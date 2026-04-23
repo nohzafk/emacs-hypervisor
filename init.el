@@ -18,7 +18,7 @@
   (expand-file-name "elle/hypervisor.lisp" emacs-hypervisor-repo-directory))
 
 (defvar emacs-hypervisor-elle-binary
-  (or (getenv "ELLE_BIN") "/tmp/elle/target/debug/elle"))
+  (or (getenv "ELLE_BIN") "/tmp/elle/target/release/elle"))
 
 (defvar emacs-hypervisor-open-buffer-on-abnormal-exit t)
 

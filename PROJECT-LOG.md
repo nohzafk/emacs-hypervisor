@@ -216,7 +216,7 @@ Observed results:
 
 - debug build succeeded in about `24.61s`
 - release build succeeded in about `59.68s`
-- debug binary: `/tmp/elle/target/debug/elle`
+- debug binary: `/tmp/elle/target/release/elle`
 - release binary: `/tmp/elle/target/release/elle`
 
 Binary sizes:
@@ -260,7 +260,7 @@ Plain `elle` starts the REPL, which is noisier for automated experiments.
 Command:
 
 ```sh
-printf '(println "hello from elle")\n' | /tmp/elle/target/debug/elle -
+printf '(println "hello from elle")\n' | /tmp/elle/target/release/elle -
 ```
 
 Output:
@@ -274,7 +274,7 @@ hello from elle
 Command:
 
 ```sh
-printf '(def f (ev/spawn (fn [] (+ 1 2))))\n(println (ev/join f))\n' | /tmp/elle/target/debug/elle -
+printf '(def f (ev/spawn (fn [] (+ 1 2))))\n(println (ev/join f))\n' | /tmp/elle/target/release/elle -
 ```
 
 Output:
@@ -688,7 +688,7 @@ experiments/bin/01-run-hello-eval-result-spike
 The default runner assumes:
 
 - `emacs` is on `PATH`
-- Elle is available at `/tmp/elle/target/debug/elle`
+- Elle is available at `/tmp/elle/target/release/elle`
 
 It can be overridden with:
 
@@ -3822,7 +3822,7 @@ This milestone changed:
 Verified in this milestone:
 
 - Elle execution module still loads successfully:
-  - `printf '(include-file "elle/protocol.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "elle/protocol.lisp") ...' | /tmp/elle/target/release/elle -`
 - Emacs-side order normalization and queue form shape:
   - `emacs --batch -Q --eval "(progn (defmacro elpaca (&rest args) \`(quote ,args)) ... )"`
 
@@ -3897,7 +3897,7 @@ longer on the main shared startup path.
 Verified in this milestone:
 
 - Elle runtime-form module load:
-  - `printf '(include-file "elle/runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "elle/runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - shared batch init path:
   - `emacs --batch -Q --init-directory=/Users/randall/projects/emacs-hypervisor --load /Users/randall/projects/emacs-hypervisor/init.el --eval "(progn (emacs-hypervisor-wait-for-completion 30) (princ (format \"%S\n\" (emacs-hypervisor-status))))"`
 
@@ -4020,7 +4020,7 @@ Verified in this milestone:
   - `emacs-hypervisor-elpaca-enable-compatibility`
   - `emacs-hypervisor-elpaca-bootstrap-order`
 - Elle runtime-forms module still loads:
-  - `printf '(include-file "elle/runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "elle/runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - shared batch init path still completes:
   - `emacs --batch -Q --init-directory=/Users/randall/projects/emacs-hypervisor --load /Users/randall/projects/emacs-hypervisor/init.el --eval "(progn (emacs-hypervisor-wait-for-completion 30) (princ (format \"%S\n\" (emacs-hypervisor-status))))"`
 
@@ -4087,7 +4087,7 @@ This milestone changed:
 Verified in this milestone:
 
 - emitted runtime forms compile again:
-  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - emitted session helper form now contains valid Emacs boolean syntax:
   - `defvar emacs-hypervisor-stage1-open-debug-buffers-on-timeout t`
 - shared batch init path still completes:
@@ -4157,7 +4157,7 @@ Verified in this milestone:
   - `elpaca-manager-root`
   - `bootstrap-order`
 - emitted runtime forms still compile:
-  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - shared batch init path still completes:
   - `emacs --batch -Q --init-directory=/Users/randall/projects/emacs-hypervisor --load /Users/randall/projects/emacs-hypervisor/init.el --eval "(progn (emacs-hypervisor-wait-for-completion 30) (princ (format \"%S\n\" (emacs-hypervisor-status))))"`
 
@@ -4223,7 +4223,7 @@ Verified in this milestone:
 
 - no active code references remain to `emacs-hypervisor-stage1-*`
 - emitted runtime forms still compile:
-  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - shared batch init path still completes:
   - `emacs --batch -Q --init-directory=/Users/randall/projects/emacs-hypervisor --load /Users/randall/projects/emacs-hypervisor/init.el --eval "(progn (emacs-hypervisor-wait-for-completion 30) (princ (format \"%S\n\" (emacs-hypervisor-status))))"`
 
@@ -4838,7 +4838,7 @@ This milestone changed:
 Verified in this milestone:
 
 - emitted runtime forms still compile:
-  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/debug/elle -`
+  - `printf '(include-file "runtime-forms.lisp") ...' | /tmp/elle/target/release/elle -`
 - shared batch init path still completes:
   - `emacs --batch -Q --init-directory=/Users/randall/projects/emacs-hypervisor --load /Users/randall/projects/emacs-hypervisor/init.el --eval "(progn (emacs-hypervisor-wait-for-completion 30) (princ (format \"%S\n\" (emacs-hypervisor-status))))"`
 
