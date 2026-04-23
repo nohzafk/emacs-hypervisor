@@ -687,7 +687,9 @@
     ((or :finished :timeout)
      (setq emacs-hypervisor--package-installation-active nil)
      (setq emacs-hypervisor--package-finished-reason reason)
-     (when emacs-hypervisor--package-installation-started-at
+     (when (and emacs-hypervisor--package-installation-started-at
+                (boundp 'emacs-hypervisor-benchmark-enabled)
+                emacs-hypervisor-benchmark-enabled)
        (emacs-hypervisor-report-note-metric
         :emacs-runtime
         :package-installation

@@ -101,6 +101,36 @@
     `(elpaca ,order
        (emacs-hypervisor-runtime-package-callback ,name)))
 
+  (defn package-entry-queue-step-form [name order]
+    `(condition-case err
+       (progn
+         (push
+          (list
+           :phase :packages
+           :event :attempt
+           :name ,name)
+          emacs-hypervisor-execution-events)
+         ,(package-entry-queue-form name order)
+         (push
+          (list :name ,name :status :queued)
+          emacs-hypervisor-batch-queue-results))
+       (error
+        (push
+         (list :name ,name :status :failed :error (format "%S" err))
+         emacs-hypervisor-batch-queue-results))))
+
+  (defn package-queue-batch-form [plan-items]
+    (append
+     '(let ((emacs-hypervisor-batch-queue-results ())))
+     (append
+      (map
+       (fn [{:entry entry :name name}]
+         (package-entry-queue-step-form
+          name
+          (package-entry-order entry)))
+       plan-items)
+      '((nreverse emacs-hypervisor-batch-queue-results)))))
+
   (defn execution-error [result]
     (protocol:response-error result))
 
@@ -123,6 +153,84 @@
      :ok
      :queued
      (graph:entry-field entry :deps)))
+
+  (defn ordered-plan-reports [plan-items reports]
+    (map
+     (fn [{:name name}]
+       (graph:find-entry reports name))
+     plan-items))
+
+  (defn package-plan-item-blockers [{:entry entry} queued-package-reports]
+    (report-blockers
+     queued-package-reports
+     (graph:entry-field entry :deps)))
+
+  (defn queueable-plan-items [plan-items queued-package-reports]
+    (filter
+     (fn [plan-item]
+       (empty?
+        (package-plan-item-blockers
+         plan-item
+         queued-package-reports)))
+     plan-items))
+
+  (defn remove-plan-items [plan-items removed-plan-items]
+    (let [removed-names (map (fn [{:name name}] name) removed-plan-items)]
+      (filter
+       (fn [{:name name}]
+         (not (member? removed-names name)))
+       plan-items)))
+
+  (defn blocked-package-entry-report
+      [{:entry entry :name name} queued-package-reports]
+    (blocked-report
+     name
+     :blocked-by-package
+     (package-plan-item-blockers
+      {:entry entry :name name}
+      queued-package-reports)))
+
+  (defn queued-package-batch-results [result]
+    (protocol:from-wire (protocol:message-payload result)))
+
+  (defn queued-package-batch-entry [queue-results name]
+    (graph:find-entry queue-results name))
+
+  (defn queued-package-batch-report
+      [{:entry entry :name name} queue-results]
+    (if-let [queue-result (queued-package-batch-entry queue-results name)]
+      (if (= (get queue-result :status) :queued)
+        (queued-package-entry-report name entry)
+        (failed-eval-report
+         name
+         (get queue-result :error "missing queue error")))
+      (failed-eval-report name "missing queue result")))
+
+  (defn queue-ready-package-batch-state [ready-plan-items current-id]
+    (let [queue-result
+          (eval-form
+           current-id
+           (package-queue-batch-form ready-plan-items)
+           :queue-package-batch
+           :package-queue
+           :packages
+           nil)]
+      (if (execution-ok? queue-result)
+        (let [queue-results (queued-package-batch-results queue-result)]
+          {:next-id (+ current-id 1)
+           :reports
+           (map
+            (fn [plan-item]
+              (queued-package-batch-report
+               plan-item
+               queue-results))
+            ready-plan-items)})
+        {:next-id (+ current-id 1)
+         :reports
+         (map
+          (fn [{:name name}]
+            (failed-eval-report name (execution-error queue-result)))
+          ready-plan-items)})))
 
   (defn report-blockers [reports names]
     (filter
@@ -184,52 +292,37 @@
               (cons (next-report (first remaining) collected) collected))))]
       (loop items ())))
 
-  (defn next-tracker-package-entry-plan-state
-      [{:entry entry :name name} queued-package-reports current-id]
-    (let [order (package-entry-order entry)
-          package-blockers
-          (report-blockers queued-package-reports
-                           (graph:entry-field entry :deps))]
-      (cond
-        ((not (empty? package-blockers))
-         (blocked-report-state
-          name
-          current-id
-          :blocked-by-package
-          package-blockers))
-        (true
-         (let [queue-form (package-entry-queue-form name order)
-               queue-result
-               (eval-form
-                current-id
-                `(progn
-                   (push
-                    (list
-                     :phase :packages
-                     :event :attempt
-                     :name ,name)
-                    emacs-hypervisor-execution-events)
-                   ,queue-form
-                   :queued)
-                :queue-package-entry
-                :package-queue
-                :packages
-                name)]
-           (eval-report-state
-            current-id
-            name
-            (queued-package-entry-report name entry)
-            queue-result))))))
-
   (defn queue-package-entry-plan [plan-items next-id]
-    (collect-report-state
-     plan-items
-     next-id
-     (fn [plan-item queued-reports current-id]
-       (next-tracker-package-entry-plan-state
-        plan-item
-        queued-reports
-        current-id))))
+    (letrec
+        [loop
+         (fn [remaining current-id queued-reports]
+           (if (empty? remaining)
+             {:next-id current-id
+              :reports (ordered-plan-reports plan-items queued-reports)}
+             (let [ready-plan-items
+                   (queueable-plan-items remaining queued-reports)]
+               (if (empty? ready-plan-items)
+                 {:next-id current-id
+                  :reports
+                  (ordered-plan-reports
+                   plan-items
+                   (append
+                    (map
+                     (fn [plan-item]
+                       (blocked-package-entry-report
+                        plan-item
+                        queued-reports))
+                     remaining)
+                    queued-reports))}
+                 (let [{:next-id next-id :reports ready-reports}
+                       (queue-ready-package-batch-state
+                        ready-plan-items
+                        current-id)]
+                   (loop
+                    (remove-plan-items remaining ready-plan-items)
+                    next-id
+                    (append ready-reports queued-reports)))))))]
+      (loop plan-items next-id ())))
 
   (defn tracker-failure-details [reason]
     (match reason

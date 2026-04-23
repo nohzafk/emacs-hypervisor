@@ -9,7 +9,7 @@
 (defvar emacs-hypervisor-repo-directory
   (file-name-directory (or load-file-name buffer-file-name)))
 
-(defvar emacs-hypervisor-benchmark-enabled t
+(defvar emacs-hypervisor-benchmark-enabled nil
   "Non-nil enables Hypervisor startup benchmarking for this session.")
 
 (defvar emacs-hypervisor-config-file

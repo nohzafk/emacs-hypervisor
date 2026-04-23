@@ -1,8 +1,5 @@
 ;;; -*- lexical-binding: t; -*-
 
-(defvar emacs-hypervisor-benchmark-enabled t
-  "Non-nil enables Hypervisor startup benchmarking for this session.")
-
 ;; Enable emacs-backbone debug mode
 (setq emacs-backbone-enable-debug nil)
 
