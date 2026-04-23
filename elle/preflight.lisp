@@ -1,6 +1,6 @@
 ## Shared env and executable preflight helpers.
 
-(defn emacs-hypervisor-preflight-module [protocol graph mailbox]
+(defn emacs-hypervisor-preflight-module [protocol graph mailbox benchmark]
   (defn env-entry-value [env name]
     (if-let [entry (graph:find-entry env name)]
       (get entry :value)
@@ -22,7 +22,12 @@
     (protocol:send-request
      id
      :eval
-     `(:form (executable-find ,binary)))
+     (benchmark:eval-payload
+      `(:form (executable-find ,binary)
+        :metric-name :probe-executable
+        :metric-kind :executable-probe
+        :phase :preflight
+        :item-name ,binary)))
     (let [result (protocol:await-response mailbox id)]
       (assert (protocol:response-ok? result)
               (string "executable probe should succeed for " binary))

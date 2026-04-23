@@ -395,7 +395,6 @@ minibuffer, even without explicitly focusing it."
 
 (package! helpful)
 (config-unit! essentials
-  :requires helpful
   :config
   (global-set-key (kbd "C-h f") #'helpful-callable)
   (global-set-key (kbd "C-h v") #'helpful-variable)
@@ -417,7 +416,6 @@ minibuffer, even without explicitly focusing it."
 (package! restart-emacs)
 
 (config-unit! restart-emacs-util
-  :requires restart-emacs
   :config
 
   ;; Simplified letf! macro for our restart function
@@ -609,7 +607,6 @@ If DEBUG (the prefix arg) is given, start the new instance with the --debug swit
 (package! ace-window)
 
 (config-unit! window-settings
-  :requires (ace-window)
   :config
   (keymap-set global-map "M-o" #'ace-window)
   (keymap-set global-map "M-O" #'ace-swap-window)
@@ -718,12 +715,6 @@ If DEBUG (the prefix arg) is given, start the new instance with the --debug swit
   (keymap-set global-map "C-."   #'embark-act)
   (keymap-set global-map "C-;"   #'embark-dwim)
   (keymap-set global-map "C-h B" #'embark-bindings))
-
-(config-unit! embark-consult
-  :requires (embark-consult consult)
-  :after (embark)
-  :config
-  (add-hook 'embark-collect-mode-hook #'consult-preview-at-point-mode))
 
 (package! websocket)
 ;; Use the local checkout while iterating on consult-snapfile itself.
@@ -1198,9 +1189,7 @@ If DEBUG (the prefix arg) is given, start the new instance with the --debug swit
   (setopt lsp-bridge-python-command "uv")
 
   ;; work with org source code block
-  (setopt lsp-bridge-enable-org-babel t)
-
-  (global-lsp-bridge-mode))
+  (setopt lsp-bridge-enable-org-babel t))
 
 (config-unit! lsp-bridge-language-server :after lsp-bridge
   :config
@@ -1883,7 +1872,7 @@ trailing whitespaces, and ensuring a newline at the end of the file."
   (keymap-set global-map "C-c j" #'my/jump-menu))
 
 (config-unit! search-keymap
-  :requires (consult rg transient)
+  :requires transient
   :config
   (transient-define-prefix my/search-menu ()
     "Search commands"
@@ -1897,7 +1886,7 @@ trailing whitespaces, and ensuring a newline at the end of the file."
   (keymap-set global-map "C-c s" #'my/search-menu))
 
 (config-unit! open-keymap
-  :requires (ghostel consult transient embark)
+  :requires transient
   :config
   (transient-define-prefix my/open-menu ()
     "Open commands"

@@ -28,6 +28,11 @@
 
 (require 'emacs-hypervisor-report)
 
+(defun emacs-hypervisor-benchmark-enabled-p ()
+  "Return non-nil when Hypervisor benchmarking is enabled."
+  (and (boundp 'emacs-hypervisor-benchmark-enabled)
+       emacs-hypervisor-benchmark-enabled))
+
 (defun emacs-hypervisor-default-context ()
   (list
    :emacs-version emacs-version
@@ -193,6 +198,52 @@ unreadable. Returns the names of envvars that were changed."
       (error "No Hypervisor process buffer is available"))
     (pop-to-buffer buffer)))
 
+(defun emacs-hypervisor-init-elapsed-ms ()
+  "Return the Emacs init duration in milliseconds."
+  (cond
+   ((and (boundp 'emacs-hypervisor-repo-init-started-at)
+         (boundp 'emacs-hypervisor-repo-init-finished-at)
+         emacs-hypervisor-repo-init-finished-at)
+    (* 1000.0
+       (- emacs-hypervisor-repo-init-finished-at
+          emacs-hypervisor-repo-init-started-at)))
+   ((and (boundp 'before-init-time)
+         (boundp 'after-init-time)
+         after-init-time)
+    (* 1000.0
+       (float-time
+        (time-subtract after-init-time before-init-time))))))
+
+(defun emacs-hypervisor-startup-metrics ()
+  "Return compact startup timing information."
+  (append
+   (list
+    :init-ms (emacs-hypervisor-init-elapsed-ms)
+    :session-ms (emacs-hypervisor-report-session-elapsed-ms))
+   (list :hypervisor (emacs-hypervisor-report-metrics-summary))))
+
+(defun emacs-hypervisor--rpc-metric-details (id op payload)
+  (append
+   (list :op op
+         :request-id id)
+   (when (eq op :eval)
+     (list
+      :phase (plist-get payload :phase)
+      :metric-kind (or (plist-get payload :metric-kind) :eval)
+      :item-name (or (plist-get payload :item-name)
+                     (plist-get payload :metric-name))))))
+
+(defun emacs-hypervisor--record-rpc-metric (id op payload started-at)
+  (when (emacs-hypervisor-benchmark-enabled-p)
+    (apply
+     #'emacs-hypervisor-report-note-metric
+     :emacs-rpc
+     (or (and (eq op :eval)
+              (plist-get payload :metric-name))
+         op)
+     (* 1000.0 (- (float-time) started-at))
+     (emacs-hypervisor--rpc-metric-details id op payload))))
+
 (defun emacs-hypervisor-status ()
   "Return a compact status plist for the current Hypervisor session."
   (list
@@ -203,6 +254,7 @@ unreadable. Returns the names of envvars that were changed."
    :last-process-event emacs-hypervisor--last-process-event
    :last-progress emacs-hypervisor--last-progress-message
    :last-log emacs-hypervisor--last-log-message
+   :timings (emacs-hypervisor-startup-metrics)
    :reports (length emacs-hypervisor--report-messages)
    :messages (length emacs-hypervisor--message-log)))
 
@@ -220,43 +272,48 @@ unreadable. Returns the names of envvars that were changed."
          (backtrace)))))))
 
 (defun emacs-hypervisor--dispatch-rpc-request (message)
-  (let ((id (emacs-hypervisor--rpc-id message))
-        (op (emacs-hypervisor--rpc-op message))
-        (payload (emacs-hypervisor--rpc-payload message)))
-    (pcase op
-      (:hello
-       (setq emacs-hypervisor--hello-message message)
-       (setq emacs-hypervisor--state :running)
-       (emacs-hypervisor-send-response
-        id
-        (list :protocol emacs-hypervisor-protocol-name
-              :version emacs-hypervisor-protocol-version
-              :mode :session-scoped-subprocess
-              :transport :s-expression))
-       t)
-      (:boot-context
-       (if (functionp emacs-hypervisor-context-function)
-           (emacs-hypervisor-send-response
-            id
-            (or (funcall emacs-hypervisor-context-function) nil))
-         (emacs-hypervisor-send-response id nil))
-       t)
-      (:session-data
-       (if (functionp emacs-hypervisor-session-data-function)
-           (let* ((fields (plist-get payload :fields))
-                  (session-data
-                   (funcall emacs-hypervisor-session-data-function fields)))
-             (emacs-hypervisor-send-response id session-data))
-         (emacs-hypervisor-send-response id nil))
-       t)
-      (:eval
-       (emacs-hypervisor--dispatch-rpc-eval id (plist-get payload :form))
-       t)
-      (_
-       (emacs-hypervisor-send-error-response
-        id
-        (format "Unknown sexp-rpc op: %S" op))
-       t))))
+  (let* ((id (emacs-hypervisor--rpc-id message))
+         (op (emacs-hypervisor--rpc-op message))
+         (payload (emacs-hypervisor--rpc-payload message))
+         (started-at (float-time))
+         handled)
+    (setq handled
+          (pcase op
+            (:hello
+             (setq emacs-hypervisor--hello-message message)
+             (setq emacs-hypervisor--state :running)
+             (emacs-hypervisor-send-response
+              id
+              (list :protocol emacs-hypervisor-protocol-name
+                    :version emacs-hypervisor-protocol-version
+                    :mode :session-scoped-subprocess
+                    :transport :s-expression))
+             t)
+            (:boot-context
+             (if (functionp emacs-hypervisor-context-function)
+                 (emacs-hypervisor-send-response
+                  id
+                  (or (funcall emacs-hypervisor-context-function) nil))
+               (emacs-hypervisor-send-response id nil))
+             t)
+            (:session-data
+             (if (functionp emacs-hypervisor-session-data-function)
+                 (let* ((fields (plist-get payload :fields))
+                        (session-data
+                         (funcall emacs-hypervisor-session-data-function fields)))
+                   (emacs-hypervisor-send-response id session-data))
+               (emacs-hypervisor-send-response id nil))
+             t)
+            (:eval
+             (emacs-hypervisor--dispatch-rpc-eval id (plist-get payload :form))
+             t)
+            (_
+             (emacs-hypervisor-send-error-response
+              id
+              (format "Unknown sexp-rpc op: %S" op))
+             t)))
+    (emacs-hypervisor--record-rpc-metric id op payload started-at)
+    handled))
 
 (defun emacs-hypervisor--dispatch-rpc-event (message)
   (let* ((topic (emacs-hypervisor--rpc-topic message))
@@ -281,6 +338,17 @@ unreadable. Returns the names of envvars that were changed."
       (:report
        (push (append '(:report) payload) emacs-hypervisor--report-messages)
        (emacs-hypervisor-report-note-report)
+       t)
+      (:metric
+       (when (emacs-hypervisor-benchmark-enabled-p)
+         (emacs-hypervisor-report-note-metric
+          (or (plist-get payload :source) :elle)
+          (or (plist-get payload :name) :metric)
+          (or (plist-get payload :duration-ms) 0.0)
+          :phase (plist-get payload :phase)
+          :metric-kind (plist-get payload :metric-kind)
+          :item-name (or (plist-get payload :item-name)
+                         (plist-get payload :detail))))
        t)
       (:shutdown
        (setq emacs-hypervisor--shutdown-reason

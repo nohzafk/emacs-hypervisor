@@ -46,6 +46,35 @@
       emacs-hypervisor-packages)))
 
 (defmacro config-unit! (name &rest args)
+  "Register an eager Hypervisor config unit.
+
+NAME is the unit name. ARGS is a plist ending with `:config' followed by the
+body forms to run.
+
+Recognized plist keys before `:config':
+
+` :requires'
+  Optional list of features to preload before running the body. This is not
+  mandatory. Use it only when the body truly needs those packages already
+  loaded, for example when it touches package-local maps, variables, macros,
+  or non-autoloaded functions.
+
+  Omit `:requires' when the unit can run eagerly using only autoloaded
+  commands, hook registration, global keybindings, or pre-load-safe variable
+  setup. Omitting it keeps the unit eager while avoiding unnecessary package
+  loads during boot.
+
+` :after'
+  Optional list of other config units that must complete first.
+
+` :env'
+  Optional list of environment variable names required by the unit.
+
+` :executable'
+  Optional list of executables required by the unit.
+
+Every `config-unit!' remains part of eager startup. `:requires' controls
+feature preloading, not whether the unit itself is lazy or deferred."
   (declare (indent defun))
   (let* ((config-index (cl-position :config args))
          (unit-name (if (stringp name) name (symbol-name name))))

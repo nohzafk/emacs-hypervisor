@@ -1,12 +1,28 @@
 ## Shared execution helpers for package and unit runtime phases.
 
-(defn emacs-hypervisor-execution-module [protocol graph mailbox]
+(defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]
 
   (defn member? [xs value]
     (any? (fn [item] (= item value)) xs))
 
-  (defn eval-form [id form]
-    (protocol:send-request id :eval `(:form ,form))
+  (defn append-plist-field [fields key value]
+    (if value
+      (append fields (list key value))
+      fields))
+
+  (defn eval-payload [form metric-name metric-kind phase item-name]
+    (let [fields `(:form ,form)
+          fields (append-plist-field fields :metric-name metric-name)
+          fields (append-plist-field fields :metric-kind metric-kind)
+          fields (append-plist-field fields :phase phase)
+          fields (append-plist-field fields :item-name item-name)]
+      (benchmark:eval-payload fields)))
+
+  (defn eval-form [id form metric-name metric-kind phase item-name]
+    (protocol:send-request
+     id
+     :eval
+     (eval-payload form metric-name metric-kind phase item-name))
     (protocol:await-response mailbox id))
 
   (defn local-repo-string? [repo]
@@ -194,7 +210,11 @@
                      :name ,name)
                     emacs-hypervisor-execution-events)
                    ,queue-form
-                   :queued))]
+                   :queued)
+                :queue-package-entry
+                :package-queue
+                :packages
+                name)]
            (eval-report-state
             current-id
             name
@@ -401,7 +421,11 @@
                 `(emacs-hypervisor-runtime-run-unit
                   ,name
                   ,(graph:entry-field entry :body)
-                  ',(graph:entry-field entry :requires)))]
+                  ',(graph:entry-field entry :requires))
+                :run-unit
+                :unit
+                :units
+                name)]
            (eval-report-state
             current-id
             name
@@ -417,11 +441,16 @@
         {:next-id process-id
          :reports queued-package-reports
          :installed ()}
-        (let [_
+         (let [_
               (protocol:send-request
                process-id
                :eval
-               `(:form (emacs-hypervisor-runtime-process-packages)))
+               (eval-payload
+                '(emacs-hypervisor-runtime-process-packages)
+                :process-packages
+                :package-start
+                :packages
+                nil))
               tracker-state
               (collect-package-tracker-state process-id () nil nil)
               {:installed installed-names :reason finished-reason}

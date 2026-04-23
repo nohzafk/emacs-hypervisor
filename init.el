@@ -1,7 +1,16 @@
 ;;; init.el --- Canonical repo-root Hypervisor init -*- lexical-binding: t; -*-
 
+(defvar emacs-hypervisor-repo-init-started-at (float-time)
+  "Wall-clock time at which this repo-local `init.el' began loading.")
+
+(defvar emacs-hypervisor-repo-init-finished-at nil
+  "Wall-clock time at which this repo-local `init.el' finished loading.")
+
 (defvar emacs-hypervisor-repo-directory
   (file-name-directory (or load-file-name buffer-file-name)))
+
+(defvar emacs-hypervisor-benchmark-enabled t
+  "Non-nil enables Hypervisor startup benchmarking for this session.")
 
 (defvar emacs-hypervisor-config-file
   (expand-file-name "config.el" emacs-hypervisor-repo-directory))
@@ -25,6 +34,7 @@
 (setq default-directory emacs-hypervisor-repo-directory)
 (setq user-emacs-directory
       (file-name-as-directory (expand-file-name emacs-hypervisor-repo-directory)))
+
 (add-to-list
  'load-path
  (file-name-as-directory
@@ -51,6 +61,7 @@
            :session-name "repo-root-init"
            :ui (if noninteractive 'batch 'interactive)
            :transport 's-expression
+           :benchmark-enabled emacs-hypervisor-benchmark-enabled
            :repo-dir emacs-hypervisor-repo-directory)))
   (setq emacs-hypervisor-session-data-function
         #'emacs-hypervisor-export-session-data)
@@ -72,6 +83,8 @@
    "emacs-hypervisor-init"))
 
 (emacs-hypervisor-start-repo-session)
+
+(setq emacs-hypervisor-repo-init-finished-at (float-time))
 
 (when (not noninteractive)
   (message "[Hypervisor] starting session %s" "repo-root-init"))
