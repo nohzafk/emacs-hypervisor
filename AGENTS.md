@@ -154,24 +154,26 @@ elle tools/mcp-server.lisp
 Repo-local wrapper:
 
 ```bash
+tools/bootstrap-elle
 tools/start-elle-mcp
 ```
 
 This wrapper:
 
+- expects the repo-local Elle checkout at `.elle` by default
+- uses the repo-local release binary at `.elle/target/release/elle` by default
 - uses a repo-local graph store at `.elle-mcp/store`
 - accepts `ELLE_MCP_SERVER` when the MCP server lives outside this repo
 - checks common local locations such as:
-  - `/tmp/elle/mcp/mcp-server.lisp`
-  - `/tmp/elle/mcp/tools/mcp-server.lisp`
+  - `.elle/mcp/mcp-server.lisp`
+  - `.elle/mcp/tools/mcp-server.lisp`
 
 Current practical setup for this machine:
 
-1. initialize the Elle submodules:
-   - `git -C /tmp/elle submodule update --init mcp`
-   - `git -C /tmp/elle submodule update --init plugins`
-2. build the MCP plugins:
-   - `env LIBCLANG_PATH=/Applications/Xcode.app/Contents/Frameworks make -C /tmp/elle mcp`
+1. bootstrap the repo-local Elle checkout:
+   - `tools/bootstrap-elle`
+2. build the MCP plugins when needed:
+   - `env LIBCLANG_PATH=/Applications/Xcode.app/Contents/Frameworks make -C .elle mcp`
 3. start the repo wrapper:
    - `tools/start-elle-mcp`
 

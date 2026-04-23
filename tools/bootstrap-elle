@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
+elle_repo=${ELLE_REPO:-https://github.com/elle-lisp/elle.git}
+elle_bin="$elle_dir/target/release/elle"
+
+usage() {
+  cat <<EOF
+usage: tools/bootstrap-elle
+
+Clone Elle into the repo-local .elle checkout if needed, initialize
+submodules, build the release binary, and build the MCP plugins:
+- .elle/target/release/elle
+- .elle/target/release/libelle_oxigraph.{dylib,so}
+- .elle/target/release/libelle_syn.{dylib,so}
+
+Environment overrides:
+- ELLE_DIR  destination checkout directory (default: $repo_dir/.elle)
+- ELLE_REPO clone URL (default: $elle_repo)
+- LIBCLANG_PATH  passed through to the MCP plugin build when set
+EOF
+}
+
+detect_libclang_path() {
+  if [ -n "${LIBCLANG_PATH:-}" ]; then
+    printf '%s\n' "$LIBCLANG_PATH"
+    return 0
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      if [ -f /Applications/Xcode.app/Contents/Frameworks/libclang.dylib ]; then
+        printf '%s\n' "/Applications/Xcode.app/Contents/Frameworks"
+        return 0
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
+case "${1-}" in
+  "")
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
+
+if ! command -v git >/dev/null 2>&1; then
+  echo "git is required but was not found in PATH" >&2
+  exit 1
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo is required but was not found in PATH" >&2
+  exit 1
+fi
+
+if [ -e "$elle_dir" ] && [ ! -d "$elle_dir/.git" ]; then
+  cat >&2 <<EOF
+Refusing to use existing path because it is not a git checkout:
+- $elle_dir
+EOF
+  exit 1
+fi
+
+if [ ! -d "$elle_dir/.git" ]; then
+  echo "Cloning Elle into $elle_dir"
+  git clone "$elle_repo" "$elle_dir"
+else
+  echo "Using existing Elle checkout at $elle_dir"
+fi
+
+echo "Initializing Elle submodules"
+git -C "$elle_dir" submodule update --init --recursive
+
+echo "Building Elle release binary"
+(
+  cd "$elle_dir"
+  cargo build --release
+)
+
+echo "Building Elle MCP plugins"
+if libclang_path=$(detect_libclang_path); then
+  echo "Using LIBCLANG_PATH=$libclang_path"
+  (
+    cd "$elle_dir"
+    env LIBCLANG_PATH="$libclang_path" make -C plugins mcp
+  )
+else
+  (
+    cd "$elle_dir"
+    make -C plugins mcp
+  )
+fi
+
+cat <<EOF
+Elle bootstrap complete.
+
+Artifacts:
+- $elle_bin
+- $elle_dir/target/release/libelle_oxigraph
+- $elle_dir/target/release/libelle_syn
+
+tools/start-elle-mcp should now resolve the repo-local binary and required MCP
+plugins automatically. Override with ELLE_BIN if you need a different binary
+build.
+EOF
