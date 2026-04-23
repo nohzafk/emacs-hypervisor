@@ -1,11 +1,9 @@
 ## Shared env and executable preflight helpers.
 
 (defn emacs-hypervisor-preflight-module [protocol graph mailbox]
-  (def plist-get protocol:plist-get)
-
   (defn env-entry-value [env name]
     (if-let [entry (graph:find-entry env name)]
-      (plist-get entry :value)
+      (get entry :value)
       nil))
 
   (defn env-missing-for-unit [unit env]
@@ -29,37 +27,34 @@
       (assert (protocol:response-ok? result)
               (string "executable probe should succeed for " binary))
       (let [value (protocol:message-payload result)]
-        (list :binary binary :ok (not (nil? value)) :value value))))
+        {:binary binary :ok (not (nil? value)) :value value})))
 
-  (defn executable-probe-report [unit check]
-    (list
-     :name (graph:entry-name unit)
-     :missing (if (plist-get check :ok) () (list (plist-get check :binary)))))
+  (defn executable-probe-report [unit {:binary binary :ok ok?}]
+    {:name (graph:entry-name unit)
+     :missing (if ok? () (list binary))})
 
-  (defn next-executable-probe-state [state unit]
-    (let* [current-id (plist-get state :next-id)
-           binary (first (graph:entry-field unit :executable))
-           check (probe-executable binary current-id)]
-      (list
-       :next-id (+ current-id 1)
+  (defn next-executable-probe-state [{:next-id current-id :reports reports} unit]
+    (let [binary (first (graph:entry-field unit :executable))
+          check (probe-executable binary current-id)]
+      {:next-id (+ current-id 1)
        :reports
        (cons
         (executable-probe-report unit check)
-        (plist-get state :reports)))))
+        reports)}))
 
   (defn probe-executables [units next-id]
-    (let [state
+    (let [{:next-id current-id :reports reports}
           (reduce
            next-executable-probe-state
-           (list :next-id next-id :reports ())
+           {:next-id next-id :reports ()}
            units)]
-      (list
-       :next-id (plist-get state :next-id)
-       :reports (reverse (plist-get state :reports)))))
+      {:next-id current-id
+       :reports (reverse reports)}))
 
   (defn executable-missing-for-unit [reports unit-name]
-    (let [entry (graph:find-entry reports unit-name)]
-      (if (nil? entry) () (plist-get entry :missing))))
+    (if-let [entry (graph:find-entry reports unit-name)]
+      (get entry :missing ())
+      ()))
 
   {:env-missing-for-unit env-missing-for-unit
    :executable-missing-for-unit executable-missing-for-unit

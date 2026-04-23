@@ -69,6 +69,46 @@
          (plist-get rest key)))
       (_ nil)))
 
+  (defn plist-like? [xs]
+    (match xs
+      (() true)
+      ((k _ & rest)
+       (and (= (type-of k) :keyword)
+            (plist-like? rest)))
+      (_ false)))
+
+  (defn from-wire-plist [xs]
+    (match xs
+      (() {})
+      ((k v & rest)
+       (put
+        (from-wire-plist rest)
+        k
+        (from-wire v)))
+      (_ {})))
+
+  (defn from-wire [value]
+    (case (type-of value)
+      :list
+      (if (plist-like? value)
+        (from-wire-plist value)
+        (map from-wire value))
+      value))
+
+  (defn to-wire-struct [value]
+    (reduce
+     (fn [fields key]
+       (append fields (list key (to-wire (get value key)))))
+     ()
+     (keys value)))
+
+  (defn to-wire [value]
+    (case (type-of value)
+      :struct (to-wire-struct value)
+      :@struct (to-wire-struct value)
+      :list (map to-wire value)
+      value))
+
   (defn message-body [message]
     (rest message))
 
@@ -281,6 +321,7 @@
    :expect-event-topic expect-event-topic
    :expect-message-kind expect-message-kind
    :expect-request-op expect-request-op
+   :from-wire from-wire
    :make-mailbox make-mailbox
    :make-envelope make-envelope
    :make-error-response make-error-response
@@ -308,4 +349,5 @@
    :send-request send-request
    :send-response send-response
    :sexp-string sexp-string
+   :to-wire to-wire
    :with-mailbox-reader with-mailbox-reader})

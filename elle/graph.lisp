@@ -1,14 +1,14 @@
 ## Shared graph, validation, and reporting helpers.
 
-(defn emacs-hypervisor-graph-module [plist-get]
+(defn emacs-hypervisor-graph-module []
   (defn member? [xs value]
     (any? (fn [item] (= item value)) xs))
 
-  (defn entry-name [entry]
-    (plist-get entry :name))
+  (defn entry-name [{:name name}]
+    name)
 
   (defn entry-field [entry key]
-    (let [value (plist-get entry key)]
+    (let [value (get entry key ())]
       (if (nil? value) () value)))
 
   (defn non-nil-values [values]
@@ -24,7 +24,7 @@
     (let [missing (missing-refs-for (entry-field entry field) known)]
       (if (empty? missing)
         nil
-        (list :name (entry-name entry) :missing missing))))
+        {:name (entry-name entry) :missing missing})))
 
   (defn collect-missing-ref-entries [entries field known]
     (non-nil-values
@@ -87,30 +87,30 @@
 
   (defn report-status [reports name]
     (if-let [entry (find-entry reports name)]
-      (plist-get entry :status)
+      (get entry :status)
       nil))
 
   (defn make-report [name status reason details]
-    (list :name name :status status :reason reason :details details))
+    {:name name :status status :reason reason :details details})
 
   (defn missing-details [missing]
-    (list :missing missing))
+    {:missing missing})
 
   (defn cycle-details [members]
-    (list :members members))
+    {:members members})
 
   (defn blocker-details [blockers]
-    (list :blockers blockers))
+    {:blockers blockers})
 
   (defn preflight-details [env executable]
-    (list :env env :executable executable))
+    {:env env :executable executable})
 
-  (defn missing-entry-report [name reason missing-entry]
+  (defn missing-entry-report [name reason {:missing missing}]
     (make-report
      name
      :invalid
      reason
-     (missing-details (plist-get missing-entry :missing))))
+     (missing-details missing)))
 
   (defn entry-missing-report [name reason missing-entries]
     (if-let [missing-entry (find-entry missing-entries name)]

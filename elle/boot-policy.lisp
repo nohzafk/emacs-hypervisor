@@ -1,8 +1,6 @@
 ## Shared boot-policy helpers built on graph + preflight modules.
 
 (defn emacs-hypervisor-boot-policy-module [protocol graph preflight]
-  (def plist-get protocol:plist-get)
-
   (defn blocked-deps [reports names]
     (filter
      (fn [dep] (not (= (graph:report-status reports dep) :ok)))
@@ -27,9 +25,8 @@
      (graph:entry-name entry)
      :ok
      :ready
-     (list
-      :requires (graph:entry-field entry :requires)
-      :after (graph:entry-field entry :after))))
+     {:requires (graph:entry-field entry :requires)
+      :after (graph:entry-field entry :after)}))
 
   (defn preflight-report [entry env-missing executable-missing]
     (graph:make-report
@@ -54,12 +51,14 @@
 
   (defn next-package-report [entry reports]
     (let [blockers (blocked-deps reports (graph:entry-field entry :deps))]
-      (if (empty? blockers)
-        (ready-package-report entry)
-        (blocked-report
-         (graph:entry-name entry)
-         :blocked-by-package
-         blockers))))
+      (match (empty? blockers)
+        (true
+         (ready-package-report entry))
+        (_
+         (blocked-report
+          (graph:entry-name entry)
+          :blocked-by-package
+          blockers)))))
 
   (defn derive-package-reports [packages]
     (let [package-names (graph:known-names packages)
@@ -71,8 +70,7 @@
            packages
            (fn [entry]
              (graph:invalid-package-report entry package-missing package-cycles)))]
-      (list
-       :cycles package-cycles
+      {:cycles package-cycles
        :missing package-missing
        :reports
        (derive-phase-reports
@@ -80,7 +78,7 @@
         invalid-package-reports
         (fn [entry reports]
           (graph:all-known? (graph:entry-field entry :deps) reports))
-        next-package-report))))
+        next-package-report)}))
 
   (defn next-unit-report [entry reports package-reports env executable-reports]
     (let [package-blockers
@@ -92,21 +90,25 @@
           (preflight:executable-missing-for-unit
            executable-reports
            (graph:entry-name entry))]
-      (cond
-        ((not (empty? package-blockers))
+      (match [(empty? package-blockers)
+              (empty? unit-blockers)
+              (empty? env-missing)
+              (empty? executable-missing)]
+        ([false _ _ _]
          (blocked-report
           (graph:entry-name entry)
           :blocked-by-package
           package-blockers))
-        ((not (empty? unit-blockers))
+        ([true false _ _]
          (blocked-report
           (graph:entry-name entry)
           :blocked-by-unit
           unit-blockers))
-        ((or (not (empty? env-missing))
-             (not (empty? executable-missing)))
+        ([true true false _]
          (preflight-report entry env-missing executable-missing))
-        (else
+        ([true true _ false]
+         (preflight-report entry env-missing executable-missing))
+        (_
          (ready-unit-report entry)))))
 
   (defn derive-unit-reports [units package-names package-reports env executable-reports]
@@ -125,8 +127,7 @@
               unit-missing-requires
               unit-missing-after
               unit-cycles)))]
-      (list
-       :cycles unit-cycles
+      {:cycles unit-cycles
        :missing-after unit-missing-after
        :missing-requires unit-missing-requires
        :reports
@@ -141,11 +142,11 @@
            reports
            package-reports
            env
-           executable-reports))))))
+           executable-reports)))}))
 
   (defn emit-report-logs [label reports]
-    (each report in reports
-      (when (not (= (plist-get report :status) :ok))
+    (each {:status status :name name :reason reason :details details} in reports
+      (when (not (= status :ok))
         (protocol:send-event
          :log
          `(:level :warn
@@ -153,14 +154,14 @@
            ,(string
              label
              " "
-             (plist-get report :name)
+             name
              " -> "
-             (string (plist-get report :reason))
+             (string reason)
              " "
-             (protocol:sexp-string (plist-get report :details))))))))
+             (protocol:sexp-string (protocol:to-wire details))))))))
 
   (defn emit-report-message [stage phase reports]
-    (protocol:send-report stage phase reports))
+    (protocol:send-report stage phase (protocol:to-wire reports)))
 
   {:derive-package-reports derive-package-reports
    :derive-unit-reports derive-unit-reports

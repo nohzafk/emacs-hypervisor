@@ -17,7 +17,7 @@
 
 (def protocol (emacs-hypervisor-protocol-module))
 (def mailbox (protocol:make-mailbox))
-(def graph (emacs-hypervisor-graph-module protocol:plist-get))
+(def graph (emacs-hypervisor-graph-module))
 (def preflight (emacs-hypervisor-preflight-module protocol graph mailbox))
 (def policy (emacs-hypervisor-boot-policy-module protocol graph preflight))
 (def planning (emacs-hypervisor-planning-module protocol graph))
@@ -35,10 +35,12 @@
    (let [hello-response (protocol:await-response mailbox 1)]
      (assert (protocol:response-ok? hello-response)
              "expected successful :hello response")
-     (let [hello-payload (protocol:message-payload hello-response)]
-       (assert (= (protocol:plist-get hello-payload :protocol) :sexp-rpc)
+     (let [{:protocol hello-protocol
+            :version hello-version}
+           (protocol:from-wire (protocol:message-payload hello-response))]
+       (assert (= hello-protocol :sexp-rpc)
                "expected :sexp-rpc protocol in :hello response")
-       (assert (= (protocol:plist-get hello-payload :version) 1)
+       (assert (= hello-version 1)
                "expected version 1 in :hello response")))
 
    (protocol:send-request 2 :boot-context ())
@@ -46,10 +48,9 @@
    (let* [boot-context-response (protocol:await-response mailbox 2)
           _ (assert (protocol:response-ok? boot-context-response)
                     "expected successful :boot-context response")
-          boot-payload (protocol:message-payload boot-context-response)
-          session-name
-          (or (protocol:plist-get boot-payload :session-name)
-              "hypervisor-session")]
+          {:session-name boot-session-name & _boot-context}
+          (protocol:from-wire (protocol:message-payload boot-context-response))
+          session-name (or boot-session-name "hypervisor-session")]
      (protocol:send-request
       3
       :session-data
@@ -57,26 +58,22 @@
      (let* [session-data-response (protocol:await-response mailbox 3)
             _ (assert (protocol:response-ok? session-data-response)
                       "expected successful :session-data response")
-            payload (protocol:message-payload session-data-response)
-            packages (protocol:plist-get payload :packages)
-            units (protocol:plist-get payload :units)
-            env (protocol:plist-get payload :env)
-            package-resolution (policy:derive-package-reports packages)
-            planned-package-reports (protocol:plist-get package-resolution :reports)
+            {:packages packages :units units :env env}
+            (protocol:from-wire (protocol:message-payload session-data-response))
+            {:reports planned-package-reports}
+            (policy:derive-package-reports packages)
             package-names (graph:known-names packages)
-            executable-probes
+            {:reports executable-reports}
             (preflight:probe-executables
              (preflight:units-with-executables units)
              10)
-            executable-reports (protocol:plist-get executable-probes :reports)
-            unit-resolution
+            {:reports planned-unit-reports}
             (policy:derive-unit-reports
              units
              package-names
              planned-package-reports
              env
              executable-reports)
-            planned-unit-reports (protocol:plist-get unit-resolution :reports)
             package-plan (planning:derive-package-plan packages planned-package-reports)
             unit-plan (planning:derive-unit-plan units planned-unit-reports)]
        (protocol:send-event
@@ -112,16 +109,18 @@
               package-reports
               (planning:merge-executed-reports
                planned-package-reports
-               (protocol:plist-get executed-package-plan :reports))
+               (get executed-package-plan :reports))
+              {:next-id next-id}
+              executed-package-plan
               executed-unit-plan
               (execution:execute-unit-plan
                (planning:plan-items unit-plan)
                package-reports
-               (protocol:plist-get executed-package-plan :next-id))
+               next-id)
               unit-reports
               (planning:merge-executed-reports
                planned-unit-reports
-               (protocol:plist-get executed-unit-plan :reports))]
+               (get executed-unit-plan :reports))]
          (policy:emit-report-logs "package" package-reports)
          (policy:emit-report-message :executed :packages package-reports)
          (protocol:send-event

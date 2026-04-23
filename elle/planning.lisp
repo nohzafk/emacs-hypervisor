@@ -1,8 +1,6 @@
 ## Shared execution planning helpers.
 
 (defn emacs-hypervisor-planning-module [protocol graph]
-  (def plist-get protocol:plist-get)
-
   (defn member? [xs value]
     (any? (fn [item] (= item value)) xs))
 
@@ -21,11 +19,10 @@
      entries))
 
   (defn make-plan-item [phase entry planned-report]
-    (list
-     :phase phase
+    {:phase phase
      :name (graph:entry-name entry)
      :entry entry
-     :planned-report planned-report))
+     :planned-report planned-report})
 
   (defn ready-plan-entries [entries dep-key ordered-names]
     (filter
@@ -38,9 +35,8 @@
       (first ready)))
 
   (defn phase-plan [phase items]
-    (list
-     :phase phase
-     :items items))
+    {:phase phase
+     :items items})
 
   (defn derive-phase-plan [phase entries planned-reports dep-key]
     (letrec
@@ -66,33 +62,31 @@
   (defn derive-unit-plan [units planned-unit-reports]
     (derive-phase-plan :units units planned-unit-reports :after))
 
-  (defn plan-items [plan]
-    (plist-get plan :items))
+  (defn plan-items [{:items items}]
+    items)
 
-  (defn plan-message-item [item]
-    (let [entry (plist-get item :entry)
-          name (plist-get item :name)]
-      (match (plist-get item :phase)
-        (:packages
-         (list
-          :name name
-          :deps (graph:entry-field entry :deps)))
-        (_
-         (list
-          :name name
-          :requires (graph:entry-field entry :requires)
-          :after (graph:entry-field entry :after))))))
+  (defn plan-message-item [{:phase phase :entry entry :name name}]
+    (match phase
+      (:packages
+       (list
+        :name name
+        :deps (graph:entry-field entry :deps)))
+      (_
+       (list
+        :name name
+        :requires (graph:entry-field entry :requires)
+        :after (graph:entry-field entry :after)))))
 
-  (defn emit-plan-message [plan]
+  (defn emit-plan-message [{:phase phase :items items}]
     (protocol:send-event
      :plan
-     `(:phase ,(plist-get plan :phase)
-       :items ,(map plan-message-item (plan-items plan)))))
+     `(:phase ,phase
+       :items ,(map plan-message-item items))))
 
   (defn merge-executed-reports [planned-reports executed-reports]
     (map
      (fn [report]
-       (if-let [executed (graph:find-entry executed-reports (plist-get report :name))]
+       (if-let [executed (graph:find-entry executed-reports (graph:entry-name report))]
          executed
          report))
      planned-reports))
