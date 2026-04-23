@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "elle-mcp": {
+      "command": "tools/start-elle-mcp",
+      "args": []
+    }
+  }
+}

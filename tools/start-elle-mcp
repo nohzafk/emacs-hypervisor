@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+elle_bin=${ELLE_BIN:-/tmp/elle/target/debug/elle}
+store_dir=${ELLE_MCP_STORE:-"$repo_dir/.elle-mcp/store"}
+
+resolve_server() {
+  if [ -n "${ELLE_MCP_SERVER:-}" ] && [ -f "${ELLE_MCP_SERVER}" ]; then
+    printf '%s\n' "${ELLE_MCP_SERVER}"
+    return 0
+  fi
+
+  for path in \
+    "/tmp/elle/mcp/mcp-server.lisp" \
+    "/tmp/elle/mcp/tools/mcp-server.lisp" \
+    "$repo_dir/.vendor/elle-mcp/mcp-server.lisp" \
+    "$repo_dir/.vendor/elle-mcp/tools/mcp-server.lisp" \
+    "$repo_dir/../elle-mcp/mcp-server.lisp" \
+    "$repo_dir/../elle-mcp/tools/mcp-server.lisp"
+  do
+    if [ -f "$path" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! server_file=$(resolve_server); then
+  cat <<'EOF' >&2
+Elle MCP server not found.
+
+Expected one of:
+- ELLE_MCP_SERVER=/path/to/mcp-server.lisp
+- /tmp/elle/mcp/mcp-server.lisp
+- /tmp/elle/mcp/tools/mcp-server.lisp
+- ../elle-mcp/mcp-server.lisp
+- ../elle-mcp/tools/mcp-server.lisp
+- .vendor/elle-mcp/mcp-server.lisp
+- .vendor/elle-mcp/tools/mcp-server.lisp
+
+Once available, this wrapper will start the MCP server with a repo-local store
+at .elle-mcp/store by default.
+EOF
+  exit 1
+fi
+
+mkdir -p "$store_dir"
+cd "$repo_dir"
+exec "$elle_bin" "$server_file" -- "$store_dir"

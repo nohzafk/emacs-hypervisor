@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+elle_bin=${ELLE_BIN:-/tmp/elle/target/debug/elle}
+analysis_file="$repo_dir/tools/analyze-runtime.lisp"
+
+cd "$repo_dir"
+exec "$elle_bin" "$analysis_file"

@@ -1,0 +1,10 @@
+.elle-mcp/
+.persistent-scratch
+env
+requirements/.requirements.lock
+elpaca/
+experiments/
+history
+places
+recentf
+transient/
