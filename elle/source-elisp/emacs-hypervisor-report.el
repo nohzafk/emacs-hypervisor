@@ -1,6 +1,7 @@
 ;;; emacs-hypervisor-report.el --- Startup report UI -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'emacs-hypervisor-report-core)
 (require 'subr-x)
 
 (defvar emacs-hypervisor--plan-messages)
@@ -12,15 +13,6 @@
 (defvar emacs-hypervisor--completed)
 
 (defvar emacs-hypervisor--report-buffer-name "*emacs-hypervisor-report*")
-(defvar emacs-hypervisor--session-started-at nil)
-(defvar emacs-hypervisor--session-finished-at nil)
-(defvar emacs-hypervisor--package-events nil)
-(defvar emacs-hypervisor--unit-events nil)
-(defvar emacs-hypervisor--metric-events nil)
-(defvar emacs-hypervisor--package-installation-active nil)
-(defvar emacs-hypervisor--package-installation-started-at nil)
-(defvar emacs-hypervisor--package-finished-reason nil)
-(defvar emacs-hypervisor--running-unit-name nil)
 
 (defvar emacs-hypervisor-report-recent-completed-limit 5)
 
@@ -130,17 +122,6 @@
       (format "%.2fs"
               (- (or emacs-hypervisor--session-finished-at (float-time))
                  started)))))
-
-(defun emacs-hypervisor-report-session-elapsed-seconds ()
-  "Return the Hypervisor session wall time in seconds."
-  (when emacs-hypervisor--session-started-at
-    (- (or emacs-hypervisor--session-finished-at (float-time))
-       emacs-hypervisor--session-started-at)))
-
-(defun emacs-hypervisor-report-session-elapsed-ms ()
-  "Return the Hypervisor session wall time in milliseconds."
-  (when-let ((seconds (emacs-hypervisor-report-session-elapsed-seconds)))
-    (* 1000.0 seconds)))
 
 (defun emacs-hypervisor--format-duration-ms (duration-ms)
   (format "%.1fms" (or duration-ms 0.0)))
@@ -334,28 +315,6 @@
    (t
     "Waiting")))
 
-(defun emacs-hypervisor-report-metrics ()
-  "Return recorded startup metrics in chronological order."
-  (reverse (copy-tree emacs-hypervisor--metric-events)))
-
-(defun emacs-hypervisor--metric-total-ms (&rest predicates)
-  (cl-loop for metric in emacs-hypervisor--metric-events
-           when (cl-every (lambda (predicate) (funcall predicate metric)) predicates)
-           sum (or (plist-get metric :duration-ms) 0.0)))
-
-(defun emacs-hypervisor--metrics-for-source (source)
-  (seq-filter
-   (lambda (metric) (eq (plist-get metric :source) source))
-   (emacs-hypervisor-report-metrics)))
-
-(defun emacs-hypervisor--slow-metrics (&optional limit)
-  (seq-take
-   (sort (emacs-hypervisor-report-metrics)
-         (lambda (left right)
-           (> (or (plist-get left :duration-ms) 0.0)
-              (or (plist-get right :duration-ms) 0.0))))
-   (or limit 8)))
-
 (defun emacs-hypervisor--metric-label (metric)
   (let* ((source (plist-get metric :source))
          (name (plist-get metric :name))
@@ -372,32 +331,6 @@
                  (when metric-kind (format "kind=%s" metric-kind))
                  (when item-name (format "item=%s" item-name))))))
     (string-join parts "  ")))
-
-(defun emacs-hypervisor-report-metrics-summary ()
-  "Return a compact summary of recorded startup metrics."
-  (let* ((session-wall-ms (emacs-hypervisor-report-session-elapsed-ms))
-         (elle-ms (emacs-hypervisor--metric-total-ms
-                   (lambda (metric) (eq (plist-get metric :source) :elle))))
-         (emacs-rpc-ms (emacs-hypervisor--metric-total-ms
-                        (lambda (metric) (eq (plist-get metric :source) :emacs-rpc))))
-         (emacs-eval-ms (emacs-hypervisor--metric-total-ms
-                         (lambda (metric) (eq (plist-get metric :source) :emacs-rpc))
-                         (lambda (metric) (eq (plist-get metric :op) :eval))))
-         (packages-ms (emacs-hypervisor--metric-total-ms
-                       (lambda (metric) (eq (plist-get metric :source) :emacs-runtime))))
-         (known-ms (+ elle-ms emacs-rpc-ms packages-ms)))
-    (list
-     :count (length emacs-hypervisor--metric-events)
-     :elle-count (length (emacs-hypervisor--metrics-for-source :elle))
-     :emacs-rpc-count (length (emacs-hypervisor--metrics-for-source :emacs-rpc))
-     :runtime-count (length (emacs-hypervisor--metrics-for-source :emacs-runtime))
-     :session-wall-ms session-wall-ms
-     :elle-ms elle-ms
-     :emacs-rpc-ms emacs-rpc-ms
-     :emacs-eval-ms emacs-eval-ms
-     :packages-ms packages-ms
-     :known-ms known-ms
-     :unattributed-ms (and session-wall-ms (max 0.0 (- session-wall-ms known-ms))))))
 
 (defun emacs-hypervisor--activity-focus-index (plan-names states)
   (or (and emacs-hypervisor--running-unit-name
@@ -598,56 +531,6 @@
             (not noninteractive))
     (emacs-hypervisor--render-report-buffer)))
 
-(defun emacs-hypervisor-report-reset ()
-  "Reset report UI state for a fresh startup session."
-  (setq emacs-hypervisor--session-started-at nil)
-  (setq emacs-hypervisor--session-finished-at nil)
-  (setq emacs-hypervisor--package-events nil)
-  (setq emacs-hypervisor--unit-events nil)
-  (setq emacs-hypervisor--metric-events nil)
-  (setq emacs-hypervisor--package-installation-active nil)
-  (setq emacs-hypervisor--package-installation-started-at nil)
-  (setq emacs-hypervisor--package-finished-reason nil)
-  (setq emacs-hypervisor--running-unit-name nil)
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-session-started ()
-  "Mark the start of a startup session."
-  (setq emacs-hypervisor--session-started-at (float-time))
-  (setq emacs-hypervisor--session-finished-at nil)
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-session-finished ()
-  "Mark the end of a startup session."
-  (setq emacs-hypervisor--session-finished-at (float-time))
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-plan ()
-  "Refresh the report after a new plan message."
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-progress ()
-  "Refresh the report after a new progress message."
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-log ()
-  "Refresh the report after a new log message."
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-report ()
-  "Refresh the report after a new report message."
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-metric (source name duration-ms &rest details)
-  "Record a startup metric for SOURCE and NAME lasting DURATION-MS."
-  (push (append (list :source source
-                      :name name
-                      :duration-ms duration-ms
-                      :time (float-time))
-                details)
-        emacs-hypervisor--metric-events)
-  (emacs-hypervisor--refresh-report-buffer))
-
 (defun emacs-hypervisor-open-report-buffer ()
   "Display the Hypervisor startup report buffer."
   (interactive)
@@ -671,54 +554,5 @@
      (report-window nil)
      (t
       (pop-to-buffer buffer)))))
-
-(defun emacs-hypervisor-report-note-package-event (kind &optional name reason)
-  "Record a local package event for the startup report."
-  (push (delq nil (list :kind kind
-                        :name name
-                        :reason reason
-                        :time (float-time)))
-        emacs-hypervisor--package-events)
-  (pcase kind
-    (:begin
-     (setq emacs-hypervisor--package-installation-active t)
-     (setq emacs-hypervisor--package-installation-started-at (float-time))
-     (setq emacs-hypervisor--package-finished-reason nil))
-    ((or :finished :timeout)
-     (setq emacs-hypervisor--package-installation-active nil)
-     (setq emacs-hypervisor--package-finished-reason reason)
-     (when (and emacs-hypervisor--package-installation-started-at
-                (boundp 'emacs-hypervisor-benchmark-enabled)
-                emacs-hypervisor-benchmark-enabled)
-       (emacs-hypervisor-report-note-metric
-        :emacs-runtime
-        :package-installation
-        (* 1000.0
-           (- (float-time) emacs-hypervisor--package-installation-started-at))
-        :metric-kind kind
-        :item-name reason)
-       (setq emacs-hypervisor--package-installation-started-at nil))
-     (unless noninteractive
-       (emacs-hypervisor-open-report-buffer))))
-  (emacs-hypervisor--refresh-report-buffer))
-
-(defun emacs-hypervisor-report-note-unit-event (kind name &optional error)
-  "Record a local config-unit event for the startup report."
-  (push (delq nil (list :kind kind
-                        :name name
-                        :error error
-                        :time (float-time)))
-        emacs-hypervisor--unit-events)
-  (pcase kind
-    (:attempt
-     (setq emacs-hypervisor--running-unit-name name)
-     (unless noninteractive
-       (emacs-hypervisor-open-report-buffer)))
-    ((or :success :failed)
-     (when (equal emacs-hypervisor--running-unit-name name)
-       (setq emacs-hypervisor--running-unit-name nil))
-     (when (and (eq kind :failed) (not noninteractive))
-       (emacs-hypervisor-open-report-buffer))))
-  (emacs-hypervisor--refresh-report-buffer))
 
 (provide 'emacs-hypervisor-report)

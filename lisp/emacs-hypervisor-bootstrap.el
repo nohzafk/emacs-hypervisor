@@ -3,7 +3,7 @@
 (defvar emacs-hypervisor-context-function #'emacs-hypervisor-default-context)
 (defvar emacs-hypervisor-session-data-function #'emacs-hypervisor-default-session-data)
 
-(require 'emacs-hypervisor-session)
+(require 'emacs-hypervisor-session-state)
 (require 'emacs-hypervisor-sexp-rpc)
 
 (defun emacs-hypervisor-default-context ()
@@ -52,7 +52,7 @@ unreadable. Returns the names of envvars that were changed."
     (unless emacs-hypervisor--completed
       (setq emacs-hypervisor--state :failed)
       (setq emacs-hypervisor--shutdown-reason :process-exited))
-    (emacs-hypervisor-report-session-finished)
+    (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-finished)
     (when (functionp emacs-hypervisor-process-sentinel-function)
       (funcall emacs-hypervisor-process-sentinel-function proc event))))
 
@@ -61,7 +61,7 @@ unreadable. Returns the names of envvars that were changed."
     (with-current-buffer buffer
       (erase-buffer))
     (setq emacs-hypervisor--state :starting)
-    (emacs-hypervisor-report-session-started)
+    (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-started)
     (setq emacs-hypervisor--process
           (make-process
            :name (or process-name "emacs-hypervisor")

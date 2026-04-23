@@ -43,11 +43,9 @@
   (expand-file-name "lisp" emacs-hypervisor-repo-directory)))
 
 (require 'emacs-hypervisor-bootstrap)
-(require 'emacs-hypervisor-declarations)
-(require 'emacs-hypervisor-compose)
 
 (defun emacs-hypervisor-start-repo-session ()
-  "Load repo declarations and start a fresh Hypervisor session."
+  "Start a fresh Hypervisor session for the repo-root config."
   (when (emacs-hypervisor-live-p)
     (user-error "Hypervisor session is still running"))
   (unless (file-exists-p emacs-hypervisor-config-file)
@@ -55,18 +53,19 @@
            emacs-hypervisor-config-file))
   (emacs-hypervisor-reset)
   (emacs-hypervisor-load-envvars-file emacs-hypervisor-env-file t)
-  (emacs-hypervisor-reset-declarations)
-  (load-file emacs-hypervisor-config-file)
   (setq emacs-hypervisor-context-function
         (lambda ()
           (list
            :session-name "repo-root-init"
+           :config-file emacs-hypervisor-config-file
            :ui (if noninteractive 'batch 'interactive)
            :transport 's-expression
            :benchmark-enabled emacs-hypervisor-benchmark-enabled
            :repo-dir emacs-hypervisor-repo-directory)))
   (setq emacs-hypervisor-session-data-function
-        #'emacs-hypervisor-export-session-data)
+        (lambda (&optional fields)
+          (when (fboundp 'emacs-hypervisor-export-session-data)
+            (emacs-hypervisor-export-session-data fields))))
   (setq emacs-hypervisor-process-sentinel-function
         (lambda (_proc _event)
           (unless noninteractive

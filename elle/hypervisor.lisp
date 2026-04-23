@@ -1,11 +1,11 @@
 ## hypervisor.lisp
 ##
 ## Shared Hypervisor backend:
-## 1. perform the standard handshake and session-data request
-## 2. derive package and unit plans from the shared runtime modules
-## 3. install transient session helpers inside Emacs
-## 4. execute the real Elpaca tracker package phase
-## 5. execute units and record reports back into Emacs
+## 1. perform the standard handshake and read boot context
+## 2. install emitted declaration forms inside Emacs
+## 3. ask Emacs to load repo config using those emitted forms
+## 4. request exported session-data from Emacs
+## 5. derive plans, install runtime helpers, then execute
 
 (include-file "protocol.lisp")
 (include-file "graph.lisp")
@@ -47,8 +47,33 @@
                     "expected successful :boot-context response")
           boot-context
           (protocol:from-wire (protocol:message-payload boot-context-response))
-          {:session-name boot-session-name & _boot-context}
+          {:session-name boot-session-name
+           :config-file boot-config-file
+           :repo-dir boot-repo-dir
+           & _boot-context}
           boot-context
+          report-core-file
+          (or (and boot-repo-dir
+                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report-core.el"))
+              "elle/source-elisp/emacs-hypervisor-report-core.el")
+          report-file
+          (or (and boot-repo-dir
+                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report.el"))
+              "elle/source-elisp/emacs-hypervisor-report.el")
+          declarations-file
+          (or (and boot-repo-dir
+                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-declarations.el"))
+              "elle/source-elisp/emacs-hypervisor-declarations.el")
+          compose-file
+          (or (and boot-repo-dir
+                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-compose.el"))
+              "elle/source-elisp/emacs-hypervisor-compose.el")
+          config-file
+          (or boot-config-file
+              (and boot-repo-dir
+                   (string boot-repo-dir "/config.el")))
+          _ (assert config-file
+                    "expected :config-file or :repo-dir in boot context")
           benchmark-enabled
           (not (= (get boot-context :benchmark-enabled) false))
           benchmark
@@ -62,11 +87,50 @@
           execution
           (emacs-hypervisor-execution-module protocol graph mailbox benchmark)
           session-name (or boot-session-name "hypervisor-session")]
+     (protocol:send-event
+      :log
+      `(:level :info
+        :message ,(string "installing config surface for " session-name)))
      (protocol:send-request
       3
+      :eval
+      (benchmark:eval-payload
+       `(:form ,(runtime-forms:install-config-surface-form report-core-file report-file declarations-file compose-file)
+         :metric-name :install-config-surface
+         :metric-kind :runtime-setup
+         :phase :startup)))
+     (let [config-surface-result (protocol:await-response mailbox 3)]
+       (assert (protocol:response-ok? config-surface-result)
+               (string "config surface install should succeed: "
+                       (or (protocol:response-error config-surface-result)
+                           :unknown-error))))
+     (protocol:send-event
+      :progress
+      '(:phase :startup :step :config-surface-installed :done 1 :total 10))
+     (protocol:send-request
+     4
+      :eval
+      (benchmark:eval-payload
+       `(:form (progn
+                 (emacs-hypervisor-reset-declarations)
+                 (load-file ,config-file)
+                 :ok)
+         :metric-name :load-config
+         :metric-kind :runtime-setup
+         :phase :startup)))
+     (let [config-load-result (protocol:await-response mailbox 4)]
+       (assert (protocol:response-ok? config-load-result)
+               (string "config load should succeed: "
+                       (or (protocol:response-error config-load-result)
+                           :unknown-error))))
+     (protocol:send-event
+      :progress
+      '(:phase :startup :step :config-loaded :done 2 :total 10))
+     (protocol:send-request
+      5
       :session-data
       '(:fields (:packages :units :env)))
-     (let* [session-data-response (protocol:await-response mailbox 3)
+     (let* [session-data-response (protocol:await-response mailbox 5)
             _ (assert (protocol:response-ok? session-data-response)
                       "expected successful :session-data response")
             {:packages packages :units units :env env}
@@ -117,25 +181,27 @@
          nil)
         (protocol:send-event
          :progress
-         '(:phase :handshake :step :session-data-parsed :done 1 :total 8))
+         '(:phase :handshake :step :session-data-parsed :done 3 :total 10))
         (protocol:send-event
          :log
          `(:level :info
            :message ,(string "prepared session helper forms for " session-name)))
         (protocol:send-request
-         4
+         6
          :eval
          (benchmark:eval-payload
           `(:form ,(runtime-forms:install-session-helpers-form)
             :metric-name :install-session-helpers
             :metric-kind :runtime-setup
             :phase :startup)))
-        (let [runtime-result (protocol:await-response mailbox 4)]
+        (let [runtime-result (protocol:await-response mailbox 6)]
           (assert (protocol:response-ok? runtime-result)
-                  "session helper install should succeed"))
+                  (string "session helper install should succeed: "
+                          (or (protocol:response-error runtime-result)
+                              :unknown-error))))
         (protocol:send-event
          :progress
-         '(:phase :planning :step :policy-derived :done 2 :total 8))
+         '(:phase :planning :step :policy-derived :done 4 :total 10))
         (policy:emit-report-message :planned :packages planned-package-reports)
         (policy:emit-report-message :planned :units planned-unit-reports)
         (policy:emit-report-logs "planned-package" planned-package-reports)
@@ -144,7 +210,7 @@
         (planning:emit-plan-message unit-plan)
         (protocol:send-event
          :progress
-         '(:phase :planning :step :plans-emitted :done 3 :total 8))
+         '(:phase :planning :step :plans-emitted :done 5 :total 10))
         (let* [executed-package-plan
                (execution:execute-package-entry-plan-tracker
                 (planning:plan-items package-plan)
@@ -168,21 +234,21 @@
           (policy:emit-report-message :executed :packages package-reports)
           (protocol:send-event
            :progress
-           '(:phase :packages :step :executed :done 4 :total 8))
+           '(:phase :packages :step :executed :done 6 :total 10))
           (policy:emit-report-logs "unit" unit-reports)
           (policy:emit-report-message :executed :units unit-reports)
           (protocol:send-event
            :progress
-           '(:phase :units :step :executed :done 5 :total 8))
+           '(:phase :units :step :executed :done 7 :total 10))
           (protocol:send-event
            :progress
-           '(:phase :reporting :step :reports-emitted :done 6 :total 8))
+           '(:phase :reporting :step :reports-emitted :done 8 :total 10))
           (protocol:send-event
            :progress
-           '(:phase :events :step :execution-recorded :done 7 :total 8))
+           '(:phase :events :step :execution-recorded :done 9 :total 10))
           (protocol:send-event
            :progress
-           '(:phase :shutdown :step :ready :done 8 :total 8))
+           '(:phase :shutdown :step :ready :done 10 :total 10))
           (protocol:send-event
            :shutdown
            '(:reason :hypervisor-session-complete)))))))

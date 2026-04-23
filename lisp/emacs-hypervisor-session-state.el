@@ -1,4 +1,4 @@
-;;; emacs-hypervisor-session.el --- Session state and observability -*- lexical-binding: t; -*-
+;;; emacs-hypervisor-session-state.el --- Session state and observability -*- lexical-binding: t; -*-
 
 (defvar emacs-hypervisor--buffer-name " *emacs-hypervisor*")
 (defvar emacs-hypervisor--process nil)
@@ -19,7 +19,13 @@
 (defvar emacs-hypervisor-loaded-env-file nil)
 (defvar emacs-hypervisor-loaded-env-vars nil)
 
-(require 'emacs-hypervisor-report)
+(defun emacs-hypervisor--report-call (function &rest args)
+  (when (fboundp function)
+    (apply function args)))
+
+(defun emacs-hypervisor--report-value (function &rest args)
+  (when (fboundp function)
+    (apply function args)))
 
 (defun emacs-hypervisor-benchmark-enabled-p ()
   "Return non-nil when Hypervisor benchmarking is enabled."
@@ -44,7 +50,7 @@
   (setq emacs-hypervisor-loaded-env-file nil)
   (setq emacs-hypervisor-loaded-env-vars nil)
   (setq emacs-hypervisor-process-sentinel-function nil)
-  (emacs-hypervisor-report-reset))
+  (emacs-hypervisor--report-call 'emacs-hypervisor-report-reset))
 
 (defun emacs-hypervisor--record (direction payload)
   (push (cons direction payload) emacs-hypervisor--message-log))
@@ -89,8 +95,12 @@
   (append
    (list
     :init-ms (emacs-hypervisor-init-elapsed-ms)
-    :session-ms (emacs-hypervisor-report-session-elapsed-ms))
-   (list :hypervisor (emacs-hypervisor-report-metrics-summary))))
+    :session-ms (emacs-hypervisor--report-value 'emacs-hypervisor-report-session-elapsed-ms))
+   (list :hypervisor (or (emacs-hypervisor--report-value 'emacs-hypervisor-report-metrics-summary)
+                         '(:count 0 :elle-count 0 :emacs-rpc-count 0 :runtime-count 0
+                           :session-wall-ms 0 :elle-ms 0 :emacs-rpc-ms 0
+                           :emacs-eval-ms 0 :packages-ms 0 :known-ms 0
+                           :unattributed-ms 0)))))
 
 (defun emacs-hypervisor-status ()
   "Return a compact status plist for the current Hypervisor session."
@@ -106,4 +116,4 @@
    :reports (length emacs-hypervisor--report-messages)
    :messages (length emacs-hypervisor--message-log)))
 
-(provide 'emacs-hypervisor-session)
+(provide 'emacs-hypervisor-session-state)
