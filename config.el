@@ -416,26 +416,24 @@ minibuffer, even without explicitly focusing it."
 (package! restart-emacs)
 
 (config-unit! restart-emacs-util
+  :requires (restart-emacs transient)
   :config
 
-  ;; Simplified letf! macro for our restart function
-  (defmacro letf! (bindings &rest body)
-    "Temporarily rebind functions in BODY.
-A simplified version for temporarily rebinding functions."
-    (declare (indent defun))
-    (let ((fn (caar bindings))
-          (new-def (cadar bindings)))
-      `(cl-letf (((symbol-function ,fn) ,new-def))
-         ,@body)))
-
-  (defun backbone/restart-and-restore (&optional debug)
+  (defun backbone/restart-and-restore (&optional debug &rest _ignored)
     "Restart Emacs (and the daemon, if active).
 If DEBUG (the prefix arg) is given, start the new instance with the --debug switch."
     (interactive "P")
     (save-some-buffers nil t)
-    (letf! ((#'save-buffers-kill-emacs #'kill-emacs))
+    (cl-letf (((symbol-function 'save-buffers-kill-emacs)
+               (lambda (&rest args)
+                 (apply #'kill-emacs args))))
       (let ((confirm-kill-emacs nil))
-        (restart-emacs (if debug (list "--debug-init") '()))))))
+        (restart-emacs (if debug '("--debug-init") nil))))))
+
+  (defun backbone/restart-and-restore-suffix (&optional debug &rest _ignored)
+    "Restart Emacs from the quit transient."
+    (interactive "P")
+    (backbone/restart-and-restore debug))
 
 (package! beacon :repo "Malabarba/beacon" :branch "master")
 (package! rainbow-mode)
@@ -1911,7 +1909,7 @@ trailing whitespaces, and ensuring a newline at the end of the file."
     "Quit and restart commands"
     ["Quit"
      ("q" "quit Emacs" save-buffers-kill-emacs)
-     ("r" "restart Emacs" backbone/restart-and-restore)])
+     ("r" "restart Emacs" backbone/restart-and-restore-suffix)])
 
   (keymap-set global-map "C-c q" #'my/quit-menu))
 
