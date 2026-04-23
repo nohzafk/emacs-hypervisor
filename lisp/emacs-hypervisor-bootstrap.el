@@ -6,7 +6,6 @@
 (defconst emacs-hypervisor-protocol-version 1)
 
 (defvar emacs-hypervisor--buffer-name " *emacs-hypervisor*")
-(defvar emacs-hypervisor--log-buffer-name "*emacs-hypervisor-log*")
 (defvar emacs-hypervisor--process nil)
 (defvar emacs-hypervisor--message-log nil)
 (defvar emacs-hypervisor--runtime-dispatch-function nil)
@@ -82,33 +81,8 @@ unreadable. Returns the names of envvars that were changed."
   (setq emacs-hypervisor-loaded-env-vars nil)
   (setq emacs-hypervisor-process-sentinel-function nil))
 
-(defun emacs-hypervisor-log-buffer ()
-  "Return the Hypervisor interactive log buffer."
-  (get-buffer-create emacs-hypervisor--log-buffer-name))
-
-(defun emacs-hypervisor-open-log-buffer ()
-  "Display the Hypervisor log buffer."
-  (interactive)
-  (pop-to-buffer (emacs-hypervisor-log-buffer)))
-
-(defun emacs-hypervisor--append-log-line (line)
-  (with-current-buffer (emacs-hypervisor-log-buffer)
-    (let ((inhibit-read-only t))
-      (goto-char (point-max))
-      (insert line "\n"))))
-
-(defun emacs-hypervisor--log (tag payload)
-  (emacs-hypervisor--append-log-line
-   (format "%s %-8s %s"
-           (format-time-string "%H:%M:%S")
-           tag
-           payload)))
-
 (defun emacs-hypervisor--record (direction payload)
-  (push (cons direction payload) emacs-hypervisor--message-log)
-  (emacs-hypervisor--log
-   (symbol-name direction)
-   (format "%S" payload)))
+  (push (cons direction payload) emacs-hypervisor--message-log))
 
 (defun emacs-hypervisor--sexp-string (value)
   "Serialize VALUE to a single-line S-expression transport string."
@@ -348,9 +322,6 @@ unreadable. Returns the names of envvars that were changed."
 (defun emacs-hypervisor--sentinel (proc event)
   (setq emacs-hypervisor--last-process-event
         (emacs-hypervisor--normalize-process-event event))
-  (emacs-hypervisor--log
-   "process"
-   (or emacs-hypervisor--last-process-event ""))
   (unless (process-live-p proc)
     (unless emacs-hypervisor--completed
       (setq emacs-hypervisor--state :failed)
@@ -362,14 +333,7 @@ unreadable. Returns the names of envvars that were changed."
   (let ((buffer (get-buffer-create emacs-hypervisor--buffer-name)))
     (with-current-buffer buffer
       (erase-buffer))
-    (with-current-buffer (emacs-hypervisor-log-buffer)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (special-mode)))
     (setq emacs-hypervisor--state :starting)
-    (emacs-hypervisor--log
-     "start"
-     (mapconcat #'shell-quote-argument command " "))
     (setq emacs-hypervisor--process
           (make-process
            :name (or process-name "emacs-hypervisor")
