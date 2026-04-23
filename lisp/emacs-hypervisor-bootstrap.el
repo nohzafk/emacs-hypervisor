@@ -26,6 +26,8 @@
 (defvar emacs-hypervisor-loaded-env-file nil)
 (defvar emacs-hypervisor-loaded-env-vars nil)
 
+(require 'emacs-hypervisor-report)
+
 (defun emacs-hypervisor-default-context ()
   (list
    :emacs-version emacs-version
@@ -79,7 +81,8 @@ unreadable. Returns the names of envvars that were changed."
   (setq emacs-hypervisor--completed nil)
   (setq emacs-hypervisor-loaded-env-file nil)
   (setq emacs-hypervisor-loaded-env-vars nil)
-  (setq emacs-hypervisor-process-sentinel-function nil))
+  (setq emacs-hypervisor-process-sentinel-function nil)
+  (emacs-hypervisor-report-reset))
 
 (defun emacs-hypervisor--record (direction payload)
   (push (cons direction payload) emacs-hypervisor--message-log))
@@ -261,25 +264,30 @@ unreadable. Returns the names of envvars that were changed."
     (pcase topic
       (:plan
        (push (append '(:plan) payload) emacs-hypervisor--plan-messages)
+       (emacs-hypervisor-report-note-plan)
        t)
       (:progress
        (setq emacs-hypervisor--last-progress-message
              (append '(:progress) payload))
        (push (append '(:progress) payload) emacs-hypervisor--progress-messages)
+       (emacs-hypervisor-report-note-progress)
        t)
       (:log
        (setq emacs-hypervisor--last-log-message
              (append '(:log) payload))
        (push (append '(:log) payload) emacs-hypervisor--log-messages)
+       (emacs-hypervisor-report-note-log)
        t)
       (:report
        (push (append '(:report) payload) emacs-hypervisor--report-messages)
+       (emacs-hypervisor-report-note-report)
        t)
       (:shutdown
        (setq emacs-hypervisor--shutdown-reason
              (plist-get payload :reason))
        (setq emacs-hypervisor--state :completed)
        (setq emacs-hypervisor--completed t)
+       (emacs-hypervisor-report-session-finished)
        t)
       (_ nil))))
 
@@ -326,6 +334,7 @@ unreadable. Returns the names of envvars that were changed."
     (unless emacs-hypervisor--completed
       (setq emacs-hypervisor--state :failed)
       (setq emacs-hypervisor--shutdown-reason :process-exited))
+    (emacs-hypervisor-report-session-finished)
     (when (functionp emacs-hypervisor-process-sentinel-function)
       (funcall emacs-hypervisor-process-sentinel-function proc event))))
 
@@ -334,6 +343,7 @@ unreadable. Returns the names of envvars that were changed."
     (with-current-buffer buffer
       (erase-buffer))
     (setq emacs-hypervisor--state :starting)
+    (emacs-hypervisor-report-session-started)
     (setq emacs-hypervisor--process
           (make-process
            :name (or process-name "emacs-hypervisor")

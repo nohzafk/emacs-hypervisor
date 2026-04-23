@@ -13,6 +13,9 @@
         (emacs-hypervisor-send-event
          :package
          (list :phase :packages :kind :installed :name name)))
+      (defun emacs-hypervisor-runtime-note-package-event (kind &optional name reason)
+        (when (fboundp 'emacs-hypervisor-report-note-package-event)
+          (emacs-hypervisor-report-note-package-event kind name reason)))
       (defun emacs-hypervisor-runtime-send-packages-finished (&optional reason)
         (emacs-hypervisor-send-event
          :package
@@ -29,14 +32,17 @@
         (push name emacs-hypervisor-installed-packages)
         (push (list :phase :packages :event :installed :name name)
               emacs-hypervisor-execution-events)
+        (emacs-hypervisor-runtime-note-package-event :installed name)
         (emacs-hypervisor-runtime-send-package-installed name))
       (defun emacs-hypervisor-runtime-packages-finished (&optional reason)
         (push (list :phase :packages :event :finished :reason reason)
               emacs-hypervisor-execution-events)
+        (emacs-hypervisor-runtime-note-package-event :finished nil reason)
         (emacs-hypervisor-runtime-send-packages-finished reason))
       (defun emacs-hypervisor-runtime-packages-timeout (&optional reason)
         (push (list :phase :packages :event :timeout :reason reason)
               emacs-hypervisor-execution-events)
+        (emacs-hypervisor-runtime-note-package-event :timeout nil reason)
         (emacs-hypervisor-runtime-send-package-timeout reason))
       (defun emacs-hypervisor-runtime-cancel-package-timeout ()
         (when emacs-hypervisor-runtime-package-timeout-timer
@@ -57,6 +63,7 @@
       (defun emacs-hypervisor-runtime-begin-package-installation ()
         (setq emacs-hypervisor-runtime-packages-installation-active t)
         (setq emacs-hypervisor-runtime-packages-finished-sent nil)
+        (emacs-hypervisor-runtime-note-package-event :begin)
         (emacs-hypervisor-runtime-start-package-timeout))
       (defun emacs-hypervisor-runtime-reset-package-timeout ()
         (when (and emacs-hypervisor-runtime-packages-installation-active
