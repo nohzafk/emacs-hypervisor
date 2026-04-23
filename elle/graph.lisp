@@ -36,9 +36,28 @@
   (defn remove-entry-by-name [entries name]
     (filter (fn [entry] (not (= (entry-name entry) name))) entries))
 
+  (defn valid-cycle-entries [entries dep-key known]
+    (filter (fn [entry] (has-no-missing-refs? entry dep-key known)) entries))
+
+  (defn deps-in-current [entry dep-key current-names]
+    (filter
+     (fn [dep] (member? current-names dep))
+     (entry-field entry dep-key)))
+
+  (defn has-dependent-in-current? [current dep-key name]
+    (any?
+     (fn [other]
+       (member? (entry-field other dep-key) name))
+     current))
+
+  (defn cycle-core-entry? [entry current dep-key current-names]
+    (let [name (entry-name entry)
+          deps (deps-in-current entry dep-key current-names)]
+      (and (not (empty? deps))
+           (has-dependent-in-current? current dep-key name))))
+
   (defn cycle-names [entries dep-key known]
-    (let [valid-entries
-          (filter (fn [entry] (has-no-missing-refs? entry dep-key known)) entries)]
+    (let [valid-entries (valid-cycle-entries entries dep-key known)]
       (letrec
           [prune-cycle-core
            (fn [current]
@@ -46,18 +65,11 @@
                    kept
                    (filter
                     (fn [entry]
-                      (let [name (entry-name entry)
-                            deps-in-current
-                            (filter
-                             (fn [dep] (member? current-names dep))
-                             (entry-field entry dep-key))
-                            has-dependent-in-current
-                            (any?
-                             (fn [other]
-                               (member? (entry-field other dep-key) name))
-                             current)]
-                        (and (not (empty? deps-in-current))
-                             has-dependent-in-current)))
+                      (cycle-core-entry?
+                       entry
+                       current
+                       dep-key
+                       current-names))
                     current)]
                (if (= (length kept) (length current))
                  kept
@@ -65,15 +77,18 @@
         (known-names (prune-cycle-core valid-entries)))))
 
   (defn find-entry [entries name]
-    (let [matches (filter (fn [entry] (= (entry-name entry) name)) entries)]
-      (if (empty? matches) nil (first matches))))
-
-  (defn report-for [reports name]
-    (find-entry reports name))
+    (match entries
+      (() nil)
+      ((entry & rest)
+       (if (= (entry-name entry) name)
+         entry
+         (find-entry rest name)))
+      (_ nil)))
 
   (defn report-status [reports name]
-    (let [entry (report-for reports name)]
-      (if (nil? entry) nil (plist-get entry :status))))
+    (if-let [entry (find-entry reports name)]
+      (plist-get entry :status)
+      nil))
 
   (defn make-report [name status reason details]
     (list :name name :status status :reason reason :details details))
@@ -90,37 +105,46 @@
   (defn preflight-details [env executable]
     (list :env env :executable executable))
 
+  (defn missing-entry-report [name reason missing-entry]
+    (make-report
+     name
+     :invalid
+     reason
+     (missing-details (plist-get missing-entry :missing))))
+
+  (defn entry-missing-report [name reason missing-entries]
+    (if-let [missing-entry (find-entry missing-entries name)]
+      (missing-entry-report name reason missing-entry)
+      nil))
+
+  (defn cycle-entry-report [name members]
+    (make-report name :invalid :cycle (cycle-details members)))
+
   (defn invalid-package-report [entry missing-entries cycle-members]
-    (let [name (entry-name entry)
-          missing-entry (find-entry missing-entries (entry-name entry))]
-      (if (not (nil? missing-entry))
-        (make-report
-         name
-         :invalid
-         :missing-deps
-         (missing-details (plist-get missing-entry :missing)))
+    (let [name (entry-name entry)]
+      (if-let [missing-report
+               (entry-missing-report name :missing-deps missing-entries)]
+        missing-report
         (if (member? cycle-members name)
-          (make-report name :invalid :cycle (cycle-details cycle-members))
+          (cycle-entry-report name cycle-members)
           nil))))
 
   (defn invalid-unit-report [entry missing-requires missing-after cycle-members]
-    (let [name (entry-name entry)
-          missing-required-entry (find-entry missing-requires name)
-          missing-after-entry (find-entry missing-after name)]
-      (if (not (nil? missing-required-entry))
-        (make-report
-         name
-         :invalid
-         :missing-required-packages
-         (missing-details (plist-get missing-required-entry :missing)))
-        (if (not (nil? missing-after-entry))
-          (make-report
-           name
-           :invalid
-           :missing-after-units
-           (missing-details (plist-get missing-after-entry :missing)))
+    (let [name (entry-name entry)]
+      (if-let [missing-report
+               (entry-missing-report
+                name
+                :missing-required-packages
+                missing-requires)]
+        missing-report
+        (if-let [missing-report
+                 (entry-missing-report
+                  name
+                  :missing-after-units
+                  missing-after)]
+          missing-report
           (if (member? cycle-members name)
-            (make-report name :invalid :cycle (cycle-details cycle-members))
+            (cycle-entry-report name cycle-members)
             nil)))))
 
   (defn non-invalid-entries [entries invalid-reports]
@@ -130,7 +154,7 @@
      entries))
 
   (defn all-known? [names reports]
-    (all? (fn [name] (not (nil? (report-for reports name)))) names))
+    (all? (fn [name] (not (nil? (find-entry reports name)))) names))
 
   (defn resolve-reports-loop [remaining reports ready? make-next-report]
     (if (empty? remaining)

@@ -7,5 +7,23 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 elle_bin=${ELLE_BIN:-/tmp/elle/target/debug/elle}
 analysis_file="$repo_dir/tools/analyze-runtime.lisp"
 
+case "${1-}" in
+  "")
+    ;;
+  --verbose|--full)
+    export ANALYZE_RUNTIME_VERBOSE=1
+    shift
+    ;;
+  *)
+    echo "usage: tools/analyze-runtime-modules [--verbose]" >&2
+    exit 64
+    ;;
+esac
+
+if [ "$#" -ne 0 ]; then
+  echo "usage: tools/analyze-runtime-modules [--verbose]" >&2
+  exit 64
+fi
+
 cd "$repo_dir"
 exec "$elle_bin" "$analysis_file"
