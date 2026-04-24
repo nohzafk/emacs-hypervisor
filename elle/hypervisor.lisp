@@ -24,9 +24,9 @@
 (defn emacs-hypervisor-embedded-module-spec [env-name source-path]
   (let [forms-source (sys/env env-name)]
     (assert forms-source
-            (string "expected embedded module source in " env-name))
+            (string "expected embedded module forms in " env-name))
     {:path source-path
-     :source forms-source}))
+     :forms (read-all forms-source)}))
 
 (protocol:with-mailbox-reader
  mailbox
