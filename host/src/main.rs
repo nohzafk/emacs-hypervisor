@@ -2,20 +2,6 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
     include!(concat!(env!("OUT_DIR"), "/embedded_elisp.rs"));
 
-    pub const EMBEDDED_REPORT_CORE_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-report-core.el");
-    pub const EMBEDDED_REPORT_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-report.el");
-    pub const EMBEDDED_DECLARATIONS_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-declarations.el");
-    pub const EMBEDDED_COMPOSE_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-compose.el");
-    pub const EMBEDDED_ELPACA_BRIDGE_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el");
-    pub const EMBEDDED_PACKAGE_RUNTIME_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-package-runtime.el");
-    pub const EMBEDDED_UNIT_RUNTIME_SOURCE: &str =
-        include_str!("../../elle/runtime-forms/emacs-hypervisor-unit-runtime.el");
     pub const EMBEDDED_BOOTSTRAP_ELISP: &str =
         include_str!("../templates/lisp/emacs-hypervisor-bootstrap.el");
     pub const EMBEDDED_SEXP_RPC_ELISP: &str =
@@ -116,58 +102,47 @@ fn default_elle_home_path() -> PathBuf {
     repo_root().join(".elle")
 }
 
-struct SourceElispModule {
-    env_name: &'static str,
-    embedded_source: &'static str,
-}
-
 struct PackedElispModule {
     env_name: &'static str,
     embedded_forms: &'static str,
 }
 
-const SOURCE_ELISP_MODULES: &[SourceElispModule] = &[
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
-        embedded_source: embedded::EMBEDDED_REPORT_CORE_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
-        embedded_source: embedded::EMBEDDED_REPORT_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
-        embedded_source: embedded::EMBEDDED_DECLARATIONS_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
-        embedded_source: embedded::EMBEDDED_COMPOSE_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_SOURCE",
-        embedded_source: embedded::EMBEDDED_ELPACA_BRIDGE_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE",
-        embedded_source: embedded::EMBEDDED_PACKAGE_RUNTIME_SOURCE,
-    },
-    SourceElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE",
-        embedded_source: embedded::EMBEDDED_UNIT_RUNTIME_SOURCE,
-    },
-];
-
 const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_FORMS",
+        embedded_forms: embedded::EMBEDDED_REPORT_CORE_FORMS,
+    },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_FORMS",
+        embedded_forms: embedded::EMBEDDED_REPORT_FORMS,
+    },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS",
+        embedded_forms: embedded::EMBEDDED_DECLARATIONS_FORMS,
+    },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_FORMS",
+        embedded_forms: embedded::EMBEDDED_COMPOSE_FORMS,
+    },
     PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS",
         embedded_forms: embedded::EMBEDDED_SESSION_BASE_FORMS,
     },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_FORMS",
+        embedded_forms: embedded::EMBEDDED_ELPACA_BRIDGE_FORMS,
+    },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_FORMS",
+        embedded_forms: embedded::EMBEDDED_PACKAGE_RUNTIME_FORMS,
+    },
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_FORMS",
+        embedded_forms: embedded::EMBEDDED_UNIT_RUNTIME_FORMS,
+    },
 ];
 
 fn install_elisp_modules() -> Result<(), String> {
-    for module in SOURCE_ELISP_MODULES {
-        env::set_var(module.env_name, module.embedded_source);
-    }
     for module in PACKED_ELISP_MODULES {
         env::set_var(module.env_name, module.embedded_forms);
     }

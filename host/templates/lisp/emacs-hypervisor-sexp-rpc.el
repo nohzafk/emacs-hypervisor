@@ -1,6 +1,5 @@
 ;;; emacs-hypervisor-sexp-rpc.el --- S-expression RPC transport -*- lexical-binding: t; -*-
 
-(require 'json)
 (defconst emacs-hypervisor-protocol-name :sexp-rpc)
 (defconst emacs-hypervisor-protocol-version 1)
 
@@ -24,24 +23,13 @@
 (declare-function emacs-hypervisor-benchmark-enabled-p "emacs-hypervisor-session-state")
 
 (defun emacs-hypervisor--sexp-string (value)
-  "Serialize VALUE to a single-line S-expression transport string."
-  (cond
-   ((consp value)
-    (concat "("
-            (mapconcat #'emacs-hypervisor--sexp-string value " ")
-            ")"))
-   ((vectorp value)
-    (concat "["
-            (mapconcat #'emacs-hypervisor--sexp-string value " ")
-            "]"))
-   ((stringp value)
-    (json-serialize value))
-   ((keywordp value)
-    (symbol-name value))
-   ((symbolp value)
-    (symbol-name value))
-   (t
-    (prin1-to-string value))))
+  "Serialize VALUE as a reader-compatible single-line S-expression."
+  (let ((print-level nil)
+        (print-length nil)
+        (print-escape-newlines t)
+        (print-escape-control-characters t)
+        (print-circle nil))
+    (prin1-to-string value)))
 
 (defun emacs-hypervisor-send (message)
   (unless (process-live-p emacs-hypervisor--process)

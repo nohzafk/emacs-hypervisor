@@ -12,6 +12,24 @@ build:
 build-debug:
     ./scripts/build-hypervisor --debug
 
+[group('Build')]
+clean:
+    rm -rf target host/target host/elisp_pack/target
+
+[group('Build')]
+rebuild:
+    just clean
+    just build
+
+[group('Build')]
+test-pack:
+    cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
+
+[group('Build')]
+verify:
+    just test-pack
+    just build
+
 [group('Elle')]
 bootstrap-elle:
     ./scripts/bootstrap-elle

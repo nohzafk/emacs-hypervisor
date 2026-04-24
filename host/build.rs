@@ -76,15 +76,45 @@ fn main() {
     )
     .expect("should write embedded backend source");
 
-    let packed = pack_file(&repo_dir.join("elle/runtime-forms/emacs-hypervisor-session-base.el"))
-        .expect("should pack session-base elisp");
-    fs::write(
-        out_dir.join("embedded_elisp.rs"),
-        format!(
-            "pub const EMBEDDED_SESSION_BASE_FORMS: &str = {:?};\n",
-            packed.forms_source
-        ),
-    )
-    .expect("should write embedded packed elisp");
-
+    let mut packed_output = String::new();
+    for (const_name, rel_path) in PACKED_RUNTIME_FORMS {
+        let path = repo_dir.join(rel_path);
+        let packed = pack_file(&path)
+            .unwrap_or_else(|error| panic!("failed to pack {}: {}", rel_path, error));
+        packed_output.push_str(&format!(
+            "pub const EMBEDDED_{}_FORMS: &str = {:?};\n",
+            const_name, packed.forms_source
+        ));
+    }
+    fs::write(out_dir.join("embedded_elisp.rs"), packed_output)
+        .expect("should write embedded packed elisp");
 }
+
+const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
+    (
+        "REPORT_CORE",
+        "elle/runtime-forms/emacs-hypervisor-report-core.el",
+    ),
+    ("REPORT", "elle/runtime-forms/emacs-hypervisor-report.el"),
+    (
+        "DECLARATIONS",
+        "elle/runtime-forms/emacs-hypervisor-declarations.el",
+    ),
+    ("COMPOSE", "elle/runtime-forms/emacs-hypervisor-compose.el"),
+    (
+        "SESSION_BASE",
+        "elle/runtime-forms/emacs-hypervisor-session-base.el",
+    ),
+    (
+        "ELPACA_BRIDGE",
+        "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el",
+    ),
+    (
+        "PACKAGE_RUNTIME",
+        "elle/runtime-forms/emacs-hypervisor-package-runtime.el",
+    ),
+    (
+        "UNIT_RUNTIME",
+        "elle/runtime-forms/emacs-hypervisor-unit-runtime.el",
+    ),
+];
