@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use elisp_pack::pack_file;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR should be set"))
         .join("..")
@@ -60,7 +62,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", repo_dir.join("elle").display());
     println!(
         "cargo:rerun-if-changed={}",
-        repo_dir.join("elle/source-elisp").display()
+        repo_dir.join("elle/runtime-forms").display()
     );
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR should be set"));
@@ -73,4 +75,16 @@ fn main() {
         ),
     )
     .expect("should write embedded backend source");
+
+    let packed = pack_file(&repo_dir.join("elle/runtime-forms/emacs-hypervisor-session-base.el"))
+        .expect("should pack session-base elisp");
+    fs::write(
+        out_dir.join("embedded_elisp.rs"),
+        format!(
+            "pub const EMBEDDED_SESSION_BASE_FORMS: &str = {:?};\n",
+            packed.forms_source
+        ),
+    )
+    .expect("should write embedded packed elisp");
+
 }

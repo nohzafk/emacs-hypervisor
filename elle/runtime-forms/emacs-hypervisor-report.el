@@ -295,9 +295,10 @@
          (counts (emacs-hypervisor--status-counts reports))
          (installed
           (cl-count :installed emacs-hypervisor--package-events
-                    :key (lambda (entry) (plist-get entry :kind)))))
+                    :key (lambda (entry) (plist-get entry :kind))))
+         (ready (plist-get counts :ok)))
     (list :installed installed
-          :ok (plist-get counts :ok)
+          :ready ready
           :failed (plist-get counts :failed)
           :skipped (plist-get counts :skipped))))
 
@@ -397,13 +398,12 @@
     (emacs-hypervisor--insert-status-line
      "Progress"
      (if (and (= (plist-get progress :installed) 0)
-              (= (plist-get progress :ok) 0)
+              (= (plist-get progress :ready) 0)
               (= (plist-get progress :failed) 0)
               (= (plist-get progress :skipped) 0))
          "No package work yet"
-       (format "%d installed, %d ok, %d failed, %d skipped"
-               (plist-get progress :installed)
-               (plist-get progress :ok)
+       (format "%d ready, %d failed, %d skipped"
+               (plist-get progress :ready)
                (plist-get progress :failed)
                (plist-get progress :skipped))))
     (insert "\n")))

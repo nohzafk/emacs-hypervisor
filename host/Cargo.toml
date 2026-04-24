@@ -7,3 +7,7 @@ publish = false
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 elle = { path = "../.elle" }
+elisp_pack = { path = "elisp_pack" }
+
+[build-dependencies]
+elisp_pack = { path = "elisp_pack" }

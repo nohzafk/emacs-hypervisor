@@ -44,6 +44,9 @@ emacs-hypervisor env --home ~/.config/emacs
 emacs --init-directory ~/.config/emacs
 ```
 
+Each generated Emacs home is isolated. Runtime state, package installs, and
+local caches live under that selected home.
+
 Temporary testing with an explicit binary path:
 
 ```bash
@@ -55,3 +58,14 @@ Temporary testing with `PATH` only:
 ```bash
 PATH=/path/to/bin:$PATH emacs --init-directory /tmp/test-home
 ```
+
+## `elisp_pack`
+
+`elisp_pack` is an internal Rust library scoped to static Elisp modules under
+`elle/runtime-forms/`.
+
+- current shipped runtime is mixed-mode: `session-base` uses packed `:forms`, the rest still embed source text
+- the generic Elle loader supports both `:forms` and `:source`
+- `lisp/` bootstrap files are not part of `elisp_pack`
+
+See `host/ELISP-PACK.md` for the design boundary and future structured-pack path.

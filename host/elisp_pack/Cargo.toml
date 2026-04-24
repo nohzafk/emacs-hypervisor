@@ -1,0 +1,12 @@
+[package]
+name = "elisp_pack"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+tree-sitter = "0.26.8"
+tree-sitter-elisp = "1.6.1"

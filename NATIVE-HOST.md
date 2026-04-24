@@ -24,17 +24,19 @@ Write an env snapshot file for the Emacs home:
 emacs-hypervisor env
 ```
 
-Build just the native host artifact in the repo:
+Build the native host artifact in the repo:
 
 ```bash
 tools/build-hypervisor
 ```
 
-The native host defaults to the embedded backend path:
+The built artifact lives at:
 
-- uses `target/release/emacs-hypervisor`
-- auto-builds it when missing
-- runs the embedded Elle backend and embedded helper Elisp sources
+- `target/release/emacs-hypervisor`
+- `target/debug/emacs-hypervisor` when built with the debug path
+
+The native host runs the embedded Elle backend and embedded runtime helper
+Elisp modules.
 
 ## Repo Wrapper
 
@@ -69,6 +71,9 @@ Generated installed-user `init.el` resolves `emacs-hypervisor` in two phases:
 
 Once resolved, startup caches the absolute binary path before launching the
 subprocess.
+
+Each initialized Emacs home is self-contained. Startup state, package installs,
+and local caches stay under that home.
 
 The repo-root development `init.el` still prefers the repo-local wrapper for
 convenience during local iteration.

@@ -1698,8 +1698,8 @@ On cancel, inserts bare @ for manual typing."
 
 (package! org-modern)
 
-(config-unit! org-modern :aftger org
-  :require org-modern
+(config-unit! org-modern :after org
+  :requires org-modern
   :config
 
   (setopt

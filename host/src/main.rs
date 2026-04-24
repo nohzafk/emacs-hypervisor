@@ -1,14 +1,21 @@
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
+    include!(concat!(env!("OUT_DIR"), "/embedded_elisp.rs"));
 
     pub const EMBEDDED_REPORT_CORE_SOURCE: &str =
-        include_str!("../../elle/source-elisp/emacs-hypervisor-report-core.el");
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-report-core.el");
     pub const EMBEDDED_REPORT_SOURCE: &str =
-        include_str!("../../elle/source-elisp/emacs-hypervisor-report.el");
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-report.el");
     pub const EMBEDDED_DECLARATIONS_SOURCE: &str =
-        include_str!("../../elle/source-elisp/emacs-hypervisor-declarations.el");
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-declarations.el");
     pub const EMBEDDED_COMPOSE_SOURCE: &str =
-        include_str!("../../elle/source-elisp/emacs-hypervisor-compose.el");
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-compose.el");
+    pub const EMBEDDED_ELPACA_BRIDGE_SOURCE: &str =
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el");
+    pub const EMBEDDED_PACKAGE_RUNTIME_SOURCE: &str =
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-package-runtime.el");
+    pub const EMBEDDED_UNIT_RUNTIME_SOURCE: &str =
+        include_str!("../../elle/runtime-forms/emacs-hypervisor-unit-runtime.el");
     pub const EMBEDDED_BOOTSTRAP_ELISP: &str =
         include_str!("../../lisp/emacs-hypervisor-bootstrap.el");
     pub const EMBEDDED_SEXP_RPC_ELISP: &str =
@@ -24,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::{Args, Parser, Subcommand};
+use elisp_pack::pack_file;
 use elle::config::Config;
 use elle::context::{clear_symbol_table, clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::compile_file;
@@ -250,23 +258,88 @@ fn read_backend_source(backend: Option<&String>) -> (String, Cow<'static, str>) 
     }
 }
 
-fn install_embedded_elisp_sources() {
-    env::set_var(
-        "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
-        embedded::EMBEDDED_REPORT_CORE_SOURCE,
-    );
-    env::set_var(
-        "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
-        embedded::EMBEDDED_REPORT_SOURCE,
-    );
-    env::set_var(
-        "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
-        embedded::EMBEDDED_DECLARATIONS_SOURCE,
-    );
-    env::set_var(
-        "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
-        embedded::EMBEDDED_COMPOSE_SOURCE,
-    );
+struct SourceElispModule {
+    env_name: &'static str,
+    source_path: &'static str,
+    embedded_source: &'static str,
+}
+
+struct PackedElispModule {
+    env_name: &'static str,
+    source_path: &'static str,
+    embedded_forms: &'static str,
+}
+
+const SOURCE_ELISP_MODULES: &[SourceElispModule] = &[
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-report-core.el",
+        embedded_source: embedded::EMBEDDED_REPORT_CORE_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-report.el",
+        embedded_source: embedded::EMBEDDED_REPORT_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-declarations.el",
+        embedded_source: embedded::EMBEDDED_DECLARATIONS_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-compose.el",
+        embedded_source: embedded::EMBEDDED_COMPOSE_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el",
+        embedded_source: embedded::EMBEDDED_ELPACA_BRIDGE_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-package-runtime.el",
+        embedded_source: embedded::EMBEDDED_PACKAGE_RUNTIME_SOURCE,
+    },
+    SourceElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE",
+        source_path: "elle/runtime-forms/emacs-hypervisor-unit-runtime.el",
+        embedded_source: embedded::EMBEDDED_UNIT_RUNTIME_SOURCE,
+    },
+];
+
+const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
+    PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS",
+        source_path: "elle/runtime-forms/emacs-hypervisor-session-base.el",
+        embedded_forms: embedded::EMBEDDED_SESSION_BASE_FORMS,
+    },
+];
+
+fn install_elisp_modules() -> Result<(), String> {
+    let repo_dir = repo_root();
+    for module in SOURCE_ELISP_MODULES {
+        let source_path = repo_dir.join(module.source_path);
+        let source = if source_path.exists() {
+            fs::read_to_string(&source_path)
+                .map_err(|error| format!("failed to read {}: {}", source_path.display(), error))?
+        } else {
+            module.embedded_source.to_string()
+        };
+        env::set_var(module.env_name, source);
+    }
+    for module in PACKED_ELISP_MODULES {
+        let source_path = repo_dir.join(module.source_path);
+        let packed_forms = if source_path.exists() {
+            pack_file(&source_path)
+                .map_err(|error| format!("failed to pack {}: {}", source_path.display(), error))?
+                .forms_source
+        } else {
+            module.embedded_forms.to_string()
+        };
+        env::set_var(module.env_name, packed_forms);
+    }
+    Ok(())
 }
 
 fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
@@ -295,7 +368,7 @@ fn fail(message: impl AsRef<str>) -> ! {
 
 fn run_serve(backend: Option<String>) {
     let (backend_display, source) = read_backend_source(backend.as_ref());
-    install_embedded_elisp_sources();
+    install_elisp_modules().unwrap_or_else(|error| fail(error));
 
     let mut config = Config::default();
     if config.home.is_none() {
