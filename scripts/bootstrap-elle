@@ -10,7 +10,7 @@ elle_bin="$elle_dir/target/release/elle"
 
 usage() {
   cat <<EOF
-usage: tools/bootstrap-elle
+usage: scripts/bootstrap-elle
 
 Clone Elle into the repo-local .elle checkout if needed, initialize
 submodules, build the release binary, and build the MCP plugins:
@@ -112,7 +112,7 @@ Artifacts:
 - $elle_dir/target/release/libelle_oxigraph
 - $elle_dir/target/release/libelle_syn
 
-tools/start-elle-mcp should now resolve the repo-local binary and required MCP
+scripts/start-elle-mcp should now resolve the repo-local binary and required MCP
 plugins automatically. Override with ELLE_BIN if you need a different binary
 build.
 EOF

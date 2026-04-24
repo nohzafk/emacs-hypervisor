@@ -20,8 +20,7 @@ This document defines the reset target.
 The desired architecture is:
 
 - one real Emacs home
-  - `user-emacs-directory` is the project directory when testing this repo as
-    a standalone home
+  - provisioned with `emacs-hypervisor init`
 - one minimal trusted Emacs kernel
 - one session-scoped Elle subprocess
 - one Lisp-native protocol
@@ -68,17 +67,14 @@ That means the kernel is not responsible for:
 
 These pieces still belong in Emacs:
 
-- [init.el](/Users/randall/projects/emacs-hypervisor/init.el)
-  - thin repo-root bootstrap entrypoint
 - [early-init.el](/Users/randall/projects/emacs-hypervisor/early-init.el)
-  - ordinary local early-init behavior for the repo-home test path
+  - ordinary user-owned early-init behavior for a provisioned Emacs home
 - [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
   - trusted kernel
 - [lisp/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-declarations.el)
   - declaration/export surface
-- minimal `init.el`-facing startup glue
-  - currently in
-    [init.el](/Users/randall/projects/emacs-hypervisor/init.el)
+- minimal generated `init.el` startup glue
+  - emitted by `emacs-hypervisor init`
 
 These files should shrink, not grow.
 
@@ -129,10 +125,8 @@ The current Emacs-side code should be treated like this:
 
 ### Keep
 
-- [init.el](/Users/randall/projects/emacs-hypervisor/init.el)
-  - keep as the canonical repo-home bootstrap entrypoint
 - [early-init.el](/Users/randall/projects/emacs-hypervisor/early-init.el)
-  - keep as ordinary repo-home early-init behavior
+  - keep as ordinary user-owned early-init behavior
 - [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
   - keep as the trusted kernel
   - includes the async process filter, incremental S-expression parsing,
@@ -142,8 +136,8 @@ The current Emacs-side code should be treated like this:
 
 ### Shrink
 
-- [init.el](/Users/randall/projects/emacs-hypervisor/init.el)
-  - keep only repo-home startup glue
+- generated `init.el`
+  - keep only provisioned-home startup glue
   - avoid re-growing wrapper layers that duplicate the kernel boundary
 
 ### Move To Elle
@@ -217,7 +211,7 @@ The reset should happen in this order:
 3. Move Elpaca bootstrap/instruction generation into Elle-produced forms.
 4. Move package and unit execution orchestration into Elle-produced forms.
 5. Reduce Emacs-side runtime helpers until only the trusted kernel remains.
-6. Re-test the repo as a true standalone Emacs home after each shrink step.
+6. Re-test provisioned Emacs homes after each shrink step.
 
 ## Working Rule
 

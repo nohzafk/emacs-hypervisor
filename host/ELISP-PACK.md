@@ -18,9 +18,9 @@ current shipped runtime path.
 Current status:
 
 - runtime source-of-truth files live under `elle/runtime-forms/*.el`
-- the shipped host still embeds source text for most static modules
+- the shipped host embeds build-time snapshots of the static modules
 - `session-base` now ships through the structured `:forms` path
-- the Elle runtime currently mixes one packed module with source-backed module specs for the rest
+- the Elle runtime currently mixes one packed module with source-backed embedded module specs for the rest
 - `elisp_pack` is now tree-sitter-backed and ready for wider `:forms` rollout
 
 ## Runtime Contract
@@ -28,13 +28,12 @@ Current status:
 The Elle backend treats static Elisp modules as module specs with:
 
 - `:path`
-- optional `:forms`
-- optional `:source`
+- exactly one of `:forms` or `:source`
 
 Current runtime behavior:
 
 - `session-base` uses packed `:forms` loading
-- the remaining static modules still use source-backed loading
+- the remaining static modules still use embedded source-backed loading
 - dynamic/session-specific generated forms still come directly from Elle
 
 ## Scope

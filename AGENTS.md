@@ -20,12 +20,10 @@ The current architecture reset target lives in
 
 ## Layout
 
-- [init.el](/Users/randall/projects/emacs-hypervisor/init.el)
-  - canonical repo-root Emacs bootstrap entrypoint
 - [config.el](/Users/randall/projects/emacs-hypervisor/config.el)
-  - canonical repo-root Hypervisor declarations
+  - primary repo config declarations source used when provisioning a test home
 - [env](/Users/randall/projects/emacs-hypervisor/env)
-  - optional repo-root environment snapshot loaded before `config.el`
+  - optional env snapshot example in the same Lisp format emitted by `emacs-hypervisor env`
 - [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
   - minimal trusted Emacs kernel: process, framing, async filter, RPC dispatch
 - [lisp/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-declarations.el)
@@ -50,26 +48,25 @@ The current architecture reset target lives in
   - user-facing helper entrypoints
   - includes `bin/hypervisor-env` to scrape the current shell environment into
     repo-root `env`
-- [tools](/Users/randall/projects/emacs-hypervisor/tools)
+- [scripts](/Users/randall/projects/emacs-hypervisor/scripts)
   - developer analysis programs and MCP/tooling wrappers
 - [experiments/bin](/Users/randall/projects/emacs-hypervisor/experiments/bin)
   - spike runners
 
-## Repo-Home Environment Injection
+## Home Environment Injection
 
-When running the repo as the real `user-emacs-directory`, Hypervisor can load a
-repo-local environment snapshot before [config.el](/Users/randall/projects/emacs-hypervisor/config.el)
-is evaluated.
+Provisioned Emacs homes can load an environment snapshot before
+[config.el](/Users/randall/projects/emacs-hypervisor/config.el) is evaluated.
 
-- default file: [env](/Users/randall/projects/emacs-hypervisor/env)
+- default file: `HOME/env` in the provisioned Emacs home
 - override path: `EMACS_HYPERVISOR_ENV_FILE`
 - format: Lisp list of `"KEY=VALUE"` strings, matching the Backbone env file
   shape
 
-Generate/update the repo-local env file from the current shell with:
+Generate/update the home-local env file from the current shell with:
 
 ```bash
-bin/hypervisor-env
+emacs-hypervisor env --home /tmp/test-home
 ```
 
 This is a real Emacs runtime injection step, not just Elle preflight data:
@@ -121,7 +118,7 @@ This is useful for checking:
 Repo-local shortcut:
 
 ```bash
-tools/analyze-runtime-modules
+just analyze-runtime
 ```
 
 This runs Elle local analysis over the shared modules under
@@ -154,8 +151,8 @@ elle tools/mcp-server.lisp
 Repo-local wrapper:
 
 ```bash
-tools/bootstrap-elle
-tools/start-elle-mcp
+just bootstrap-elle
+just start-elle-mcp
 ```
 
 This wrapper:
@@ -171,11 +168,11 @@ This wrapper:
 Current practical setup for this machine:
 
 1. bootstrap the repo-local Elle checkout:
-   - `tools/bootstrap-elle`
+   - `just bootstrap-elle`
 2. build the MCP plugins when needed:
    - `env LIBCLANG_PATH=/Applications/Xcode.app/Contents/Frameworks make -C .elle mcp`
 3. start the repo wrapper:
-   - `tools/start-elle-mcp`
+   - `just start-elle-mcp`
 
 The `LIBCLANG_PATH` detail matters here because the `elle-oxigraph` plugin
 build goes through `bindgen` and needs `libclang.dylib`.
@@ -239,6 +236,6 @@ The current next implementation step is:
    [elle](/Users/randall/projects/emacs-hypervisor/elle)
    and
    [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
-3. keep the repo itself as the real Emacs home during testing
-4. keep `init.el` as thin repo-home startup glue and avoid re-growing resident Emacs wrappers
+3. keep using provisioned Emacs homes during testing
+4. keep generated `init.el` as thin startup glue and avoid re-growing resident Emacs wrappers
 5. keep using local analysis and MCP before structural changes to shared Elle modules

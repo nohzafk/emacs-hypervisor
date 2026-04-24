@@ -2,26 +2,18 @@
 
 (defn emacs-hypervisor-runtime-forms-module-loader-module []
   (defn module-path [module-spec]
-    (if (string? module-spec)
-      module-spec
-      (get module-spec :path)))
+    (or (get module-spec :path) "<embedded-module>"))
 
   (defn module-source [module-spec]
-    (if (string? module-spec)
-      (slurp module-spec)
-      (let [embedded-source (get module-spec :source)
-            path (get module-spec :path)]
-        (or embedded-source
-            (and path (slurp path))))))
+    (get module-spec :source))
 
   (defn module-forms [module-spec]
-    (and (not (string? module-spec))
-         (get module-spec :forms)))
+    (get module-spec :forms))
 
   (defn load-module-form [module-spec ready-marker]
     (let [path (or (module-path module-spec) "<embedded-module>")
           forms (module-forms module-spec)
-          source (and (nil? forms) (module-source module-spec))]
+          source (module-source module-spec)]
       (cond
        (forms
         (let [module-forms-literal (list 'quote forms)]
@@ -61,6 +53,6 @@
 
        (true
         (assert false
-                (string "expected module forms or source for " path))))))
+                (string "expected embedded module forms or source for " path))))))
 
   {:load-module-form load-module-form})

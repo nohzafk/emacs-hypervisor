@@ -68,7 +68,7 @@ Elle binary not found at:
 - $elle_bin
 
 Set ELLE_BIN to an existing Elle binary or run:
-- tools/bootstrap-elle
+- scripts/bootstrap-elle
 EOF
     exit 1
 fi
@@ -84,7 +84,7 @@ Expected one of:
 - .elle/target/debug/libelle_oxigraph.so
 
 Run:
-- tools/bootstrap-elle
+- scripts/bootstrap-elle
 
 That bootstrap flow builds the repo-local Elle binary and the MCP plugins in
 one pass.

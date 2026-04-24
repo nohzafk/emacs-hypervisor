@@ -24,14 +24,12 @@ mod embedded {
         include_str!("../../lisp/emacs-hypervisor-session-state.el");
 }
 
-use std::borrow::Cow;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::{Args, Parser, Subcommand};
-use elisp_pack::pack_file;
 use elle::config::Config;
 use elle::context::{clear_symbol_table, clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::compile_file;
@@ -154,8 +152,8 @@ const GENERATED_INIT_ELISP: &str = r#";;; init.el --- Minimal Emacs Hypervisor b
 #[command(name = "emacs-hypervisor")]
 #[command(about = "Elle-native Emacs Hypervisor host")]
 #[command(version)]
-#[command(override_usage = "emacs-hypervisor [BACKEND_FILE]
-       emacs-hypervisor serve [BACKEND_FILE]
+#[command(override_usage = "emacs-hypervisor
+       emacs-hypervisor serve
        emacs-hypervisor init [--home DIR]
        emacs-hypervisor env [--home DIR] [-o FILE]")]
 #[command(after_help = "When no subcommand is given, `emacs-hypervisor` defaults to `serve`.
@@ -166,24 +164,12 @@ Default Emacs home for `init` and `env`:
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-
-    #[arg(
-        value_name = "BACKEND_FILE",
-        help = "Elle backend file to serve instead of the embedded backend"
-    )]
-    backend: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Start the stdio Hypervisor backend
-    Serve {
-        #[arg(
-            value_name = "BACKEND_FILE",
-            help = "Elle backend file to serve instead of the embedded backend"
-        )]
-        backend: Option<String>,
-    },
+    Serve,
     /// Write the minimal Emacs bootstrap into an Emacs home
     Init(InitArgs),
     /// Write an env snapshot Lisp file for the Emacs home
@@ -241,69 +227,43 @@ fn default_elle_home_path() -> PathBuf {
     repo_root().join(".elle")
 }
 
-fn read_backend_source(backend: Option<&String>) -> (String, Cow<'static, str>) {
-    if let Some(backend_path) = backend {
-        let source = fs::read_to_string(backend_path).unwrap_or_else(|error| {
-            fail(format!(
-                "failed to read Hypervisor backend {}: {}",
-                backend_path, error
-            ))
-        });
-        (backend_path.clone(), Cow::Owned(source))
-    } else {
-        (
-            "elle/hypervisor.lisp".to_string(),
-            Cow::Borrowed(embedded::EMBEDDED_BACKEND_SOURCE),
-        )
-    }
-}
-
 struct SourceElispModule {
     env_name: &'static str,
-    source_path: &'static str,
     embedded_source: &'static str,
 }
 
 struct PackedElispModule {
     env_name: &'static str,
-    source_path: &'static str,
     embedded_forms: &'static str,
 }
 
 const SOURCE_ELISP_MODULES: &[SourceElispModule] = &[
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-report-core.el",
         embedded_source: embedded::EMBEDDED_REPORT_CORE_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-report.el",
         embedded_source: embedded::EMBEDDED_REPORT_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-declarations.el",
         embedded_source: embedded::EMBEDDED_DECLARATIONS_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-compose.el",
         embedded_source: embedded::EMBEDDED_COMPOSE_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el",
         embedded_source: embedded::EMBEDDED_ELPACA_BRIDGE_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-package-runtime.el",
         embedded_source: embedded::EMBEDDED_PACKAGE_RUNTIME_SOURCE,
     },
     SourceElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE",
-        source_path: "elle/runtime-forms/emacs-hypervisor-unit-runtime.el",
         embedded_source: embedded::EMBEDDED_UNIT_RUNTIME_SOURCE,
     },
 ];
@@ -311,33 +271,16 @@ const SOURCE_ELISP_MODULES: &[SourceElispModule] = &[
 const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
     PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS",
-        source_path: "elle/runtime-forms/emacs-hypervisor-session-base.el",
         embedded_forms: embedded::EMBEDDED_SESSION_BASE_FORMS,
     },
 ];
 
 fn install_elisp_modules() -> Result<(), String> {
-    let repo_dir = repo_root();
     for module in SOURCE_ELISP_MODULES {
-        let source_path = repo_dir.join(module.source_path);
-        let source = if source_path.exists() {
-            fs::read_to_string(&source_path)
-                .map_err(|error| format!("failed to read {}: {}", source_path.display(), error))?
-        } else {
-            module.embedded_source.to_string()
-        };
-        env::set_var(module.env_name, source);
+        env::set_var(module.env_name, module.embedded_source);
     }
     for module in PACKED_ELISP_MODULES {
-        let source_path = repo_dir.join(module.source_path);
-        let packed_forms = if source_path.exists() {
-            pack_file(&source_path)
-                .map_err(|error| format!("failed to pack {}: {}", source_path.display(), error))?
-                .forms_source
-        } else {
-            module.embedded_forms.to_string()
-        };
-        env::set_var(module.env_name, packed_forms);
+        env::set_var(module.env_name, module.embedded_forms);
     }
     Ok(())
 }
@@ -366,8 +309,8 @@ fn fail(message: impl AsRef<str>) -> ! {
     process::exit(1)
 }
 
-fn run_serve(backend: Option<String>) {
-    let (backend_display, source) = read_backend_source(backend.as_ref());
+fn run_serve() {
+    let backend_display = "elle/hypervisor.lisp";
     install_elisp_modules().unwrap_or_else(|error| fail(error));
 
     let mut config = Config::default();
@@ -384,7 +327,7 @@ fn run_serve(backend: Option<String>) {
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
 
-    let compiled = compile_file(source.as_ref(), &mut symbols, &backend_display)
+    let compiled = compile_file(embedded::EMBEDDED_BACKEND_SOURCE, &mut symbols, backend_display)
         .unwrap_or_else(|error| fail(error.to_string()));
 
     if let Err(error) = vm.execute_scheduled(&compiled.bytecode, &symbols) {
@@ -504,7 +447,7 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Serve { backend }) => run_serve(backend),
+        Some(Commands::Serve) => run_serve(),
         Some(Commands::Init(args)) => {
             let home = args
                 .home
@@ -523,6 +466,6 @@ fn main() {
                 process::exit(1);
             }
         }
-        None => run_serve(cli.backend),
+        None => run_serve(),
     }
 }

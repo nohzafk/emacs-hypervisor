@@ -64,8 +64,9 @@ PATH=/path/to/bin:$PATH emacs --init-directory /tmp/test-home
 `elisp_pack` is an internal Rust library scoped to static Elisp modules under
 `elle/runtime-forms/`.
 
-- current shipped runtime is mixed-mode: `session-base` uses packed `:forms`, the rest still embed source text
-- the generic Elle loader supports both `:forms` and `:source`
+- the shipped runtime is embedded into the host at build time
+- `session-base` uses packed `:forms`, the rest currently embed source text
+- the generic Elle loader consumes embedded module specs only
 - `lisp/` bootstrap files are not part of `elisp_pack`
 
 See `host/ELISP-PACK.md` for the design boundary and future structured-pack path.

@@ -21,15 +21,19 @@
 (def graph (emacs-hypervisor-graph-module))
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
 
-(defn emacs-hypervisor-embedded-module-spec [env-name fallback-path]
-  {:path fallback-path
-   :forms (if-let [forms-source (sys/env env-name)]
-            (read-all forms-source)
-            nil)})
+(defn emacs-hypervisor-embedded-module-spec [env-name source-path]
+  (let [forms-source (sys/env env-name)]
+    (assert forms-source
+            (string "expected embedded module forms in " env-name))
+    {:path source-path
+     :forms (read-all forms-source)}))
 
-(defn emacs-hypervisor-embedded-source-module-spec [env-name fallback-path]
-  {:path fallback-path
-   :source (sys/env env-name)})
+(defn emacs-hypervisor-embedded-source-module-spec [env-name source-path]
+  (let [source (sys/env env-name)]
+    (assert source
+            (string "expected embedded module source in " env-name))
+    {:path source-path
+     :source source}))
 
 (protocol:with-mailbox-reader
  mailbox
@@ -65,51 +69,35 @@
           report-core-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-report-core.el"))
-               "elle/runtime-forms/emacs-hypervisor-report-core.el"))
+           "elle/runtime-forms/emacs-hypervisor-report-core.el")
           report-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-report.el"))
-               "elle/runtime-forms/emacs-hypervisor-report.el"))
+           "elle/runtime-forms/emacs-hypervisor-report.el")
           declarations-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-declarations.el"))
-               "elle/runtime-forms/emacs-hypervisor-declarations.el"))
+           "elle/runtime-forms/emacs-hypervisor-declarations.el")
           compose-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-compose.el"))
-               "elle/runtime-forms/emacs-hypervisor-compose.el"))
+           "elle/runtime-forms/emacs-hypervisor-compose.el")
           session-base-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-session-base.el"))
-               "elle/runtime-forms/emacs-hypervisor-session-base.el"))
+           "elle/runtime-forms/emacs-hypervisor-session-base.el")
           elpaca-bridge-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el"))
-               "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el"))
+           "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el")
           package-runtime-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-package-runtime.el"))
-               "elle/runtime-forms/emacs-hypervisor-package-runtime.el"))
+           "elle/runtime-forms/emacs-hypervisor-package-runtime.el")
           unit-runtime-module
           (emacs-hypervisor-embedded-source-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE"
-           (or (and boot-repo-dir
-                    (string boot-repo-dir "/elle/runtime-forms/emacs-hypervisor-unit-runtime.el"))
-               "elle/runtime-forms/emacs-hypervisor-unit-runtime.el"))
+           "elle/runtime-forms/emacs-hypervisor-unit-runtime.el")
           config-file
           (or boot-config-file
               (and boot-repo-dir

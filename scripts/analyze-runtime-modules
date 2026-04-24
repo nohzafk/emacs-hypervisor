@@ -5,7 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 elle_bin=${ELLE_BIN:-"$repo_dir/.elle/target/release/elle"}
-analysis_file="$repo_dir/tools/analyze-runtime.lisp"
+analysis_file="$repo_dir/scripts/analyze-runtime.lisp"
 
 case "${1-}" in
 "") ;;
@@ -14,13 +14,13 @@ case "${1-}" in
     shift
     ;;
 *)
-    echo "usage: tools/analyze-runtime-modules [--verbose]" >&2
+    echo "usage: scripts/analyze-runtime-modules [--verbose]" >&2
     exit 64
     ;;
 esac
 
 if [ "$#" -ne 0 ]; then
-    echo "usage: tools/analyze-runtime-modules [--verbose]" >&2
+    echo "usage: scripts/analyze-runtime-modules [--verbose]" >&2
     exit 64
 fi
 
@@ -30,7 +30,7 @@ Elle binary not found at:
 - $elle_bin
 
 Set ELLE_BIN to an existing Elle binary or run:
-- tools/bootstrap-elle
+- scripts/bootstrap-elle
 EOF
     exit 1
 fi

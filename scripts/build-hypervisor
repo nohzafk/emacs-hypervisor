@@ -12,7 +12,7 @@ cargo_args=(build --offline --locked --manifest-path "$manifest_path" --release)
 
 usage() {
   cat <<USAGE
-usage: tools/build-hypervisor [--debug]
+usage: scripts/build-hypervisor [--debug]
 
 Build the native emacs-hypervisor host binary that links the repo-local Elle
 checkout at .elle.
@@ -57,7 +57,7 @@ if [ ! -f "$repo_dir/.elle/Cargo.toml" ]; then
 Missing repo-local Elle checkout at:
 - $repo_dir/.elle
 
-Run tools/bootstrap-elle first, or provide the checkout at that path.
+Run scripts/bootstrap-elle first, or provide the checkout at that path.
 EOF2
   exit 1
 fi

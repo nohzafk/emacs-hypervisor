@@ -1,7 +1,6 @@
 # Native Host Workflow
 
-`emacs-hypervisor` is the shipped native binary. The repo also keeps a small
-`bin/emacs-hypervisor` wrapper as a developer convenience for local builds.
+`emacs-hypervisor` is the shipped native binary.
 
 ## Normal Usage
 
@@ -27,7 +26,23 @@ emacs-hypervisor env
 Build the native host artifact in the repo:
 
 ```bash
-tools/build-hypervisor
+just build
+```
+
+Common repo automation lives in `justfile`.
+
+Canonical live test flow:
+
+```bash
+just live-test /tmp/test3
+```
+
+Equivalent step-by-step flow:
+
+```bash
+just build
+just reset-home /tmp/test3
+just run-emacs /tmp/test3
 ```
 
 The built artifact lives at:
@@ -37,30 +52,6 @@ The built artifact lives at:
 
 The native host runs the embedded Elle backend and embedded runtime helper
 Elisp modules.
-
-## Repo Wrapper
-
-The repo-local wrapper at `bin/emacs-hypervisor` is only for development inside
-this checkout. It forwards to the built binary under `target/`.
-
-Two environment variables shape that wrapper behavior:
-
-- `EMACS_HYPERVISOR_BUILD_MODE`
-  - `auto` (default): build the native binary if it does not exist
-  - `always`: rebuild before every launch
-  - `never`: do not build automatically
-
-- `EMACS_HYPERVISOR_DEBUG`
-  - `0` (default): use `target/release/emacs-hypervisor`
-  - `1`: use `target/debug/emacs-hypervisor`
-
-Examples:
-
-```bash
-EMACS_HYPERVISOR_BUILD_MODE=always bin/emacs-hypervisor
-EMACS_HYPERVISOR_DEBUG=1 bin/emacs-hypervisor
-EMACS_HYPERVISOR_BUILD_MODE=never bin/emacs-hypervisor
-```
 
 ## Emacs Startup
 
@@ -74,9 +65,6 @@ subprocess.
 
 Each initialized Emacs home is self-contained. Startup state, package installs,
 and local caches stay under that home.
-
-The repo-root development `init.el` still prefers the repo-local wrapper for
-convenience during local iteration.
 
 ## Init Behavior
 
