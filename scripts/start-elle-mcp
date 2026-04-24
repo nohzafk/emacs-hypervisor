@@ -94,4 +94,13 @@ fi
 
 mkdir -p "$store_dir"
 cd "$repo_dir"
+
+# oxigraph 0.4.x panics in rocksdb_wrapper when RLIMIT_NOFILE is unlimited
+# (TryFromIntError casting the soft limit to i32). Cap it if needed.
+current_nofile=$(ulimit -n 2>/dev/null || echo unlimited)
+case "$current_nofile" in
+    unlimited|*[!0-9]*) ulimit -n 10240 ;;
+    *) [ "$current_nofile" -gt 1048576 ] && ulimit -n 10240 ;;
+esac
+
 exec "$elle_bin" "$server_file" -- "$store_dir"
