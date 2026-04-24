@@ -49,7 +49,7 @@ The intended packable scope is intentionally narrow:
 - `elle/runtime-forms/emacs-hypervisor-package-runtime.el`
 - `elle/runtime-forms/emacs-hypervisor-unit-runtime.el`
 
-Files under `lisp/` are out of scope for `elisp_pack`.
+Files under `host/templates/lisp/` are out of scope for `elisp_pack`.
 
 Those bootstrap files are embedded as source text for `emacs-hypervisor init`
 because they are installed as real user files in the Emacs home directory.

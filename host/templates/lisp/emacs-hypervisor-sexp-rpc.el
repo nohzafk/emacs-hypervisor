@@ -240,30 +240,29 @@
   (unless (emacs-hypervisor--rpc-message-p message)
     (error "Unsupported non-sexp-rpc message: %S" message))
   (pcase (emacs-hypervisor--rpc-kind message)
-    (:request
-     (emacs-hypervisor--dispatch-rpc-request message))
-    (:event
-     (or (emacs-hypervisor--dispatch-rpc-event message)
-         (and (functionp emacs-hypervisor--runtime-dispatch-function)
-              (funcall emacs-hypervisor--runtime-dispatch-function message))
-         nil))
+    (:request (emacs-hypervisor--dispatch-rpc-request message))
+    (:event (emacs-hypervisor--dispatch-rpc-event message))
     (_ nil)))
 
-(defun emacs-hypervisor-sexp-rpc-filter (proc chunk)
-  "Read newline-delimited S-expression RPC messages from PROC CHUNK."
-  (let ((buffer (process-buffer proc)))
-    (with-current-buffer buffer
-      (goto-char (point-max))
-      (insert chunk)
-      (goto-char (point-min))
-      (condition-case nil
-          (while t
-            (skip-chars-forward "[:space:]")
-            (let ((message (read (current-buffer))))
-              (delete-region (point-min) (point))
-              (save-current-buffer
-                (emacs-hypervisor--dispatch message))
-              (goto-char (point-min))))
-        (end-of-file nil)))))
+(defun emacs-hypervisor--consume-input ()
+  (goto-char (point-min))
+  (let (value done)
+    (while (not done)
+      (condition-case err
+          (progn
+            (setq value (read (current-buffer)))
+            (emacs-hypervisor--dispatch value))
+        (end-of-file
+         (setq done t))
+        (error
+         (erase-buffer)
+         (signal (car err) (cdr err)))))
+    (delete-region (point-min) (point))))
+
+(defun emacs-hypervisor-sexp-rpc-filter (_proc output)
+  (with-current-buffer (get-buffer-create emacs-hypervisor--buffer-name)
+    (goto-char (point-max))
+    (insert output)
+    (emacs-hypervisor--consume-input)))
 
 (provide 'emacs-hypervisor-sexp-rpc)

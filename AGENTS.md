@@ -24,8 +24,8 @@ The current architecture reset target lives in
   - primary repo config declarations source used when provisioning a test home
 - [env](/Users/randall/projects/emacs-hypervisor/env)
   - optional env snapshot example in the same Lisp format emitted by `emacs-hypervisor env`
-- [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
-  - minimal trusted Emacs kernel: process, framing, async filter, RPC dispatch
+- [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
+  - install-time trusted Emacs kernel template: process, framing, async filter, RPC dispatch
 - [lisp/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-declarations.el)
   - `package!` and `config-unit!` declaration/export surface
 - [elle](/Users/randall/projects/emacs-hypervisor/elle)
@@ -231,7 +231,7 @@ The working rule is:
 The current next implementation step is:
 
 1. freeze the trusted Emacs kernel boundary around
-   [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
+   [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
 2. keep package/config execution policy and generated runtime forms in
    [elle](/Users/randall/projects/emacs-hypervisor/elle)
    and

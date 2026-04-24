@@ -69,7 +69,7 @@ These pieces still belong in Emacs:
 
 - [early-init.el](/Users/randall/projects/emacs-hypervisor/early-init.el)
   - ordinary user-owned early-init behavior for a provisioned Emacs home
-- [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
+- [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
   - trusted kernel
 - [lisp/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-declarations.el)
   - declaration/export surface
@@ -127,7 +127,7 @@ The current Emacs-side code should be treated like this:
 
 - [early-init.el](/Users/randall/projects/emacs-hypervisor/early-init.el)
   - keep as ordinary user-owned early-init behavior
-- [lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-bootstrap.el)
+- [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
   - keep as the trusted kernel
   - includes the async process filter, incremental S-expression parsing,
     request dispatch, and lifecycle handling

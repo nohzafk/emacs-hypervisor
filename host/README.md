@@ -67,6 +67,6 @@ PATH=/path/to/bin:$PATH emacs --init-directory /tmp/test-home
 - the shipped runtime is embedded into the host at build time
 - `session-base` uses packed `:forms`, the rest currently embed source text
 - the generic Elle loader consumes embedded module specs only
-- `lisp/` bootstrap files are not part of `elisp_pack`
+- `host/templates/lisp/` bootstrap files are not part of `elisp_pack`
 
 See `host/ELISP-PACK.md` for the design boundary and future structured-pack path.
