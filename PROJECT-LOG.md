@@ -4912,3 +4912,112 @@ The next implementation step should be:
 
 - examine whether the remaining emitted timeout/debug helpers are still worth
   keeping as part of the runtime surface
+
+
+## Milestone 62: Source-Backed Runtime Forms And Fresh-Home Startup Fix
+
+### Result
+
+This milestone succeeded.
+
+The project now keeps the static Hypervisor support Elisp under
+`elle/runtime-forms/` as source-of-truth files, loads them through a generic
+runtime module loader, and embeds `session-base` through the new host-side
+`elisp_pack` path.
+
+The fresh installed-home startup regression introduced during that refactor was
+also identified and fixed.
+
+### Decision
+
+The project should keep moving toward this split:
+
+- resident Emacs Lisp stays minimal and trusted
+- static helper/runtime Elisp lives under `elle/runtime-forms/`
+- the host binary can embed runtime helper modules for shipped use
+- repo-home and installed-home startup remain the same protocol shape
+- each initialized Emacs home remains isolated
+
+The important practical correction from this milestone is that `elisp_pack`
+itself was not the fresh-home startup bug.
+
+The real regression came from the Elpaca bridge compatibility path being loaded
+as interpreted source-backed runtime Elisp during first-time package bootstrap.
+
+### What Changed
+
+This milestone changed:
+
+- [elle/runtime-forms.lisp](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms.lisp)
+  - replaced the old file-specific runtime assembly with a generic module-loader pattern
+- [elle/runtime-forms/module-loader.lisp](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/module-loader.lisp)
+  - added a generic loader for runtime modules backed by either embedded `:forms` or source text
+- [elle/hypervisor.lisp](/Users/randall/projects/emacs-hypervisor/elle/hypervisor.lisp)
+  - switched runtime helper installation to module specs
+  - added embedded `:forms` support for `session-base`
+- [elle/runtime-forms/emacs-hypervisor-session-base.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-session-base.el)
+  - became the source-of-truth session base runtime module
+- [elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el)
+  - became the source-of-truth Elpaca bridge module
+  - fixed fresh-home queue mutation by replacing failing generalized-place accessor mutation with explicit list-slot updates for Elpaca entries
+- [elle/runtime-forms/emacs-hypervisor-package-runtime.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-package-runtime.el)
+  - became the source-of-truth package runtime module
+  - stopped forcing a default package timeout during first-time installs
+- [elle/runtime-forms/emacs-hypervisor-unit-runtime.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-unit-runtime.el)
+  - became the source-of-truth unit runtime module
+- [host/elisp_pack/src/lib.rs](/Users/randall/projects/emacs-hypervisor/host/elisp_pack/src/lib.rs)
+  - added the host-side Rust library that parses static Elisp and emits packed forms
+- [host/build.rs](/Users/randall/projects/emacs-hypervisor/host/build.rs)
+  - now packs `emacs-hypervisor-session-base.el` at build time
+- [host/src/main.rs](/Users/randall/projects/emacs-hypervisor/host/src/main.rs)
+  - now installs embedded runtime modules into the backend environment
+  - now generates installed-home bootstrap that resolves the host binary without sharing package state
+- [host/README.md](/Users/randall/projects/emacs-hypervisor/host/README.md)
+  - documented host bootstrap rules and isolated-home behavior
+- [NATIVE-HOST.md](/Users/randall/projects/emacs-hypervisor/NATIVE-HOST.md)
+  - documented the native host workflow and installed-home behavior
+
+### Why The Fresh-Home Bug Happened
+
+Fresh isolated Emacs homes forced the project to exercise the real first-time
+Elpaca bootstrap path again.
+
+That exposed a bridge bug that had been masked when startup reused an already
+populated package tree.
+
+The failure was not in the packed `session-base` module.
+
+It was in the source-backed Elpaca bridge advice path, where interpreted Elisp
+could read accessors like `elpaca<-blockers` but could not safely use the old
+mutation style for those accessors during first-time queue setup.
+
+Once that bridge path failed, the package queue start failed early and the
+Hypervisor moved on to blocked package/unit reports instead of waiting for the
+real install flow.
+
+### Verification
+
+Verified in this milestone:
+
+- host binary still builds:
+  - `tools/build-hypervisor`
+- installed-home bootstrap still initializes a fresh home:
+  - `./target/release/emacs-hypervisor init --home /tmp/test-home`
+  - `./target/release/emacs-hypervisor env --home /tmp/test-home`
+- fresh isolated-home startup no longer bails out early:
+  - `EMACS_HYPERVISOR_BIN=/Users/randall/projects/emacs-hypervisor/target/release/emacs-hypervisor emacs --init-directory=/tmp/test-home`
+- during first startup, the session now remains running while package work is still active instead of immediately falling through to the final Hypervisor report buffer
+
+Observed result:
+
+- the fresh-home session stayed in `:running` state after initial planning while
+  package installation was still in progress
+- the earlier bridge crash on package queue start was removed
+
+### Next Step
+
+The next implementation step should be:
+
+- continue moving remaining static runtime helpers toward the same source-backed
+  / embedded-module path while keeping startup behavior identical between
+  repo-home and installed-home execution
