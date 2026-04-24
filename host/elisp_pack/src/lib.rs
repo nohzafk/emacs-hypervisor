@@ -58,12 +58,139 @@ pub fn pack_source(source: &str, path: &str) -> Result<PackedModule, String> {
         forms.push(expr_from_node(child, source, path)?);
     }
 
+    let forms = forms
+        .into_iter()
+        .map(rewrite_elle_incompatible)
+        .collect::<Result<Vec<_>, _>>()?;
+
     let forms_source = forms
         .iter()
         .map(render_expr)
         .collect::<Result<Vec<_>, _>>()?
         .join("\n");
     Ok(PackedModule { forms_source })
+}
+
+/// Rewrite Emacs Lisp constructs that elle's reader cannot tokenize. Elle treats
+/// digit-prefix tokens like `1+` as `1` followed by `+`, so we rewrite
+/// `(1+ x)` into `(+ x 1)` and `(1- x)` into `(- x 1)` at pack time. Any bare
+/// appearance of `1+`/`1-` outside of call position is rejected so we notice
+/// when a new pattern sneaks in.
+fn rewrite_elle_incompatible(expr: Expr) -> Result<Expr, String> {
+    match expr {
+        Expr::List(mut items) => {
+            let head = items.first().and_then(|expr| {
+                digit_prefix_op(expr).map(|op| (op, digit_prefix_text(expr).to_string()))
+            });
+            if let Some((op, label)) = head {
+                let rest = items.split_off(1);
+                if rest.len() != 1 {
+                    return Err(format!(
+                        "expected exactly one argument for `{}`, got {}",
+                        label,
+                        rest.len()
+                    ));
+                }
+                let args = rest
+                    .into_iter()
+                    .map(rewrite_elle_incompatible)
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut rewrite = Vec::with_capacity(3);
+                rewrite.push(Expr::Raw(op.to_string()));
+                rewrite.extend(args);
+                rewrite.push(Expr::Raw("1".to_string()));
+                return Ok(Expr::List(rewrite));
+            }
+            let rewritten = items
+                .into_iter()
+                .map(rewrite_elle_incompatible)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::List(rewritten))
+        }
+        Expr::Vector(items) => Ok(Expr::Vector(
+            items
+                .into_iter()
+                .map(rewrite_elle_incompatible)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::Bytecode(items) => Ok(Expr::Bytecode(
+            items
+                .into_iter()
+                .map(rewrite_elle_incompatible)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::HashTable(items) => Ok(Expr::HashTable(
+            items
+                .into_iter()
+                .map(rewrite_elle_incompatible)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Expr::StringTextProperties { string, properties } => Ok(Expr::StringTextProperties {
+            string: Box::new(rewrite_elle_incompatible(*string)?),
+            properties: properties
+                .into_iter()
+                .map(rewrite_elle_incompatible)
+                .collect::<Result<Vec<_>, _>>()?,
+        }),
+        Expr::Quote(inner) => {
+            guard_digit_prefix(&inner, "quote")?;
+            Ok(Expr::Quote(Box::new(rewrite_elle_incompatible(*inner)?)))
+        }
+        Expr::Function(inner) => {
+            guard_digit_prefix(&inner, "function")?;
+            Ok(Expr::Function(Box::new(rewrite_elle_incompatible(*inner)?)))
+        }
+        Expr::Quasiquote(inner) => Ok(Expr::Quasiquote(Box::new(rewrite_elle_incompatible(
+            *inner,
+        )?))),
+        Expr::Unquote(inner) => Ok(Expr::Unquote(Box::new(rewrite_elle_incompatible(*inner)?))),
+        Expr::UnquoteSplicing(inner) => Ok(Expr::UnquoteSplicing(Box::new(
+            rewrite_elle_incompatible(*inner)?,
+        ))),
+        expr @ (Expr::Atom(_) | Expr::Raw(_)) => {
+            if let Some(text) = digit_prefix_text_owned(&expr) {
+                return Err(format!(
+                    "bare `{}` outside call position is not supported by elisp_pack",
+                    text
+                ));
+            }
+            Ok(expr)
+        }
+    }
+}
+
+fn digit_prefix_op(expr: &Expr) -> Option<&'static str> {
+    match digit_prefix_text(expr) {
+        "1+" => Some("+"),
+        "1-" => Some("-"),
+        _ => None,
+    }
+}
+
+fn digit_prefix_text(expr: &Expr) -> &str {
+    match expr {
+        Expr::Atom(text) | Expr::Raw(text) => text.as_str(),
+        _ => "",
+    }
+}
+
+fn digit_prefix_text_owned(expr: &Expr) -> Option<&str> {
+    let text = digit_prefix_text(expr);
+    if matches!(text, "1+" | "1-") {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn guard_digit_prefix(inner: &Expr, context: &str) -> Result<(), String> {
+    if let Some(text) = digit_prefix_text_owned(inner) {
+        return Err(format!(
+            "`{}` inside `{}` is not supported by elisp_pack",
+            text, context
+        ));
+    }
+    Ok(())
 }
 
 fn expr_from_node(node: Node<'_>, source: &str, path: &str) -> Result<Expr, String> {
@@ -383,6 +510,23 @@ mod tests {
         let packed = pack_source("[foo 1 'bar]", "<test>")
             .expect("pack should succeed");
         assert_eq!(packed.forms_source, "[foo 1 (quote bar)]");
+    }
+
+    #[test]
+    fn rewrites_digit_prefix_ops() {
+        let packed = pack_source("(seq-subseq args (1+ i)) (max 0 (1- n))", "<test>")
+            .expect("pack should succeed");
+        assert_eq!(
+            packed.forms_source,
+            "(seq-subseq args (+ i 1))\n(max 0 (- n 1))"
+        );
+    }
+
+    #[test]
+    fn rejects_bare_digit_prefix_symbol() {
+        let error = pack_source("(mapcar #'1+ xs)", "<test>")
+            .expect_err("bare #'1+ should error");
+        assert!(error.contains("1+"));
     }
 
     #[test]
