@@ -22,12 +22,8 @@ rebuild:
     just build
 
 [group('Build')]
-test-pack:
-    cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
-
-[group('Build')]
 verify:
-    just test-pack
+    just test
     just build
 
 [group('Elle')]
@@ -45,6 +41,17 @@ analyze-runtime:
 [group('Elle')]
 analyze-runtime-verbose:
     ./scripts/analyze-runtime-modules --verbose
+
+[group('Test')]
+test:
+    cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
+    ./.elle/target/debug/elle tests/elle/hypervisor-runtime.lisp
+    emacs --batch -Q \
+      -L host/templates/lisp \
+      -L elle/runtime-forms \
+      -L tests/elisp \
+      -l tests/elisp/emacs-hypervisor-bootstrap-test.el \
+      -f ert-run-tests-batch-and-exit
 
 [group('Test')]
 clean-home home="/tmp/test3":

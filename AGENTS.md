@@ -36,12 +36,12 @@ The current architecture reset target lives in
 - [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
   - split emitted runtime modules sent into Emacs at session startup
   - includes shared base state, Elpaca bridge/runtime, and unit execution helpers
-- [experiments/elle](/Users/randall/projects/emacs-hypervisor/experiments/elle)
-  - numbered Elle protocol and orchestration spikes
-- [experiments/lisp](/Users/randall/projects/emacs-hypervisor/experiments/lisp)
-  - numbered Elisp spike frontends
 - [elle/hypervisor.lisp](/Users/randall/projects/emacs-hypervisor/elle/hypervisor.lisp)
   - non-spike Elle backend entrypoint using the shared runtime modules
+- [tests/elle/hypervisor-runtime.lisp](/Users/randall/projects/emacs-hypervisor/tests/elle/hypervisor-runtime.lisp)
+  - regression coverage for boot policy, planning, and execution semantics extracted from the old spikes
+- [tests/elisp/emacs-hypervisor-bootstrap-test.el](/Users/randall/projects/emacs-hypervisor/tests/elisp/emacs-hypervisor-bootstrap-test.el)
+  - batch ERT coverage for the trusted Emacs kernel, env injection, and package runtime callbacks
 - [PROTOCOL.md](/Users/randall/projects/emacs-hypervisor/PROTOCOL.md)
   - protocol notes and current message semantics
 - [bin](/Users/randall/projects/emacs-hypervisor/bin)
@@ -50,8 +50,8 @@ The current architecture reset target lives in
     repo-root `env`
 - [scripts](/Users/randall/projects/emacs-hypervisor/scripts)
   - developer analysis programs and MCP/tooling wrappers
-- [experiments/bin](/Users/randall/projects/emacs-hypervisor/experiments/bin)
-  - spike runners
+- [experiments/README.md](/Users/randall/projects/emacs-hypervisor/experiments/README.md)
+  - archive note mapping removed spike code to the current regression coverage
 
 ## Home Environment Injection
 
@@ -95,9 +95,12 @@ For this codebase, an agent should use them in this order:
 ### Local Analysis
 
 Use local analysis first when working on shared files under
-[elle](/Users/randall/projects/emacs-hypervisor/elle). Treat
-[experiments/elle](/Users/randall/projects/emacs-hypervisor/experiments/elle)
-as historical spike snapshots unless the task is explicitly about a spike.
+[elle](/Users/randall/projects/emacs-hypervisor/elle). Historical numbered
+spikes no longer live in the repo as runnable sources; use
+[experiments/README.md](/Users/randall/projects/emacs-hypervisor/experiments/README.md)
+for the archive mapping and
+[tests/elle/hypervisor-runtime.lisp](/Users/randall/projects/emacs-hypervisor/tests/elle/hypervisor-runtime.lisp)
+for the preserved behavioral checks.
 
 Typical upstream pattern:
 
