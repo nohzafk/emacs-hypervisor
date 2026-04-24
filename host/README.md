@@ -1,0 +1,57 @@
+# Host Bootstrap Rules
+
+`host/` builds the shipped native `emacs-hypervisor` binary. The generated
+`init.el` is intentionally minimal and follows a strict bootstrap rule for
+finding the host executable.
+
+## Binary Resolution Order
+
+The generated bootstrap resolves the host binary in this order:
+
+1. prefer `EMACS_HYPERVISOR_BIN` if it is already set in Emacs's launch environment
+2. otherwise try `executable-find` on the launch environment `PATH`
+3. load the repo/home `env` file if present
+4. if still unresolved, try `EMACS_HYPERVISOR_BIN` / `PATH` again after the env file changes the environment
+5. cache the resolved absolute path and launch the subprocess with that cached path
+
+This means:
+
+- `env` is not required for bootstrap
+- if `EMACS_HYPERVISOR_BIN` is set, it wins
+- otherwise the binary only needs to be reachable from `PATH`
+- the env file may help resolution, but it is not the only bootstrap path
+
+## Why The Two-Phase Lookup Exists
+
+The generated `env` file can rewrite `PATH`, `exec-path`, and related process
+environment state inside Emacs. If bootstrap only resolved the binary after
+loading `env`, a stale or narrow env snapshot could accidentally hide a working
+`emacs-hypervisor` already present in the original launch environment.
+
+Resolving before and after env loading gives the desired behavior:
+
+- keep explicit override support via `EMACS_HYPERVISOR_BIN`
+- preserve launch-time `PATH` success when it already works
+- still allow env-driven resolution when a user intentionally provides it there
+
+## Practical Usage
+
+Installed-user flow:
+
+```bash
+emacs-hypervisor init --home ~/.config/emacs
+emacs-hypervisor env --home ~/.config/emacs
+emacs --init-directory ~/.config/emacs
+```
+
+Temporary testing with an explicit binary path:
+
+```bash
+EMACS_HYPERVISOR_BIN=/path/to/emacs-hypervisor emacs --init-directory /tmp/test-home
+```
+
+Temporary testing with `PATH` only:
+
+```bash
+PATH=/path/to/bin:$PATH emacs --init-directory /tmp/test-home
+```

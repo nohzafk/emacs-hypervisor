@@ -26,12 +26,30 @@
 (defvar emacs-hypervisor-backend-file
   (expand-file-name "elle/hypervisor.lisp" emacs-hypervisor-repo-directory))
 
+(defvar emacs-hypervisor-native-entrypoint
+  (expand-file-name "bin/emacs-hypervisor"
+                    emacs-hypervisor-repo-directory))
+
+(defvar emacs-hypervisor-native-binary
+  (expand-file-name "target/release/emacs-hypervisor"
+                    emacs-hypervisor-repo-directory))
+
 (defvar emacs-hypervisor-elle-binary
   (expand-file-name
-   (or (getenv "ELLE_BIN") ".elle/target/release/elle")
+   (or (getenv "ELLE_BIN")
+       (and (file-exists-p emacs-hypervisor-native-entrypoint)
+            "bin/emacs-hypervisor")
+       ".elle/target/release/elle")
    emacs-hypervisor-repo-directory))
 
 (defvar emacs-hypervisor-open-buffer-on-abnormal-exit t)
+
+(defun emacs-hypervisor-start-command ()
+  "Return the backend subprocess command for the current configuration."
+  (if (string= emacs-hypervisor-elle-binary
+               emacs-hypervisor-native-entrypoint)
+      (list emacs-hypervisor-elle-binary)
+    (list emacs-hypervisor-elle-binary emacs-hypervisor-backend-file)))
 
 (setq default-directory emacs-hypervisor-repo-directory)
 (setq user-emacs-directory
@@ -80,7 +98,7 @@
                 (message "[Hypervisor] session complete: %s"
                          (or (plist-get status :shutdown) :ok)))))))
   (emacs-hypervisor-start
-   (list emacs-hypervisor-elle-binary emacs-hypervisor-backend-file)
+   (emacs-hypervisor-start-command)
    "emacs-hypervisor-init"))
 
 (emacs-hypervisor-start-repo-session)

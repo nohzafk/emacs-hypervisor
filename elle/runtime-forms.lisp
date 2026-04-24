@@ -18,17 +18,17 @@
       ()
       (append (first lists) (append-all (rest lists)))))
 
-  (defn install-config-surface-form [report-core-source-path report-source-path declarations-source-path compose-source-path]
+  (defn install-config-surface-form [report-core-source-spec report-source-spec declarations-source-spec compose-source-spec]
     (append-all
      (list
       '(progn)
       (base:prelude-forms)
-      (source-loader:load-source-form report-core-source-path :emacs-hypervisor-report-core-ready)
-      (source-loader:load-source-form report-source-path :emacs-hypervisor-report-ready)
+      (source-loader:load-source-form report-core-source-spec :emacs-hypervisor-report-core-ready)
+      (source-loader:load-source-form report-source-spec :emacs-hypervisor-report-ready)
       '((emacs-hypervisor-report-reset)
         (emacs-hypervisor-report-session-started))
-      (source-loader:load-source-form declarations-source-path :emacs-hypervisor-config-surface-ready)
-      (source-loader:load-source-form compose-source-path :emacs-hypervisor-compose-ready)
+      (source-loader:load-source-form declarations-source-spec :emacs-hypervisor-config-surface-ready)
+      (source-loader:load-source-form compose-source-spec :emacs-hypervisor-compose-ready)
       '(:emacs-hypervisor-config-surface-ready))))
 
   (defn install-session-helpers-form []

@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+manifest_path="$repo_dir/host/Cargo.toml"
+lock_path="$repo_dir/host/Cargo.lock"
+seed_lock_path="$repo_dir/.elle/Cargo.lock"
+target_dir=${CARGO_TARGET_DIR:-"$repo_dir/target"}
+profile=release
+cargo_args=(build --offline --locked --manifest-path "$manifest_path" --release)
+
+usage() {
+  cat <<USAGE
+usage: tools/build-hypervisor [--debug]
+
+Build the native emacs-hypervisor host binary that links the repo-local Elle
+checkout at .elle.
+
+Artifacts:
+- $target_dir/release/emacs-hypervisor
+- $target_dir/debug/emacs-hypervisor (with --debug)
+
+Notes:
+- builds offline against the checked-in host lockfile
+- if host/Cargo.lock is missing, it is seeded from .elle/Cargo.lock
+
+Environment overrides:
+- CARGO_TARGET_DIR  cargo target directory (default: $repo_dir/target)
+USAGE
+}
+
+case "${1-}" in
+  "")
+    ;;
+  --debug)
+    profile=debug
+    cargo_args=(build --offline --locked --manifest-path "$manifest_path")
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo is required but was not found in PATH" >&2
+  exit 1
+fi
+
+if [ ! -f "$repo_dir/.elle/Cargo.toml" ]; then
+  cat >&2 <<EOF2
+Missing repo-local Elle checkout at:
+- $repo_dir/.elle
+
+Run tools/bootstrap-elle first, or provide the checkout at that path.
+EOF2
+  exit 1
+fi
+
+if [ ! -f "$lock_path" ]; then
+  if [ ! -f "$seed_lock_path" ]; then
+    cat >&2 <<EOF2
+Missing lockfiles:
+- $lock_path
+- $seed_lock_path
+EOF2
+    exit 1
+  fi
+  cp "$seed_lock_path" "$lock_path"
+fi
+
+echo "Building emacs-hypervisor ($profile)"
+CARGO_TARGET_DIR="$target_dir" cargo "${cargo_args[@]}"
+
+echo
+printf 'Built binary: %s/%s/emacs-hypervisor\n' "$target_dir" "$profile"

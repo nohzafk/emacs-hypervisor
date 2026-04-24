@@ -21,6 +21,10 @@
 (def graph (emacs-hypervisor-graph-module))
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
 
+(defn emacs-hypervisor-embedded-source-spec [env-name fallback-path]
+  {:path fallback-path
+   :source (sys/env env-name)})
+
 (protocol:with-mailbox-reader
  mailbox
  (fn []
@@ -52,22 +56,30 @@
            :repo-dir boot-repo-dir
            & _boot-context}
           boot-context
-          report-core-file
-          (or (and boot-repo-dir
-                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report-core.el"))
-              "elle/source-elisp/emacs-hypervisor-report-core.el")
-          report-file
-          (or (and boot-repo-dir
-                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report.el"))
-              "elle/source-elisp/emacs-hypervisor-report.el")
-          declarations-file
-          (or (and boot-repo-dir
-                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-declarations.el"))
-              "elle/source-elisp/emacs-hypervisor-declarations.el")
-          compose-file
-          (or (and boot-repo-dir
-                   (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-compose.el"))
-              "elle/source-elisp/emacs-hypervisor-compose.el")
+          report-core-source
+          (emacs-hypervisor-embedded-source-spec
+           "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE"
+           (or (and boot-repo-dir
+                    (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report-core.el"))
+               "elle/source-elisp/emacs-hypervisor-report-core.el"))
+          report-source
+          (emacs-hypervisor-embedded-source-spec
+           "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE"
+           (or (and boot-repo-dir
+                    (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-report.el"))
+               "elle/source-elisp/emacs-hypervisor-report.el"))
+          declarations-source
+          (emacs-hypervisor-embedded-source-spec
+           "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE"
+           (or (and boot-repo-dir
+                    (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-declarations.el"))
+               "elle/source-elisp/emacs-hypervisor-declarations.el"))
+          compose-source
+          (emacs-hypervisor-embedded-source-spec
+           "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE"
+           (or (and boot-repo-dir
+                    (string boot-repo-dir "/elle/source-elisp/emacs-hypervisor-compose.el"))
+               "elle/source-elisp/emacs-hypervisor-compose.el"))
           config-file
           (or boot-config-file
               (and boot-repo-dir
@@ -95,7 +107,7 @@
       3
       :eval
       (benchmark:eval-payload
-       `(:form ,(runtime-forms:install-config-surface-form report-core-file report-file declarations-file compose-file)
+       `(:form ,(runtime-forms:install-config-surface-form report-core-source report-source declarations-source compose-source)
          :metric-name :install-config-surface
          :metric-kind :runtime-setup
          :phase :startup)))
@@ -133,8 +145,11 @@
      (let* [session-data-response (protocol:await-response mailbox 5)
             _ (assert (protocol:response-ok? session-data-response)
                       "expected successful :session-data response")
-            {:packages packages :units units :env env}
+            {:packages raw-packages :units raw-units :env raw-env}
             (protocol:from-wire (protocol:message-payload session-data-response))
+            packages (or raw-packages ())
+            units (or raw-units ())
+            env (or raw-env ())
             session-analysis-started-at (clock/monotonic)
             {:reports planned-package-reports}
             (benchmark:measure
