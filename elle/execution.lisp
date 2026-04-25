@@ -488,6 +488,12 @@
      :executed
      (unit-execution-details entry)))
 
+  (defn unit-run-form [entry]
+    `(emacs-hypervisor-runtime-run-unit
+      ,(graph:entry-name entry)
+      ,(list 'quote (graph:entry-field entry :body))
+      ,(list 'quote (graph:entry-field entry :requires))))
+
   (defn execute-unit-entry-state
       [name entry package-reports executed-unit-reports current-id]
     (let [package-blockers
@@ -511,10 +517,7 @@
          (let [result
                (eval-form
                 current-id
-                `(emacs-hypervisor-runtime-run-unit
-                  ,name
-                  ,(graph:entry-field entry :body)
-                  ',(graph:entry-field entry :requires))
+                (unit-run-form entry)
                 :run-unit
                 :unit
                 :units

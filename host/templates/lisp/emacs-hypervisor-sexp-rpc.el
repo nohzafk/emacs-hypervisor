@@ -23,12 +23,17 @@
 (declare-function emacs-hypervisor-benchmark-enabled-p "emacs-hypervisor-session-state")
 
 (defun emacs-hypervisor--sexp-string (value)
-  "Serialize VALUE as a reader-compatible single-line S-expression."
+  "Serialize VALUE as a reader-compatible single-line S-expression.
+
+`print-quoted' is bound to nil so that `(quote x)' and `(function x)'
+are emitted in their explicit list forms rather than the reader
+shortcuts `'x' and `#'x', which elle's reader does not accept."
   (let ((print-level nil)
         (print-length nil)
         (print-escape-newlines t)
         (print-escape-control-characters t)
-        (print-circle nil))
+        (print-circle nil)
+        (print-quoted nil))
     (prin1-to-string value)))
 
 (defun emacs-hypervisor-send (message)

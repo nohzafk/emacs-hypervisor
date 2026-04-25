@@ -9,6 +9,7 @@
 (defvar elpaca--post-queues-hook nil)
 (defvar emacs-hypervisor-installed-packages nil)
 (defvar emacs-hypervisor-execution-events nil)
+(defvar emacs-hypervisor-test-runtime-value nil)
 
 (defun emacs-hypervisor-elpaca-bootstrap ()
   t)
@@ -38,6 +39,8 @@
   :processed)
 
 (require 'emacs-hypervisor-package-runtime)
+(require 'emacs-hypervisor-declarations)
+(require 'emacs-hypervisor-unit-runtime)
 
 (defun emacs-hypervisor-test--request (id op &optional payload)
   `(:rpc
@@ -55,6 +58,136 @@
     :kind :event
     :topic ,topic
     :payload ,payload))
+
+(ert-deftest emacs-hypervisor-config-unit-export-preserves-structured-body ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! vector-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value
+          [["Open" ("a" "window" ignore)]
+           ["Tabs" ("[" "prev tab" ignore) ("]" "next tab" ignore)]]))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal (plist-get unit :name) "vector-unit"))
+    (should-not (stringp body))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            [["Open" ("a" "window" ignore)]
+                             ["Tabs" ("[" "prev tab" ignore)
+                              ("]" "next tab" ignore)]])
+                      t)))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-reader-hostile-ops ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! increment-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value
+          [(1+ emacs-hypervisor-test-runtime-value)]))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            [(+ emacs-hypervisor-test-runtime-value 1)])
+                      t)))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-backquote ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! backquote-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value
+          `("Hypervisor" . ,emacs-hypervisor-test-runtime-value)))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            (cons "Hypervisor"
+                                  emacs-hypervisor-test-runtime-value))
+                      t)))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-empty-brace-symbol ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! empty-brace-symbol-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value '{}))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            (intern "{}"))
+                      t)))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-lowers-quoted-reader-hostile-data ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! quoted-reader-hostile-data-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value
+          '(foo {} 1+ (bar . 1-) [1+ {}])))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            (list (quote foo)
+                                  (intern "{}")
+                                  (intern "1+")
+                                  (cons (quote bar) (intern "1-"))
+                                  (vector (intern "1+") (intern "{}"))))
+                      t)))
+    (eval body)
+    (should (equal emacs-hypervisor-test-runtime-value
+                   (list 'foo
+                         (intern "{}")
+                         (intern "1+")
+                         (cons 'bar (intern "1-"))
+                         (vector (intern "1+") (intern "{}")))))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-reader-hostile-function-quote ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! reader-hostile-function-quote-unit
+    :config
+    (setq emacs-hypervisor-test-runtime-value
+          (mapcar #'1+ '(1 2))))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body)))
+    (should (equal body
+                   '(progn
+                      (setq emacs-hypervisor-test-runtime-value
+                            (mapcar (symbol-function (intern "1+"))
+                                    (list 1 2)))
+                      t)))
+    (eval body)
+    (should (equal emacs-hypervisor-test-runtime-value '(2 3)))))
+
+(ert-deftest emacs-hypervisor-config-unit-export-rejects-bare-reader-hostile-symbols ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! bare-reader-hostile-symbol
+    :config
+    (setq emacs-hypervisor-test-runtime-value 1+))
+  (should-error (emacs-hypervisor-export-config-units) :type 'error))
+
+(ert-deftest emacs-hypervisor-runtime-run-unit-evals-structured-body ()
+  (setq emacs-hypervisor-test-runtime-value nil)
+  (setq emacs-hypervisor-execution-events nil)
+  (let ((result
+         (emacs-hypervisor-runtime-run-unit
+          "structured-unit"
+          '(progn
+             (setq emacs-hypervisor-test-runtime-value
+                   [["Open" ("a" "window" ignore)]
+                    ["Tabs" ("[" "prev tab" ignore)
+                     ("]" "next tab" ignore)]])
+             :ok))))
+    (should (eq result :ok))
+    (should (equal emacs-hypervisor-test-runtime-value
+                   [["Open" ("a" "window" ignore)]
+                    ["Tabs" ("[" "prev tab" ignore)
+                     ("]" "next tab" ignore)]]))
+    (should (member '(:phase :units :event :success :name "structured-unit")
+                    emacs-hypervisor-execution-events))))
 
 (ert-deftest emacs-hypervisor-load-envvars-file-updates-runtime-environment ()
   (let* ((path-dir "/tmp/emacs-hypervisor-test-bin")

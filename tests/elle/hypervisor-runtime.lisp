@@ -10,12 +10,14 @@
 ## - unit execution failure propagation
 
 (include-file "../../elle/graph.lisp")
+(include-file "../../elle/protocol.lisp")
 (include-file "../../elle/preflight.lisp")
 (include-file "../../elle/boot-policy.lisp")
 (include-file "../../elle/planning.lisp")
 (include-file "../../elle/execution.lisp")
 
 (def graph (emacs-hypervisor-graph-module))
+(def wire-protocol (emacs-hypervisor-protocol-module))
 
 (def @stub-sent-events @[])
 (def @stub-sent-requests @[])
@@ -97,55 +99,55 @@
     :after (list "core-ui-unit")
     :env (list)
     :executable (list)
-    :body "(progn :ui-ok)"}
+    :body '(progn :ui-ok)}
    {:name "after-runtime-fail-unit"
     :requires (list)
     :after (list "runtime-fail-unit")
     :env (list)
     :executable (list)
-    :body "(progn :after-fail-ok)"}
+    :body '(progn :after-fail-ok)}
    {:name "core-ui-unit"
     :requires (list "core-pkg")
     :after (list)
     :env (list)
     :executable (list)
-    :body "(progn :core-ok)"}
+    :body '(progn :core-ok)}
    {:name "blocked-by-invalid-package-unit"
     :requires (list "invalid-root")
     :after (list)
     :env (list)
     :executable (list)
-    :body "(progn :blocked-invalid-ok)"}
+    :body '(progn :blocked-invalid-ok)}
    {:name "blocked-by-runtime-package-unit"
     :requires (list "runtime-fail-pkg")
     :after (list)
     :env (list)
     :executable (list)
-    :body "(progn :blocked-ok)"}
+    :body '(progn :blocked-ok)}
    {:name "invalid-after-unit"
     :requires (list)
     :after (list "ghost-unit")
     :env (list)
     :executable (list)
-    :body "(progn :invalid-ok)"}
+    :body '(progn :invalid-ok)}
    {:name "independent-unit"
     :requires (list)
     :after (list)
     :env (list)
     :executable (list)
-    :body "(progn :independent-ok)"}
+    :body '(progn :independent-ok)}
    {:name "runtime-fail-unit"
     :requires (list)
     :after (list)
     :env (list)
     :executable (list)
-    :body "(error \"simulated unit failure\")"}
+    :body '(error "simulated unit failure")}
    {:name "preflight-bad-unit"
     :requires (list)
     :after (list)
     :env (list "HYPERVISOR_MISSING_ENV")
     :executable (list "definitely-not-installed-command")
-    :body "(progn :preflight-ok)"}))
+    :body '(progn :preflight-ok)}))
 
 (def env
   (list
@@ -156,6 +158,66 @@
 (def executable-reports
   (list
    {:name "preflight-bad-unit" :missing (list "definitely-not-installed-command")}))
+
+# ============================================================================
+# 0. Protocol printing preserves nested arrays as recursive s-expressions.
+# ============================================================================
+
+(assert
+ (= (wire-protocol:sexp-string ["Open" ["a" "window"]])
+    "[\"Open\" [\"a\" \"window\"]]")
+ "protocol prints immutable arrays recursively")
+(assert
+ (= (wire-protocol:sexp-string @["Tabs" "[" "]"])
+    "[\"Tabs\" \"[\" \"]\"]")
+ "protocol prints mutable arrays recursively")
+(assert
+ (= (wire-protocol:sexp-string
+     (wire-protocol:to-wire
+      (wire-protocol:from-wire
+       [(quote (:name "unit")) ["Open" "a"]])))
+    "[(:name \"unit\") [\"Open\" \"a\"]]")
+ "protocol converts nested arrays through from-wire/to-wire")
+(let* [decoded
+       (wire-protocol:from-wire-session-data
+        (quote
+         (:packages ((:name "pkg"
+                      :deps ()
+                      :repo "example/pkg"
+                      :host nil
+                      :branch nil
+                      :tag nil
+                      :ref nil
+                      :files nil
+                      :local nil
+                      :no-compilation nil))
+          :units ((:name "plist-unit"
+                   :requires ("pkg")
+                   :after ()
+                   :env ()
+                   :executable ()
+                   :body (progn
+                           (setq x (quote (:a 1 :b 2)))
+                           t)))
+          :env ((:name "PATH" :value "/usr/bin")))))
+       unit (first (get decoded :units))
+       package (first (get decoded :packages))
+       env-entry (first (get decoded :env))
+       body (get unit :body)]
+  (assert (= (get package :name) "pkg") "session decoder decodes packages")
+  (assert (= (get env-entry :value) "/usr/bin") "session decoder decodes env")
+  (assert (= (get unit :requires) (list "pkg")) "session decoder decodes unit metadata")
+  (assert
+   (= body
+      '(progn
+         (setq x (quote (:a 1 :b 2)))
+         t))
+   "session decoder preserves raw unit body")
+  (assert
+   (= (wire-protocol:sexp-string body)
+      "(progn (setq x (quote (:a 1 :b 2))) t)")
+   "session decoder does not struct-convert plist literals inside body"))
+(println "  0. protocol arrays and session decoding: ok")
 
 # ============================================================================
 # 1. Boot policy preserves invalid, blocked, and preflight detail shapes.

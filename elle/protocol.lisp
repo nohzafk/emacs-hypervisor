@@ -52,6 +52,8 @@
                   value)]
       (case (type-of value)
         :list (string "(" (string/join (map sexp-string value) " ") ")")
+        :array (string "[" (string/join (map sexp-string value) " ") "]")
+        :@array (string "[" (string/join (map sexp-string value) " ") "]")
         :string (json/serialize value)
         :keyword (string ":" (string value))
         :symbol (string value)
@@ -87,13 +89,46 @@
         (from-wire v)))
       (_ {})))
 
+  (defn raw-wire-field? [raw-keys key]
+    (any? (fn [raw-key] (= raw-key key)) raw-keys))
+
+  (defn from-wire-plist-preserving [xs raw-keys]
+    (match xs
+      (() {})
+      ((k v & rest)
+       (put
+        (from-wire-plist-preserving rest raw-keys)
+        k
+        (if (raw-wire-field? raw-keys k)
+          v
+          (from-wire v))))
+      (_ {})))
+
   (defn from-wire [value]
     (case (type-of value)
       :list
       (if (plist-like? value)
         (from-wire-plist value)
         (map from-wire value))
+      :array (->array (map from-wire value))
+      :@array (thaw (->array (map from-wire value)))
       value))
+
+  (defn wire-field [value key]
+    (case (type-of value)
+      :struct (get value key)
+      :@struct (get value key)
+      (plist-get value key)))
+
+  (defn from-wire-unit-entry [entry]
+    (case (type-of entry)
+      :list (from-wire-plist-preserving entry (list :body))
+      entry))
+
+  (defn from-wire-session-data [payload]
+    {:packages (map from-wire (or (wire-field payload :packages) ()))
+     :units (map from-wire-unit-entry (or (wire-field payload :units) ()))
+     :env (map from-wire (or (wire-field payload :env) ()))})
 
   (defn to-wire-struct [value]
     (reduce
@@ -107,6 +142,8 @@
       :struct (to-wire-struct value)
       :@struct (to-wire-struct value)
       :list (map to-wire value)
+      :array (->array (map to-wire value))
+      :@array (thaw (->array (map to-wire value)))
       value))
 
   (defn message-body [message]
@@ -322,6 +359,7 @@
    :expect-message-kind expect-message-kind
    :expect-request-op expect-request-op
    :from-wire from-wire
+   :from-wire-session-data from-wire-session-data
    :make-mailbox make-mailbox
    :make-envelope make-envelope
    :make-error-response make-error-response

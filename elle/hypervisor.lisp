@@ -157,7 +157,8 @@
             _ (assert (protocol:response-ok? session-data-response)
                       "expected successful :session-data response")
             {:packages raw-packages :units raw-units :env raw-env}
-            (protocol:from-wire (protocol:message-payload session-data-response))
+            (protocol:from-wire-session-data
+             (protocol:message-payload session-data-response))
             packages (or raw-packages ())
             units (or raw-units ())
             env (or raw-env ())

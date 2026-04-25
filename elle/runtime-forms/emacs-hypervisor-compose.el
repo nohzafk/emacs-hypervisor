@@ -105,7 +105,7 @@
      (t
       (condition-case err
           (progn
-            (eval (read (emacs-hypervisor--unit-body entry)))
+            (eval (emacs-hypervisor--unit-body entry))
             (emacs-hypervisor--make-soft-reload-report
              name :ok :reloaded
              (list :requires (emacs-hypervisor--unit-requires entry)
