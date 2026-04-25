@@ -36,14 +36,25 @@ Resolving before and after env loading gives the desired behavior:
 - preserve launch-time `PATH` success when it already works
 - still allow env-driven resolution when a user intentionally provides it there
 
-## Practical Usage
+## Host Commands
 
-Installed-user flow:
+Installed-user bootstrap:
 
 ```bash
 emacs-hypervisor init --home ~/.config/emacs
 emacs-hypervisor env --home ~/.config/emacs
 emacs --init-directory ~/.config/emacs
+```
+
+Direct Emacs kernel tests:
+
+```bash
+emacs --batch -Q \
+  -L host/emacs-kernel \
+  -L elle/runtime-forms \
+  -L tests/elisp \
+  -l tests/elisp/emacs-hypervisor-bootstrap-test.el \
+  -f ert-run-tests-batch-and-exit
 ```
 
 Each generated Emacs home is isolated. Runtime state, package installs, and

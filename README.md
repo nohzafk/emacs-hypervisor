@@ -233,6 +233,20 @@ just home-live-test
 Use `just analyze-runtime` after changes to shared Elle modules. Use a
 provisioned Emacs home for live startup tests.
 
+Repo-local live test home:
+
+```bash
+just build
+just home-reset
+just home-run
+```
+
+One-shot repo-local live test:
+
+```bash
+just home-live-test
+```
+
 ## Related Docs
 
 - `PROTOCOL.md` documents `sexp-rpc` message shape and failure payloads.

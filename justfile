@@ -3,7 +3,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 test_home := justfile_directory() + "/.test-home"
 hypervisor_binary := justfile_directory() + "/target/release/emacs-hypervisor"
 
-[group('Meta')]
+[group('Default')]
 default:
     @just --list
 
@@ -20,11 +20,6 @@ clean:
     rm -rf target host/target host/elisp_pack/target
 
 [group('Build')]
-rebuild:
-    just clean
-    just build
-
-[group('Build')]
 verify:
     just test
     just build
@@ -36,14 +31,6 @@ bootstrap-elle:
 [group('Elle')]
 start-elle-mcp:
     ./scripts/start-elle-mcp
-
-[group('Elle')]
-analyze-runtime:
-    ./scripts/analyze-runtime-modules
-
-[group('Elle')]
-analyze-runtime-verbose:
-    ./scripts/analyze-runtime-modules --verbose
 
 [group('Test')]
 test:
@@ -57,17 +44,17 @@ test:
       -f ert-run-tests-batch-and-exit
 
 [group('Emacs')]
-home-reset path=test_home:
+emacs-home-reset path=test_home:
     rm -rf "{{path}}"
     ./target/release/emacs-hypervisor init --home "{{path}}"
     cp early-init.el config.el "{{path}}"
 
 [group('Emacs')]
-home-run path=test_home binary=hypervisor_binary:
+emacs-home-run path=test_home binary=hypervisor_binary:
     EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
 
 [group('Emacs')]
-home-live-test path=test_home binary=hypervisor_binary:
+emacs-home-live-test path=test_home binary=hypervisor_binary:
     just build
-    just home-reset "{{path}}"
-    just home-run "{{path}}" "{{binary}}"
+    just emacs-home-reset "{{path}}"
+    just emacs-home-run "{{path}}" "{{binary}}"
