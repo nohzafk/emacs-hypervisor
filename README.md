@@ -226,7 +226,7 @@ and failed units, and includes per-unit cleanup details.
 just test
 just analyze-runtime
 just build
-just home live /tmp/test3
+just home-live-test
 ```
 
 Use `just analyze-runtime` after changes to shared Elle modules. Use a

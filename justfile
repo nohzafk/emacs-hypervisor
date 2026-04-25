@@ -1,5 +1,8 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+test_home := justfile_directory() + "/.test-home"
+hypervisor_binary := justfile_directory() + "/target/release/emacs-hypervisor"
+
 [group('Meta')]
 default:
     @just --list
@@ -54,37 +57,17 @@ test:
       -f ert-run-tests-batch-and-exit
 
 [group('Emacs')]
-home action="live" path="/tmp/test3" binary=(justfile_directory() + "/target/release/emacs-hypervisor"):
-    #!/usr/bin/env bash
-    set -euo pipefail
+home-reset path=test_home:
+    rm -rf "{{path}}"
+    ./target/release/emacs-hypervisor init --home "{{path}}"
+    cp early-init.el config.el "{{path}}"
 
-    case "{{action}}" in
-      clean)
-        rm -rf "{{path}}"
-        ;;
-      init)
-        ./target/release/emacs-hypervisor init --home "{{path}}"
-        ;;
-      env)
-        ./target/release/emacs-hypervisor env --home "{{path}}"
-        ;;
-      reset)
-        rm -rf "{{path}}"
-        ./target/release/emacs-hypervisor init --home "{{path}}"
-        ;;
-      run)
-        EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
-        ;;
-      live)
-        just build
-        rm -rf "{{path}}"
-        ./target/release/emacs-hypervisor init --home "{{path}}"
-        cp early-init.el config.el "{{path}}"
-        EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
-        ;;
-      *)
-        printf 'unknown home action: %s\n' "{{action}}" >&2
-        printf 'expected one of: clean, init, env, reset, run, live\n' >&2
-        exit 64
-        ;;
-    esac
+[group('Emacs')]
+home-run path=test_home binary=hypervisor_binary:
+    EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
+
+[group('Emacs')]
+home-live-test path=test_home binary=hypervisor_binary:
+    just build
+    just home-reset "{{path}}"
+    just home-run "{{path}}" "{{binary}}"

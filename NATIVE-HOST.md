@@ -30,19 +30,20 @@ just build
 ```
 
 Common repo automation lives in `justfile`.
+By default, the home recipes use the ignored repo-local `.test-home` directory.
 
 Canonical live test flow:
 
 ```bash
-just home live /tmp/test3
+just home-live-test
 ```
 
 Equivalent step-by-step flow:
 
 ```bash
 just build
-just home reset /tmp/test3
-just home run /tmp/test3
+just home-reset
+just home-run
 ```
 
 The built artifact lives at:
