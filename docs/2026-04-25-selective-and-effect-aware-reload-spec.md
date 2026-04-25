@@ -168,8 +168,8 @@ Unsupported effect shape:
 
 The first recognizer should only support literal global hooks and literal
 advice targets. It should not try to clean up local hooks, computed hook names,
-computed advice targets, anonymous closures, timers, processes, or package
-manager side effects.
+computed advice targets, lambdas hidden inside computed expressions, timers,
+processes, or package manager side effects.
 
 ### Reload Report
 
@@ -292,8 +292,16 @@ Cleanup:
 (advice-remove 'TARGET FUNCTION)
 ```
 
-`FUNCTION` should be a symbol or function-quoted symbol in the MVP. Other
-function shapes should be reported as opaque.
+`FUNCTION` may be a symbol, function-quoted symbol, anonymous `(lambda ...)`,
+or anonymous `#'(lambda ...)` in the supported positions above.
+
+Anonymous lambdas are rewritten inside the `config-unit!` body to a generated
+internal function name before the effect is installed. The generated name is
+derived from the unit name, effect kind, target hook/advice symbol, and a hash
+of the lambda form. Cleanup derives the same name from the previous unit body,
+then removes the hook or advice by symbol.
+
+Other function shapes should be reported as opaque.
 
 ## 5) Authorization And Permissions
 
@@ -348,6 +356,8 @@ Required tests:
 - removed unit is not evaluated
 - previous `add-hook` effect is cleaned before changed unit is applied
 - previous `advice-add` effect is cleaned before changed unit is applied
+- previous anonymous `add-hook` lambda is cleaned by generated function name
+- previous anonymous `advice-add` lambda is cleaned by generated function name
 - unsupported previous effect is reported as opaque
 - pending new package still skips dependent units
 - `:after` ordering still blocks units when dependencies fail

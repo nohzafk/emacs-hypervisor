@@ -48,7 +48,9 @@
   (copy-sequence (plist-get entry :executable)))
 
 (defun emacs-hypervisor--unit-body (entry)
-  (plist-get entry :body))
+  (plist-get
+   (emacs-hypervisor-effect-aware-reload-normalize-entry entry)
+   :body))
 
 (defun emacs-hypervisor--missing-env (entry)
   (cl-loop for name in (emacs-hypervisor--unit-env entry)

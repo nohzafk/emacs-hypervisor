@@ -1,6 +1,41 @@
 ;;; emacs-hypervisor-effect-aware-reload.el --- Reload effect cleanup -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'subr-x)
+
+(defconst emacs-hypervisor-effect-aware-reload--generated-prefix
+  "emacs-hypervisor--generated-")
+
+(defun emacs-hypervisor-effect-aware-reload--safe-name-component (value)
+  (let* ((raw (cond
+               ((symbolp value) (symbol-name value))
+               ((stringp value) value)
+               (t (format "%S" value))))
+         (safe (replace-regexp-in-string "[^[:alnum:]_-]+" "-" raw)))
+    (if (string-empty-p safe) "anonymous" safe)))
+
+(defun emacs-hypervisor-effect-aware-reload--hash-form (form)
+  (substring
+   (secure-hash
+    'sha1
+    (let ((print-circle t)
+          (print-level nil)
+          (print-length nil))
+      (prin1-to-string form)))
+   0
+   10))
+
+(defun emacs-hypervisor-effect-aware-reload--lambda-ref-form (form)
+  (cond
+   ((and (consp form) (eq (car form) 'lambda))
+    form)
+   ((and (consp form)
+         (eq (car form) 'function)
+         (consp (cadr form))
+         (eq (caadr form) 'lambda)
+         (null (cddr form)))
+    (cadr form))
+   (t nil)))
 
 (defun emacs-hypervisor-effect-aware-reload--literal-symbol-ref-p (form)
   (or (and form (symbolp form))
@@ -16,6 +51,146 @@
        (cadr form)
        (symbolp (cadr form))
        (null (cddr form))))
+
+(defun emacs-hypervisor-effect-aware-reload--quoted-symbol-name (form)
+  (symbol-name (cadr form)))
+
+(defun emacs-hypervisor-effect-aware-reload--generated-function-symbol
+    (unit-name effect-kind target-name function-form)
+  (intern
+   (format
+    "%s%s-%s-%s-%s"
+    emacs-hypervisor-effect-aware-reload--generated-prefix
+    (emacs-hypervisor-effect-aware-reload--safe-name-component unit-name)
+    (emacs-hypervisor-effect-aware-reload--safe-name-component effect-kind)
+    (emacs-hypervisor-effect-aware-reload--safe-name-component target-name)
+    (emacs-hypervisor-effect-aware-reload--hash-form
+     (list :unit unit-name
+           :effect effect-kind
+           :target target-name
+           :function function-form)))))
+
+(defun emacs-hypervisor-effect-aware-reload--generated-function-symbol-p (symbol)
+  (and (symbolp symbol)
+       (string-prefix-p
+        emacs-hypervisor-effect-aware-reload--generated-prefix
+        (symbol-name symbol))))
+
+(defun emacs-hypervisor-effect-aware-reload--generated-defalias-form-p (form)
+  (and (consp form)
+       (eq (car form) 'defalias)
+       (= (length form) 3)
+       (emacs-hypervisor-effect-aware-reload--quoted-symbol-ref-p (nth 1 form))
+       (emacs-hypervisor-effect-aware-reload--generated-function-symbol-p
+        (cadr (nth 1 form)))))
+
+(defun emacs-hypervisor-effect-aware-reload--generated-defalias-cleanup-form
+    (form)
+  (let ((symbol (cadr (nth 1 form))))
+    `(when (fboundp ',symbol)
+       (fmakunbound ',symbol))))
+
+(defun emacs-hypervisor-effect-aware-reload--normalize-hook-form
+    (unit-name form)
+  (let ((lambda-form
+         (and (consp form)
+              (eq (car form) 'add-hook)
+              (memq (length form) '(3 4 5))
+              (emacs-hypervisor-effect-aware-reload--quoted-symbol-ref-p
+               (nth 1 form))
+              (or (< (length form) 5)
+                  (null (nth 4 form)))
+              (emacs-hypervisor-effect-aware-reload--lambda-ref-form
+               (nth 2 form)))))
+    (if lambda-form
+        (let* ((target
+                (emacs-hypervisor-effect-aware-reload--quoted-symbol-name
+                 (nth 1 form)))
+               (symbol
+                (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+                 unit-name
+                 "add-hook"
+                 target
+                 lambda-form)))
+          (list
+           (list 'defalias (list 'quote symbol) (list 'function lambda-form))
+           (append
+            (cl-subseq form 0 2)
+            (list (list 'function symbol))
+            (nthcdr 3 form))))
+      (list form))))
+
+(defun emacs-hypervisor-effect-aware-reload--normalize-advice-form
+    (unit-name form)
+  (let ((lambda-form
+         (and (consp form)
+              (eq (car form) 'advice-add)
+              (= (length form) 4)
+              (emacs-hypervisor-effect-aware-reload--quoted-symbol-ref-p
+               (nth 1 form))
+              (emacs-hypervisor-effect-aware-reload--lambda-ref-form
+               (nth 3 form)))))
+    (if lambda-form
+        (let* ((target
+                (emacs-hypervisor-effect-aware-reload--quoted-symbol-name
+                 (nth 1 form)))
+               (symbol
+                (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+                 unit-name
+                 (format "advice-add-%S" (nth 2 form))
+                 target
+                 lambda-form)))
+          (list
+           (list 'defalias (list 'quote symbol) (list 'function lambda-form))
+           (list (nth 0 form) (nth 1 form) (nth 2 form)
+                 (list 'function symbol))))
+      (list form))))
+
+(defun emacs-hypervisor-effect-aware-reload-normalize-body (unit-name body)
+  "Return BODY with supported anonymous effects rewritten to generated symbols."
+  (if (and (consp body) (eq (car body) 'progn))
+      (cons
+       'progn
+       (apply
+        #'append
+        (mapcar
+         (lambda (form)
+           (cond
+            ((and (consp form) (eq (car form) 'add-hook))
+             (emacs-hypervisor-effect-aware-reload--normalize-hook-form
+              unit-name
+              form))
+            ((and (consp form) (eq (car form) 'advice-add))
+             (emacs-hypervisor-effect-aware-reload--normalize-advice-form
+              unit-name
+              form))
+            (t (list form))))
+         (cdr body))))
+    (cond
+     ((and (consp body) (eq (car body) 'add-hook))
+      (let ((forms
+             (emacs-hypervisor-effect-aware-reload--normalize-hook-form
+              unit-name
+              body)))
+        (if (cdr forms) (cons 'progn forms) (car forms))))
+     ((and (consp body) (eq (car body) 'advice-add))
+      (let ((forms
+             (emacs-hypervisor-effect-aware-reload--normalize-advice-form
+              unit-name
+              body)))
+        (if (cdr forms) (cons 'progn forms) (car forms))))
+     (t body))))
+
+(defun emacs-hypervisor-effect-aware-reload-normalize-entry (entry)
+  "Return ENTRY with its body normalized for supported reload effects."
+  (let ((copy (copy-sequence entry))
+        (name (plist-get entry :name)))
+    (plist-put
+     copy
+     :body
+     (emacs-hypervisor-effect-aware-reload-normalize-body
+      name
+      (plist-get entry :body)))))
 
 (defun emacs-hypervisor-effect-aware-reload--body-effect-forms (body)
   (if (and (consp body) (eq (car body) 'progn))
@@ -57,6 +232,15 @@
           :cleanup-form (list 'advice-remove (nth 1 form) (nth 3 form))
           :supported t
           :reason nil))
+   ((emacs-hypervisor-effect-aware-reload--generated-defalias-form-p form)
+    (list :kind :generated-function
+          :unit name
+          :source-form form
+          :cleanup-form
+          (emacs-hypervisor-effect-aware-reload--generated-defalias-cleanup-form
+           form)
+          :supported t
+          :reason nil))
    (t
     (list :kind :opaque
           :unit name
@@ -66,10 +250,12 @@
           :reason :unsupported-form))))
 
 (defun emacs-hypervisor-effect-aware-reload-unit-effects (name entry)
-  (mapcar (lambda (form)
-            (emacs-hypervisor-effect-aware-reload-form-effect name form))
-          (emacs-hypervisor-effect-aware-reload--body-effect-forms
-           (plist-get entry :body))))
+  (let ((normalized
+         (emacs-hypervisor-effect-aware-reload-normalize-entry entry)))
+    (mapcar (lambda (form)
+              (emacs-hypervisor-effect-aware-reload-form-effect name form))
+            (emacs-hypervisor-effect-aware-reload--body-effect-forms
+             (plist-get normalized :body)))))
 
 (defun emacs-hypervisor-effect-aware-reload-cleanup-unit (name entry)
   (let ((effects (emacs-hypervisor-effect-aware-reload-unit-effects name entry))
@@ -95,6 +281,9 @@
           :failed (nreverse failures))))
 
 (defun emacs-hypervisor-effect-aware-reload-cleanup-count (cleanup)
-  (length (plist-get cleanup :cleaned)))
+  (cl-count-if
+   (lambda (effect)
+     (memq (plist-get effect :kind) '(:hook :advice)))
+   (plist-get cleanup :cleaned)))
 
 (provide 'emacs-hypervisor-effect-aware-reload)

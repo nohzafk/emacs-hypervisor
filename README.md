@@ -153,18 +153,23 @@ Currently supported automatic resets:
     `(remove-hook 'HOOK FUNCTION)`
   - previous `(add-hook 'HOOK FUNCTION DEPTH nil)` resets with
     `(remove-hook 'HOOK FUNCTION)`
+  - anonymous `(lambda ...)` and `#'(lambda ...)` functions are rewritten to
+    generated internal function names before they are added, so they can be
+    removed on the next reload
 - `advice-add`
   - previous `(advice-add 'TARGET WHERE FUNCTION)` resets with
     `(advice-remove 'TARGET FUNCTION)`
+  - anonymous `(lambda ...)` and `#'(lambda ...)` functions are rewritten to
+    generated internal function names before advice is installed
 
 The recognizer is intentionally conservative. Hook names and advice targets
 must be literal quoted symbols. Functions must be symbols or function-quoted
-symbols.
+symbols, or anonymous lambdas in the supported positions above.
 
 Everything else is treated as opaque and reported without being reset
 unsafely. Opaque does not automatically mean restart recommended. This
-includes computed hook names, computed advice targets, anonymous
-lambdas/closures, local hooks, timers, processes, file/network effects,
+includes computed hook names, computed advice targets, lambdas hidden inside
+computed expressions, local hooks, timers, processes, file/network effects,
 package-manager effects, theme state, faces, variables, keybindings, and
 buffer-local side effects.
 

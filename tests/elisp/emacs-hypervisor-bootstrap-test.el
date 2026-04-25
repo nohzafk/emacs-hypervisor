@@ -113,6 +113,61 @@
                             [(+ emacs-hypervisor-test-runtime-value 1)])
                       t)))))
 
+(ert-deftest emacs-hypervisor-config-unit-export-names-supported-effect-lambdas ()
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! lambda-hook-unit
+    :config
+    (add-hook 'emacs-hypervisor-test-hook
+              (lambda ()
+                :hook)))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body))
+         (defalias-form (nth 1 body))
+         (hook-form (nth 2 body))
+         (generated-symbol (cadr (nth 1 defalias-form))))
+    (should (eq (car defalias-form) 'defalias))
+    (should (string-prefix-p
+             "emacs-hypervisor--generated-lambda-hook-unit-add-hook-emacs-hypervisor-test-hook-"
+             (symbol-name generated-symbol)))
+    (should (equal hook-form
+                   `(add-hook 'emacs-hypervisor-test-hook
+                              (function ,generated-symbol))))
+    (should (equal (nth 3 body) t))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-generated-name-is-deterministic ()
+  (let* ((lambda-form '(lambda () :hook))
+         (same
+          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+           "lambda-hook-unit"
+           "add-hook"
+           "emacs-hypervisor-test-hook"
+           lambda-form))
+         (repeat
+          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+           "lambda-hook-unit"
+           "add-hook"
+           "emacs-hypervisor-test-hook"
+           lambda-form))
+         (different-target
+          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+           "lambda-hook-unit"
+           "add-hook"
+           "emacs-hypervisor-other-hook"
+           lambda-form))
+         (different-body
+          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+           "lambda-hook-unit"
+           "add-hook"
+           "emacs-hypervisor-test-hook"
+           '(lambda () :changed))))
+    (should (eq same repeat))
+    (should-not (eq same different-target))
+    (should-not (eq same different-body))
+    (should
+     (string-match-p
+      "\\`emacs-hypervisor--generated-lambda-hook-unit-add-hook-emacs-hypervisor-test-hook-[[:xdigit:]]\\{10\\}\\'"
+      (symbol-name same)))))
+
 (ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-backquote ()
   (emacs-hypervisor-reset-declarations)
   (config-unit! backquote-unit
@@ -272,6 +327,9 @@
 (defun emacs-hypervisor-test-hook-new ()
   :new)
 
+(defun emacs-hypervisor-test--generated-symbol-from-body (body)
+  (cadr (nth 1 (nth 1 body))))
+
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-hook-effect ()
   (let* ((emacs-hypervisor-test-hook nil)
          (previous
@@ -302,6 +360,54 @@
     (should (memq #'emacs-hypervisor-test-hook-new emacs-hypervisor-test-hook))
     (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count (plist-get report :cleanup)) 1))
     (should-not (plist-member report :restart-recommended))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-cleans-generated-hook-lambda ()
+  (let* ((emacs-hypervisor-test-hook nil)
+         (emacs-hypervisor-test-runtime-value nil)
+         previous
+         current
+         old-symbol
+         new-symbol
+         reports
+         report
+         cleanup)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! lambda-hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                (lambda ()
+                  (setq emacs-hypervisor-test-runtime-value :old))))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (setq old-symbol
+          (emacs-hypervisor-test--generated-symbol-from-body
+           (plist-get (car previous) :body)))
+    (eval (plist-get (car previous) :body))
+    (should (fboundp old-symbol))
+    (should (memq old-symbol emacs-hypervisor-test-hook))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! lambda-hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                (lambda ()
+                  (setq emacs-hypervisor-test-runtime-value :new))))
+    (setq current (emacs-hypervisor-export-config-units))
+    (setq new-symbol
+          (emacs-hypervisor-test--generated-symbol-from-body
+           (plist-get (car current) :body)))
+    (setq reports
+          (emacs-hypervisor--reload-unit-reports
+           (emacs-hypervisor-selective-reload-diff-units previous current)
+           nil))
+    (setq report (emacs-hypervisor-test--report reports "lambda-hook-unit"))
+    (setq cleanup (plist-get report :cleanup))
+    (run-hooks 'emacs-hypervisor-test-hook)
+    (should (eq emacs-hypervisor-test-runtime-value :new))
+    (should-not (memq old-symbol emacs-hypervisor-test-hook))
+    (should (memq new-symbol emacs-hypervisor-test-hook))
+    (should-not (fboundp old-symbol))
+    (should (fboundp new-symbol))
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup) 1))
+    (should-not (plist-get cleanup :unsupported))))
 
 (defun emacs-hypervisor-test-advice-target ()
   :target)
@@ -357,6 +463,74 @@
                      #'emacs-hypervisor-test-advice-old)
       (advice-remove 'emacs-hypervisor-test-advice-target
                      #'emacs-hypervisor-test-advice-new))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-cleans-generated-advice-lambda ()
+  (let* ((emacs-hypervisor-test-runtime-value nil)
+         previous
+         current
+         old-symbol
+         new-symbol
+         reports
+         report
+         cleanup)
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! lambda-advice-unit
+            :config
+            (advice-add 'emacs-hypervisor-test-advice-target
+                        :around
+                        (lambda (orig-fn &rest args)
+                          (setq emacs-hypervisor-test-runtime-value :old)
+                          (apply orig-fn args))))
+          (setq previous (emacs-hypervisor-export-config-units))
+          (setq old-symbol
+                (emacs-hypervisor-test--generated-symbol-from-body
+                 (plist-get (car previous) :body)))
+          (eval (plist-get (car previous) :body))
+          (should (fboundp old-symbol))
+          (should
+           (advice-member-p
+            old-symbol
+            'emacs-hypervisor-test-advice-target))
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! lambda-advice-unit
+            :config
+            (advice-add 'emacs-hypervisor-test-advice-target
+                        :around
+                        (lambda (orig-fn &rest args)
+                          (setq emacs-hypervisor-test-runtime-value :new)
+                          (apply orig-fn args))))
+          (setq current (emacs-hypervisor-export-config-units))
+          (setq new-symbol
+                (emacs-hypervisor-test--generated-symbol-from-body
+                 (plist-get (car current) :body)))
+          (setq reports
+                (emacs-hypervisor--reload-unit-reports
+                 (emacs-hypervisor-selective-reload-diff-units previous current)
+                 nil))
+          (setq report
+                (emacs-hypervisor-test--report reports "lambda-advice-unit"))
+          (setq cleanup (plist-get report :cleanup))
+          (emacs-hypervisor-test-advice-target)
+          (should (eq emacs-hypervisor-test-runtime-value :new))
+          (should-not
+           (advice-member-p
+            old-symbol
+            'emacs-hypervisor-test-advice-target))
+          (should
+           (advice-member-p
+            new-symbol
+            'emacs-hypervisor-test-advice-target))
+          (should-not (fboundp old-symbol))
+          (should (fboundp new-symbol))
+          (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup) 1))
+          (should-not (plist-get cleanup :unsupported)))
+      (when (bound-and-true-p old-symbol)
+        (advice-remove 'emacs-hypervisor-test-advice-target old-symbol))
+      (when (bound-and-true-p new-symbol)
+        (advice-remove 'emacs-hypervisor-test-advice-target new-symbol))
+      (emacs-hypervisor-reset-declarations))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-reports-opaque-effects ()
   (let* ((emacs-hypervisor-test-runtime-value nil)

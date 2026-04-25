@@ -1,6 +1,7 @@
 ;;; emacs-hypervisor-declarations.el --- Minimal declaration registry -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'emacs-hypervisor-effect-aware-reload)
 
 (defvar emacs-hypervisor-packages nil)
 (defvar emacs-hypervisor-config-units nil)
@@ -187,7 +188,10 @@ feature preloading, not whether the unit itself is lazy or deferred."
                  (plist-get plist-pairs :env)))
            (executable (emacs-hypervisor--normalize-symbol-list
                         (plist-get plist-pairs :executable)))
-           (body-form `(progn ,@body t)))
+           (body-form
+            (emacs-hypervisor-effect-aware-reload-normalize-body
+             unit-name
+             `(progn ,@body t))))
       `(push
         (list
          :name ,unit-name
