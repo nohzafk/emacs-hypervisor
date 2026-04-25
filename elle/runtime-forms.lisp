@@ -10,7 +10,13 @@
       ()
       (append (first lists) (append-all (rest lists)))))
 
-  (defn install-config-surface-form [report-core-module report-module declarations-module compose-module]
+  (defn install-config-surface-form
+      [report-core-module
+       report-module
+       declarations-module
+       effect-aware-reload-module
+       selective-reload-module
+       compose-module]
     (append-all
      (list
       '(progn)
@@ -19,6 +25,8 @@
       '((emacs-hypervisor-report-reset)
         (emacs-hypervisor-report-session-started))
       (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
+      (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
+      (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)
       (module-loader:load-module-form compose-module :emacs-hypervisor-compose-ready)
       '(:emacs-hypervisor-config-surface-ready))))
 

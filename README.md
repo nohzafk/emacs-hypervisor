@@ -108,6 +108,79 @@ This is the Lisp-to-Lisp homoiconic surface that unlocks later advanced
 features such as structural inspection, targeted rewrites, interactive
 remediation, and live reload without re-parsing opaque strings.
 
+## Reload Features
+
+`emacs-hypervisor-reload-config` reloads `config.el` into a running Emacs
+session. It wires together two distinct features:
+
+- selective reload decides which `config-unit!` declarations need work
+- effect-aware reload cleans recognized old effects before replacing or
+  removing a unit
+
+### Selective Reload
+
+Selective reload captures the previous exported `config-unit!` declarations,
+resets and reloads declarations from `config.el`, then compares old and new
+units by `:name` and exported structure:
+
+- unchanged units are skipped
+- new units are applied
+- changed units are applied
+- removed units are not evaluated
+
+This is a core strength of the Lisp-to-Lisp runtime boundary. Because
+config-unit bodies are preserved as structured Lisp forms, Hypervisor can make
+targeted reload decisions without reparsing strings or treating config as an
+opaque blob.
+
+### Effect-Aware Reload
+
+Effect-aware reload automatically resets supported effects before applying a
+changed unit. This prevents the most common reload drift: duplicate hooks and
+stale advice left behind by an older version of a config unit.
+
+For a changed unit, Hypervisor looks at the previous unit body, runs cleanup
+for supported effects, then evaluates the new body. For a removed unit,
+Hypervisor runs cleanup for supported effects from the old body and does not
+evaluate that unit again.
+
+Currently supported automatic resets:
+
+- `add-hook`
+  - previous `(add-hook 'HOOK FUNCTION)` resets with
+    `(remove-hook 'HOOK FUNCTION)`
+  - previous `(add-hook 'HOOK FUNCTION DEPTH)` resets with
+    `(remove-hook 'HOOK FUNCTION)`
+  - previous `(add-hook 'HOOK FUNCTION DEPTH nil)` resets with
+    `(remove-hook 'HOOK FUNCTION)`
+- `advice-add`
+  - previous `(advice-add 'TARGET WHERE FUNCTION)` resets with
+    `(advice-remove 'TARGET FUNCTION)`
+
+The recognizer is intentionally conservative. Hook names and advice targets
+must be literal quoted symbols. Functions must be symbols or function-quoted
+symbols.
+
+Everything else is treated as opaque and reported without being reset
+unsafely. Opaque does not automatically mean restart recommended. This
+includes computed hook names, computed advice targets, anonymous
+lambdas/closures, local hooks, timers, processes, file/network effects,
+package-manager effects, theme state, faces, variables, keybindings, and
+buffer-local side effects.
+
+Reload still preserves the existing guardrails:
+
+- it refuses to run while a Hypervisor session is actively starting/running
+- it reloads the configured env file before loading `config.el`
+- it keeps preflight checks for env vars, executables, required features, new
+  packages, `:after` ordering, cycles, and blocked units
+- it warns when new package declarations require a restart/package sync
+
+The latest reload report is stored in
+`emacs-hypervisor-last-soft-reload-report` with kind
+`:config-reload`. The report summarizes applied, removed, unchanged, cleaned,
+and failed units, and includes per-unit cleanup details.
+
 ## Startup Flow
 
 1. A provisioned Emacs home loads generated `init.el`.
@@ -132,6 +205,12 @@ remediation, and live reload without re-parsing opaque strings.
   `elle/planning.lisp`, and `elle/execution.lisp` own orchestration policy.
 - `elle/runtime-forms.lisp` coordinates emitted runtime modules.
 - `elle/runtime-forms/` contains transient Emacs helper modules.
+- `elle/runtime-forms/emacs-hypervisor-selective-reload.el` owns reload unit
+  diffing and `:after` scheduling for changed units.
+- `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el` owns recognized
+  effect detection and cleanup.
+- `elle/runtime-forms/emacs-hypervisor-compose.el` wires reload features into
+  `emacs-hypervisor-reload-config`.
 - `tests/elle/hypervisor-runtime.lisp` covers shared Elle runtime semantics.
 - `tests/elisp/emacs-hypervisor-bootstrap-test.el` covers the trusted kernel
   and runtime helper behavior.
@@ -152,6 +231,10 @@ provisioned Emacs home for live startup tests.
 
 - `PROTOCOL.md` documents `sexp-rpc` message shape and failure payloads.
 - `NATIVE-HOST.md` documents normal host binary usage.
+- `LISP-TO-LISP-FUTURES.md` captures future capabilities unlocked by
+  preserving config-unit bodies as structured Lisp data.
+- `docs/2026-04-25-selective-and-effect-aware-reload-spec.md` specifies the
+  implemented selective reload and effect-aware reload features.
 - `host/README.md` documents generated-home bootstrap rules.
 - `host/ELISP-PACK.md` documents the static Elisp packing boundary.
 - `PROJECT-LOG.md` is historical implementation context, not the current

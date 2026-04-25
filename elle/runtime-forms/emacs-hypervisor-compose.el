@@ -1,11 +1,14 @@
-;;; emacs-hypervisor-compose.el --- Soft reload helpers -*- lexical-binding: t; -*-
+;;; emacs-hypervisor-compose.el --- Config reload command wiring -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'emacs-hypervisor-bootstrap)
 (require 'emacs-hypervisor-declarations)
+(require 'emacs-hypervisor-effect-aware-reload)
+(require 'emacs-hypervisor-selective-reload)
 
 (defvar emacs-hypervisor-last-soft-reload-report nil
-  "Report plist from the last soft reload.")
+  "Report plist from the last config reload.")
 
 (defun emacs-hypervisor--repo-file (name)
   (expand-file-name name user-emacs-directory))
@@ -31,11 +34,6 @@
 
 (defun emacs-hypervisor--unit-name (entry)
   (plist-get entry :name))
-
-(defun emacs-hypervisor--unit-entry (name units)
-  (cl-find name units
-           :key #'emacs-hypervisor--unit-name
-           :test #'equal))
 
 (defun emacs-hypervisor--unit-requires (entry)
   (copy-sequence (plist-get entry :requires)))
@@ -67,16 +65,17 @@
            unless (require (intern feature-name) nil t)
            collect feature-name))
 
-(defun emacs-hypervisor--make-soft-reload-report (name status reason &optional details)
+(defun emacs-hypervisor--make-reload-report
+    (name status reason &optional details action cleanup)
   (list :name name
         :status status
         :reason reason
+        :action action
+        :cleanup cleanup
         :details details))
 
-(defun emacs-hypervisor--soft-reload-status (reports name)
-  (plist-get (gethash name reports) :status))
-
-(defun emacs-hypervisor--soft-reload-run-unit (entry pending-packages)
+(defun emacs-hypervisor--reload-run-current-unit
+    (entry pending-packages &optional action previous-entry)
   (let* ((name (emacs-hypervisor--unit-name entry))
          (pending-package-deps
           (cl-intersection
@@ -88,105 +87,103 @@
          (missing-features (emacs-hypervisor--missing-features entry)))
     (cond
      (pending-package-deps
-      (emacs-hypervisor--make-soft-reload-report
-       name :skipped :pending-package-sync pending-package-deps))
+      (emacs-hypervisor--make-reload-report
+       name :skipped :pending-package-sync pending-package-deps action nil))
      (missing-env
-      (emacs-hypervisor--make-soft-reload-report
+      (emacs-hypervisor--make-reload-report
        name :skipped :preflight
-       (list :env missing-env :executable nil)))
+       (list :env missing-env :executable nil) action nil))
      (missing-executables
-      (emacs-hypervisor--make-soft-reload-report
+      (emacs-hypervisor--make-reload-report
        name :skipped :preflight
-       (list :env nil :executable missing-executables)))
+       (list :env nil :executable missing-executables) action nil))
      (missing-features
-      (emacs-hypervisor--make-soft-reload-report
+      (emacs-hypervisor--make-reload-report
        name :skipped :missing-required-features
-       missing-features))
+       missing-features action nil))
      (t
-      (condition-case err
-          (progn
-            (eval (emacs-hypervisor--unit-body entry))
-            (emacs-hypervisor--make-soft-reload-report
-             name :ok :reloaded
-             (list :requires (emacs-hypervisor--unit-requires entry)
-                   :after (emacs-hypervisor--unit-after entry))))
-        (error
-         (emacs-hypervisor--make-soft-reload-report
-          name :failed :execution (format "%S" err))))))))
+      (let ((cleanup (and previous-entry
+                          (emacs-hypervisor-effect-aware-reload-cleanup-unit
+                           name
+                           previous-entry))))
+        (if (plist-get cleanup :failed)
+            (emacs-hypervisor--make-reload-report
+             name :failed :cleanup
+             (plist-get cleanup :failed)
+             action
+             cleanup)
+          (condition-case err
+              (progn
+                (eval (emacs-hypervisor--unit-body entry))
+                (emacs-hypervisor--make-reload-report
+                 name :ok :applied
+                 (list :requires (emacs-hypervisor--unit-requires entry)
+                       :after (emacs-hypervisor--unit-after entry))
+                 action
+                 cleanup))
+            (error
+             (emacs-hypervisor--make-reload-report
+              name :failed :execution (format "%S" err)
+              action
+              cleanup)))))))))
 
-(defun emacs-hypervisor--soft-reload-unit-reports (units pending-packages)
-  (let* ((known-unit-names (mapcar #'emacs-hypervisor--unit-name units))
-         (reports (make-hash-table :test #'equal))
-         pending
-         progress)
-    (dolist (entry units)
-      (let* ((name (emacs-hypervisor--unit-name entry))
-             (missing-after
-              (cl-set-difference
-               (emacs-hypervisor--unit-after entry)
-               known-unit-names
-               :test #'equal)))
-        (if missing-after
-            (puthash
-             name
-             (emacs-hypervisor--make-soft-reload-report
-              name :skipped :missing-after-units missing-after)
-             reports)
-          (push entry pending))))
-    (setq pending (nreverse pending))
-    (while pending
-      (setq progress nil)
-      (let (next-pending)
-        (dolist (entry pending)
-          (let* ((name (emacs-hypervisor--unit-name entry))
-                 (after (emacs-hypervisor--unit-after entry))
-                 (unresolved
-                  (cl-remove-if
-                   (lambda (dep) (gethash dep reports))
-                   after))
-                 (blocked
-                  (cl-loop for dep in after
-                           unless (eq (emacs-hypervisor--soft-reload-status reports dep) :ok)
-                           when (gethash dep reports)
-                           collect dep)))
-            (cond
-             (unresolved
-              (push entry next-pending))
-             (blocked
-              (setq progress t)
-              (puthash
-               name
-               (emacs-hypervisor--make-soft-reload-report
-                name :skipped :blocked-by-unit blocked)
-               reports))
-             (t
-             (setq progress t)
-              (puthash name
-                       (emacs-hypervisor--soft-reload-run-unit
-                        entry
-                        pending-packages)
-                       reports)))))
-        (setq pending (nreverse next-pending)))
-      (unless progress
-        (dolist (entry pending)
-          (let ((name (emacs-hypervisor--unit-name entry)))
-            (puthash
-             name
-             (emacs-hypervisor--make-soft-reload-report
-              name :skipped :cycle (emacs-hypervisor--unit-after entry))
-             reports)))
-        (setq pending nil)))
-    (mapcar (lambda (entry)
-              (gethash (emacs-hypervisor--unit-name entry) reports))
-            units)))
+(defun emacs-hypervisor--removed-unit-report (diff)
+  (let* ((name (plist-get diff :name))
+         (previous (plist-get diff :previous))
+         (cleanup (emacs-hypervisor-effect-aware-reload-cleanup-unit name previous)))
+    (if (plist-get cleanup :failed)
+        (emacs-hypervisor--make-reload-report
+         name :failed :cleanup
+         (plist-get cleanup :failed)
+         :removed
+         cleanup)
+      (emacs-hypervisor--make-reload-report
+       name :ok :removed
+       nil
+       :removed
+       cleanup))))
 
-(defun emacs-hypervisor--soft-reload-summary (reports)
+(defun emacs-hypervisor--reload-unit-reports (diffs pending-packages)
+  (emacs-hypervisor-selective-reload-reports
+   diffs
+   #'emacs-hypervisor--make-reload-report
+   (lambda (diff)
+     (let ((entry (plist-get diff :current)))
+       (emacs-hypervisor--reload-run-current-unit
+        entry
+        pending-packages
+        (emacs-hypervisor-selective-reload-diff-action diff)
+        (plist-get diff :previous))))
+   #'emacs-hypervisor--removed-unit-report))
+
+(defun emacs-hypervisor--reload-summary (reports)
   (list
-   :ok (cl-count :ok reports :key (lambda (entry) (plist-get entry :status)))
-   :skipped (cl-count :skipped reports :key (lambda (entry) (plist-get entry :status)))
-   :failed (cl-count :failed reports :key (lambda (entry) (plist-get entry :status)))))
+   :applied
+   (cl-count-if
+    (lambda (entry)
+      (and (eq (plist-get entry :status) :ok)
+           (memq (plist-get entry :action) '(:new :changed))))
+    reports)
+   :removed
+   (cl-count-if
+    (lambda (entry)
+      (and (eq (plist-get entry :status) :ok)
+           (eq (plist-get entry :action) :removed)))
+    reports)
+   :skipped-unchanged
+   (cl-count-if
+    (lambda (entry)
+      (and (eq (plist-get entry :status) :skipped)
+           (eq (plist-get entry :action) :unchanged)))
+    reports)
+   :cleaned
+   (cl-loop for entry in reports
+            sum (emacs-hypervisor-effect-aware-reload-cleanup-count
+                 (plist-get entry :cleanup)))
+   :failed
+   (cl-count :failed reports :key (lambda (entry) (plist-get entry :status)))))
 
-(defun emacs-hypervisor--soft-reload-warning (new-packages reports)
+(defun emacs-hypervisor--reload-warning (new-packages reports)
   (let ((skipped-units
          (cl-loop for entry in reports
                   when (eq (plist-get entry :reason) :pending-package-sync)
@@ -195,7 +192,7 @@
      (delq
       nil
       (list
-       (format "Soft reload: new packages %s"
+       (format "Reload: new packages %s"
                (string-join new-packages ", "))
        (when skipped-units
          (format "Skipped: %s"
@@ -213,16 +210,17 @@
     (org-babel-tangle-file config-org-file)))
 
 (defun emacs-hypervisor-reload-config ()
-  "Soft reload config units on top of the current Emacs state.
+  "Reload changed config units into the current Emacs state.
 
 This command reloads declarations from `config.el', warns about new package
-declarations, and reruns config units only. It does not unload old config,
-hooks, advice, themes, or package state."
+declarations, skips unchanged config units, and cleans up recognized effects
+from previous changed or removed units before applying new bodies."
   (interactive)
-  (when (emacs-hypervisor-live-p)
-    (user-error "Hypervisor session is still running"))
+  (when (emacs-hypervisor-session-active-p)
+    (user-error "Hypervisor session is still active"))
   (let* ((config-file (emacs-hypervisor--config-file))
-         (previous-packages (emacs-hypervisor--declared-package-names)))
+         (previous-packages (emacs-hypervisor--declared-package-names))
+         (previous-units (emacs-hypervisor-export-config-units)))
     (unless (file-exists-p config-file)
       (error "No config.el at %s" config-file))
     (emacs-hypervisor-load-envvars-file (emacs-hypervisor--env-file) t)
@@ -233,27 +231,32 @@ hooks, advice, themes, or package state."
              (emacs-hypervisor--declared-package-names)
              previous-packages
              :test #'equal))
+           (current-units (emacs-hypervisor-export-config-units))
+           (diffs
+            (emacs-hypervisor-selective-reload-diff-units
+             previous-units
+             current-units))
            (reports
-            (emacs-hypervisor--soft-reload-unit-reports
-             (emacs-hypervisor-export-config-units)
+            (emacs-hypervisor--reload-unit-reports
+             diffs
              new-packages))
-           (summary (emacs-hypervisor--soft-reload-summary reports)))
+           (summary (emacs-hypervisor--reload-summary reports)))
       (setq emacs-hypervisor-last-soft-reload-report
             (list
-             :kind :soft-reload
+             :kind :config-reload
              :new-packages new-packages
              :reports reports
              :summary summary
-             :note "Soft reload reruns config on top of current Emacs state; old config is not unloaded."))
+             :note "Selective reload applies only new and changed config units. Effect-aware reload cleans recognized previous hook and advice effects before replacement; opaque effects are reported but not reset."))
       (message
-       "[Hypervisor] Soft reload: %d ok, %d skipped, %d failed. Existing Emacs state was not unloaded."
-       (plist-get summary :ok)
-       (plist-get summary :skipped)
-       (plist-get summary :failed))
+       "[Hypervisor] Reload: %d changed applied, %d unchanged skipped, %d old effects cleaned."
+       (plist-get summary :applied)
+       (plist-get summary :skipped-unchanged)
+       (plist-get summary :cleaned))
       (when new-packages
         (display-warning
          'emacs-hypervisor
-         (emacs-hypervisor--soft-reload-warning new-packages reports)
+         (emacs-hypervisor--reload-warning new-packages reports)
          :warning))
       emacs-hypervisor-last-soft-reload-report)))
 

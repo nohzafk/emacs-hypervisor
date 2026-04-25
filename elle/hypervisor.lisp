@@ -71,6 +71,14 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS"
            "elle/runtime-forms/emacs-hypervisor-declarations.el")
+          effect-aware-reload-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el")
+          selective-reload-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-selective-reload.el")
           compose-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_FORMS"
@@ -118,7 +126,13 @@
       3
       :eval
       (benchmark:eval-payload
-       `(:form ,(runtime-forms:install-config-surface-form report-core-module report-module declarations-module compose-module)
+       `(:form ,(runtime-forms:install-config-surface-form
+                 report-core-module
+                 report-module
+                 declarations-module
+                 effect-aware-reload-module
+                 selective-reload-module
+                 compose-module)
          :metric-name :install-config-surface
          :metric-kind :runtime-setup
          :phase :startup)))

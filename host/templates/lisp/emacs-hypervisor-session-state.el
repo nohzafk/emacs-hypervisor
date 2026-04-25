@@ -60,6 +60,15 @@
   (and (processp emacs-hypervisor--process)
        (process-live-p emacs-hypervisor--process)))
 
+(defun emacs-hypervisor-session-active-p ()
+  "Return non-nil when Hypervisor is actively orchestrating a session.
+
+A completed startup session may still have a live process object briefly, but
+that should not prevent local config reloads."
+  (and (emacs-hypervisor-live-p)
+       (not emacs-hypervisor--completed)
+       (memq emacs-hypervisor--state '(:starting :running))))
+
 (defun emacs-hypervisor-process-buffer ()
   "Return the Hypervisor process buffer."
   (and (processp emacs-hypervisor--process)
@@ -107,6 +116,7 @@
   (list
    :state emacs-hypervisor--state
    :live (emacs-hypervisor-live-p)
+   :active (emacs-hypervisor-session-active-p)
    :completed emacs-hypervisor--completed
    :shutdown emacs-hypervisor--shutdown-reason
    :last-process-event emacs-hypervisor--last-process-event

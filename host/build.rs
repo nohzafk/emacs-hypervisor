@@ -100,6 +100,14 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
         "DECLARATIONS",
         "elle/runtime-forms/emacs-hypervisor-declarations.el",
     ),
+    (
+        "EFFECT_AWARE_RELOAD",
+        "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el",
+    ),
+    (
+        "SELECTIVE_RELOAD",
+        "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
+    ),
     ("COMPOSE", "elle/runtime-forms/emacs-hypervisor-compose.el"),
     (
         "SESSION_BASE",

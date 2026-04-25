@@ -43,6 +43,8 @@ The intended packable scope is intentionally narrow:
 - `elle/runtime-forms/emacs-hypervisor-report-core.el`
 - `elle/runtime-forms/emacs-hypervisor-report.el`
 - `elle/runtime-forms/emacs-hypervisor-declarations.el`
+- `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el`
+- `elle/runtime-forms/emacs-hypervisor-selective-reload.el`
 - `elle/runtime-forms/emacs-hypervisor-compose.el`
 - `elle/runtime-forms/emacs-hypervisor-session-base.el`
 - `elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el`
