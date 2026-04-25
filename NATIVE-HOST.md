@@ -34,15 +34,15 @@ Common repo automation lives in `justfile`.
 Canonical live test flow:
 
 ```bash
-just live-test /tmp/test3
+just home live /tmp/test3
 ```
 
 Equivalent step-by-step flow:
 
 ```bash
 just build
-just reset-home /tmp/test3
-just run-emacs /tmp/test3
+just home reset /tmp/test3
+just home run /tmp/test3
 ```
 
 The built artifact lives at:

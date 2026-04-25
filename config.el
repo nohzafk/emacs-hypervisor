@@ -78,6 +78,7 @@
   :config
   (load-theme 'gruvbox-light-medium t))
 
+
 (config-unit! unify-ui-background
   :after (config-theme)
   :config
@@ -430,10 +431,10 @@ If DEBUG (the prefix arg) is given, start the new instance with the --debug swit
       (let ((confirm-kill-emacs nil))
         (restart-emacs (if debug '("--debug-init") nil))))))
 
-  (defun backbone/restart-and-restore-suffix (&optional debug &rest _ignored)
-    "Restart Emacs from the quit transient."
-    (interactive "P")
-    (backbone/restart-and-restore debug))
+(defun backbone/restart-and-restore-suffix (&optional debug &rest _ignored)
+  "Restart Emacs from the quit transient."
+  (interactive "P")
+  (backbone/restart-and-restore debug))
 
 (package! beacon :repo "Malabarba/beacon" :branch "master")
 (package! rainbow-mode)
@@ -1458,233 +1459,233 @@ If DEBUG (the prefix arg) is given, start the new instance with the --debug swit
       (cli2eli-load-tool transform-file))))
 
 (package! shell-maker :repo "xenodium/shell-maker" :branch "main")
-  (package! acp :repo "xenodium/acp.el" :branch "main" :deps shell-maker)
-  (package! agent-shell :repo "xenodium/agent-shell" :branch "main" :deps (shell-maker acp))
-  (package! agent-shell-manager
-    :repo "jethrokuan/agent-shell-manager"
-    :branch "main"
-    :deps agent-shell)
-  (package! agent-shell-darwin-notifications
-    :repo "nohzafk/agent-shell-darwin-notifications"
-    :branch "main")
-  (package! agent-shell-ediff
-    :repo "cassandracomar/agent-shell-ediff"
-    :branch "main"
-    :deps agent-shell)
-  (package! visual-fill-column)
+(package! acp :repo "xenodium/acp.el" :branch "main" :deps shell-maker)
+(package! agent-shell :repo "xenodium/agent-shell" :branch "main" :deps (shell-maker acp))
+(package! agent-shell-manager
+  :repo "jethrokuan/agent-shell-manager"
+  :branch "main"
+  :deps agent-shell)
+(package! agent-shell-darwin-notifications
+  :repo "nohzafk/agent-shell-darwin-notifications"
+  :branch "main")
+(package! agent-shell-ediff
+  :repo "cassandracomar/agent-shell-ediff"
+  :branch "main"
+  :deps agent-shell)
+(package! visual-fill-column)
 
-  (config-unit! agent-shell
-    :requires (agent-shell agent-shell-darwin-notifications agent-shell-manager transient)
-    :executable terminal-notifier
-    :config
-    ;; Claude Code configuration
-    ;; Set ANTHROPIC_API_KEY, and optionally ANTHROPIC_BASE_URL,
-    ;; in your environment.
-    (setopt agent-shell-anthropic-claude-acp-command
-            '("claude-agent-acp" "--model" "claude-opus-4-6"))
-    (let ((anthropic-api-key (getenv "ANTHROPIC_API_KEY"))
-          (anthropic-base-url (getenv "ANTHROPIC_BASE_URL")))
-      (cond
-       (anthropic-api-key
-        (setopt agent-shell-anthropic-claude-environment
-                (when anthropic-base-url
-                  (agent-shell-make-environment-variables "ANTHROPIC_BASE_URL" anthropic-base-url)))
-        (setopt agent-shell-anthropic-authentication
-                (agent-shell-anthropic-make-authentication :api-key anthropic-api-key)))
-       (t
-        (setopt agent-shell-anthropic-claude-environment nil)
-        (setopt agent-shell-anthropic-authentication
-                (agent-shell-anthropic-make-authentication :login t)))))
+(config-unit! agent-shell
+  :requires (agent-shell agent-shell-darwin-notifications agent-shell-manager transient)
+  :executable terminal-notifier
+  :config
+  ;; Claude Code configuration
+  ;; Set ANTHROPIC_API_KEY, and optionally ANTHROPIC_BASE_URL,
+  ;; in your environment.
+  (setopt agent-shell-anthropic-claude-acp-command
+          '("claude-agent-acp" "--model" "claude-opus-4-6"))
+  (let ((anthropic-api-key (getenv "ANTHROPIC_API_KEY"))
+        (anthropic-base-url (getenv "ANTHROPIC_BASE_URL")))
+    (cond
+     (anthropic-api-key
+      (setopt agent-shell-anthropic-claude-environment
+              (when anthropic-base-url
+                (agent-shell-make-environment-variables "ANTHROPIC_BASE_URL" anthropic-base-url)))
+      (setopt agent-shell-anthropic-authentication
+              (agent-shell-anthropic-make-authentication :api-key anthropic-api-key)))
+     (t
+      (setopt agent-shell-anthropic-claude-environment nil)
+      (setopt agent-shell-anthropic-authentication
+              (agent-shell-anthropic-make-authentication :login t)))))
 
-    (add-hook 'agent-shell-mode-hook #'backbone/disable-line-numbers)
-    (add-hook 'agent-shell-mode-hook
-              (lambda ()
-                (setq-local agent-shell-darwin-notify-current-buffer nil)))
+  (add-hook 'agent-shell-mode-hook #'backbone/disable-line-numbers)
+  (add-hook 'agent-shell-mode-hook
+            (lambda ()
+              (setq-local agent-shell-darwin-notify-current-buffer nil)))
 
-    (when (eq system-type 'darwin)
-      (add-hook 'agent-shell-mode-hook #'agent-shell-darwin-notifications-setup))
+  (when (eq system-type 'darwin)
+    (add-hook 'agent-shell-mode-hook #'agent-shell-darwin-notifications-setup))
 
-    (defun backbone/agent-shell-expand-fragment-if-collapsed (buffer namespace-id block-id)
-      "Expand the fragment in BUFFER identified by NAMESPACE-ID and BLOCK-ID."
-      (when (buffer-live-p buffer)
-        (with-current-buffer buffer
-          (save-excursion
-            (goto-char (point-max))
-            (let ((qualified-id (format "%s-%s" namespace-id block-id)))
-              (when-let ((match (text-property-search-backward
-                                 'agent-shell-ui-state nil
-                                 (lambda (_ state)
-                                   (equal (map-elt state :qualified-id) qualified-id))
-                                 t)))
-                (goto-char (prop-match-beginning match))
-                (when-let ((state (get-text-property (point) 'agent-shell-ui-state)))
-                  (when (map-elt state :collapsed)
-                    (agent-shell-ui-toggle-fragment-at-point)))))))))
-
-    (defun backbone/agent-shell-auto-expand-edit-fragment-a (&rest args)
-      "Keep edit tool-call fragments expanded in agent-shell buffers."
-      (when-let* ((state (plist-get args :state))
-                  (block-id (plist-get args :block-id))
-                  (namespace-id (or (plist-get args :namespace-id)
-                                    (map-elt state :request-count)))
-                  (shell-buffer (map-elt state :buffer))
-                  ((equal (map-nested-elt state `(:tool-calls ,block-id :kind)) "edit")))
-        (backbone/agent-shell-expand-fragment-if-collapsed shell-buffer namespace-id block-id)
-        (when-let ((viewport-buffer (agent-shell-viewport--buffer
-                                     :shell-buffer shell-buffer
-                                     :existing-only t)))
-          (backbone/agent-shell-expand-fragment-if-collapsed viewport-buffer namespace-id block-id))))
-
-    (advice-add 'agent-shell--update-fragment :after #'backbone/agent-shell-auto-expand-edit-fragment-a)
-
-    (transient-define-prefix my/agent-shell-menu ()
-      "Agent Shell commands"
-      [["Agents"
-        ("c" "Claude Code" agent-shell-anthropic-start-claude-code)
-        ("o" "OpenAI Codex" agent-shell-openai-start-codex)]
-       ["Manage"
-        ("m" "Manager" agent-shell-manager-toggle)]])
-
-    (keymap-set global-map "C-c a" #'my/agent-shell-menu))
-
-  (config-unit! agent-shell-consult-snapfile :after agent-shell
-    :requires (agent-shell consult consult-snapfile)
-    :config
-    (defun backbone/agent-shell-mention-root ()
-      "Return the root directory for @mentions in the current agent-shell buffer."
-      (expand-file-name default-directory))
-
-    (defun backbone/agent-shell-fuzzy-insert-file ()
-      "Insert a file reference using consult-snapfile fuzzy matching.
-On cancel, inserts bare @ for manual typing."
-      (interactive)
-      (let* ((root (backbone/agent-shell-mention-root))
-             (default-directory root)
-             (prompt (format "@ Path [%s]: " (abbreviate-file-name root)))
-             (selected (condition-case nil
-                           (consult-snapfile-read
-                            :cwd root
-                            :mode 'paths
-                            :prompt prompt
-                            :history 'file-name-history
-                            :require-match t)
-                         (quit nil))))
-        (if selected
-            (let ((path (substring-no-properties selected)))
-              (insert "@" path)
-              (unless (string-suffix-p "/" path)
-                (insert " ")))
-          (insert "@"))))
-
-    (keymap-set agent-shell-mode-map "@" #'backbone/agent-shell-fuzzy-insert-file)
-    (keymap-set agent-shell-viewport-edit-mode-map "@" #'backbone/agent-shell-fuzzy-insert-file)
-
-    (defun backbone/agent-shell-buffer-word-candidates (prefix)
-      "Return words in the current buffer that start with PREFIX."
-      (let ((seen (make-hash-table :test #'equal))
-            candidates)
+  (defun backbone/agent-shell-expand-fragment-if-collapsed (buffer namespace-id block-id)
+    "Expand the fragment in BUFFER identified by NAMESPACE-ID and BLOCK-ID."
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
         (save-excursion
-          (goto-char (point-min))
-          (while (re-search-forward "\\(?:\\sw\\|\\s_\\)+" nil t)
-            (let ((word (match-string-no-properties 0)))
-              (when (and (string-prefix-p prefix word)
-                         (> (length word) (length prefix))
-                         (not (equal word prefix))
-                         (not (gethash word seen)))
-                (puthash word t seen)
-                (push word candidates)))))
-        (sort candidates #'string-lessp)))
+          (goto-char (point-max))
+          (let ((qualified-id (format "%s-%s" namespace-id block-id)))
+            (when-let ((match (text-property-search-backward
+                               'agent-shell-ui-state nil
+                               (lambda (_ state)
+                                 (equal (map-elt state :qualified-id) qualified-id))
+                               t)))
+              (goto-char (prop-match-beginning match))
+              (when-let ((state (get-text-property (point) 'agent-shell-ui-state)))
+                (when (map-elt state :collapsed)
+                  (agent-shell-ui-toggle-fragment-at-point)))))))))
 
-    (defun backbone/agent-shell-buffer-word-capf ()
-      "Complete the symbol at point from words already present in this buffer."
-      (when-let ((bounds (bounds-of-thing-at-point 'symbol)))
-        (list (car bounds)
-              (cdr bounds)
-              (completion-table-dynamic #'backbone/agent-shell-buffer-word-candidates)
-              :exclusive 'no)))
+  (defun backbone/agent-shell-auto-expand-edit-fragment-a (&rest args)
+    "Keep edit tool-call fragments expanded in agent-shell buffers."
+    (when-let* ((state (plist-get args :state))
+                (block-id (plist-get args :block-id))
+                (namespace-id (or (plist-get args :namespace-id)
+                                  (map-elt state :request-count)))
+                (shell-buffer (map-elt state :buffer))
+                ((equal (map-nested-elt state `(:tool-calls ,block-id :kind)) "edit")))
+      (backbone/agent-shell-expand-fragment-if-collapsed shell-buffer namespace-id block-id)
+      (when-let ((viewport-buffer (agent-shell-viewport--buffer
+                                   :shell-buffer shell-buffer
+                                   :existing-only t)))
+        (backbone/agent-shell-expand-fragment-if-collapsed viewport-buffer namespace-id block-id))))
 
-    (defun backbone/agent-shell-setup-fuzzy-completion ()
-      "Use consult completion with buffer-word CAPF in agent-shell."
-      (setq-local completion-in-region-function
-                  #'consult-completion-in-region)
-      (add-hook 'completion-at-point-functions #'backbone/agent-shell-buffer-word-capf nil t))
-    (add-hook 'agent-shell-mode-hook #'backbone/agent-shell-setup-fuzzy-completion)
-    (add-hook 'agent-shell-viewport-edit-mode-hook #'backbone/agent-shell-setup-fuzzy-completion))
+  (advice-add 'agent-shell--update-fragment :after #'backbone/agent-shell-auto-expand-edit-fragment-a)
 
-  (config-unit! agent-shell-openai-codex :after agent-shell
-    :requires agent-shell
-    :executable codex-acp
-    :config
-    ;; Set OPENAI_API_KEY or CODEX_API_KEY, and optionally OPENAI_BASE_URL,
-    ;; in your environment.
-    (let ((openai-api-key (getenv "OPENAI_API_KEY"))
-          (codex-api-key (getenv "CODEX_API_KEY"))
-          (openai-base-url (getenv "OPENAI_BASE_URL")))
-      (setopt agent-shell-openai-codex-acp-command
-              (append '("codex-acp")
-                      (when openai-base-url
-                        (list "--config"
-                              (format "openai_base_url=%s" openai-base-url)))))
+  (transient-define-prefix my/agent-shell-menu ()
+    "Agent Shell commands"
+    [["Agents"
+      ("c" "Claude Code" agent-shell-anthropic-start-claude-code)
+      ("o" "OpenAI Codex" agent-shell-openai-start-codex)]
+     ["Manage"
+      ("m" "Manager" agent-shell-manager-toggle)]])
 
-      (cond
-       (codex-api-key
-        (setopt agent-shell-openai-authentication
-                (agent-shell-openai-make-authentication :codex-api-key codex-api-key)))
-       (openai-api-key
-        (setopt agent-shell-openai-authentication
-                (agent-shell-openai-make-authentication :api-key openai-api-key)))
-       (t
-        (setopt agent-shell-openai-authentication
-                (agent-shell-openai-make-authentication :login t))))))
+  (keymap-set global-map "C-c a" #'my/agent-shell-menu))
 
-  (config-unit! agent-shell-jira-mcp :after agent-shell
-    :requires agent-shell
-    :env JIRA_API_TOKEN
-    :executable uvx
-    :config
-    (setopt agent-shell-mcp-servers
-            '(((name . "mcp-atlassian")
-               (command . "uvx")
-               (args . ("mcp-atlassian"))
-               (env . (((name . "JIRA_URL")
-                        (value . "https://new-talpasolutions.atlassian.net"))
-                       ((name . "JIRA_USERNAME")
-                        (value . "randall@talpa-solutions.com"))
-                       ((name . "JIRA_API_TOKEN")
-                        (value . (lambda ()
-                                   (getenv "JIRA_API_TOKEN"))))))))))
+(config-unit! agent-shell-consult-snapfile :after agent-shell
+  :requires (agent-shell consult consult-snapfile)
+  :config
+  (defun backbone/agent-shell-mention-root ()
+    "Return the root directory for @mentions in the current agent-shell buffer."
+    (expand-file-name default-directory))
 
-  (config-unit! agent-shell-beautify :after agent-shell
-    :requires (agent-shell visual-fill-column)
-    :config
-    (setopt agent-shell-header-style 'text)
-    (setopt agent-shell-show-context-usage-indicator 'detailed)
-    (setopt agent-shell-show-session-id nil)
-    (setopt agent-shell-thought-process-expand-by-default nil)
+  (defun backbone/agent-shell-fuzzy-insert-file ()
+    "Insert a file reference using consult-snapfile fuzzy matching.
+On cancel, inserts bare @ for manual typing."
+    (interactive)
+    (let* ((root (backbone/agent-shell-mention-root))
+           (default-directory root)
+           (prompt (format "@ Path [%s]: " (abbreviate-file-name root)))
+           (selected (condition-case nil
+                         (consult-snapfile-read
+                          :cwd root
+                          :mode 'paths
+                          :prompt prompt
+                          :history 'file-name-history
+                          :require-match t)
+                       (quit nil))))
+      (if selected
+          (let ((path (substring-no-properties selected)))
+            (insert "@" path)
+            (unless (string-suffix-p "/" path)
+              (insert " ")))
+        (insert "@"))))
 
-    (defun backbone/agent-shell-beautify ()
-      "Apply lightweight layout tweaks to agent-shell buffers."
-      (setq-local buffer-face-mode-face
-                  '(:family "BlexMono Nerd Font Mono" :height 140))
-      (buffer-face-mode 1)
-      (visual-line-mode 1)
-      (setq-local visual-fill-column-width 130
-                  visual-fill-column-center-text t)
-      (visual-fill-column-mode 1)
-      (setq-local scroll-conservatively 101))
+  (keymap-set agent-shell-mode-map "@" #'backbone/agent-shell-fuzzy-insert-file)
+  (keymap-set agent-shell-viewport-edit-mode-map "@" #'backbone/agent-shell-fuzzy-insert-file)
 
-    (add-hook 'agent-shell-mode-hook #'backbone/agent-shell-beautify))
+  (defun backbone/agent-shell-buffer-word-candidates (prefix)
+    "Return words in the current buffer that start with PREFIX."
+    (let ((seen (make-hash-table :test #'equal))
+          candidates)
+      (save-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "\\(?:\\sw\\|\\s_\\)+" nil t)
+          (let ((word (match-string-no-properties 0)))
+            (when (and (string-prefix-p prefix word)
+                       (> (length word) (length prefix))
+                       (not (equal word prefix))
+                       (not (gethash word seen)))
+              (puthash word t seen)
+              (push word candidates)))))
+      (sort candidates #'string-lessp)))
 
-  (config-unit! agent-shell-ediff :after agent-shell
-    :requires agent-shell-ediff
-    :config
-    (setopt agent-shell-ediff-quick-quit t)
-    (agent-shell-ediff-mode 1))
+  (defun backbone/agent-shell-buffer-word-capf ()
+    "Complete the symbol at point from words already present in this buffer."
+    (when-let ((bounds (bounds-of-thing-at-point 'symbol)))
+      (list (car bounds)
+            (cdr bounds)
+            (completion-table-dynamic #'backbone/agent-shell-buffer-word-candidates)
+            :exclusive 'no)))
 
-  (config-unit! agent-shell-manager :after agent-shell
-    :requires agent-shell-manager
-    :config
-    (setopt agent-shell-manager-side 'bottom))
+  (defun backbone/agent-shell-setup-fuzzy-completion ()
+    "Use consult completion with buffer-word CAPF in agent-shell."
+    (setq-local completion-in-region-function
+                #'consult-completion-in-region)
+    (add-hook 'completion-at-point-functions #'backbone/agent-shell-buffer-word-capf nil t))
+  (add-hook 'agent-shell-mode-hook #'backbone/agent-shell-setup-fuzzy-completion)
+  (add-hook 'agent-shell-viewport-edit-mode-hook #'backbone/agent-shell-setup-fuzzy-completion))
+
+(config-unit! agent-shell-openai-codex :after agent-shell
+  :requires agent-shell
+  :executable codex-acp
+  :config
+  ;; Set OPENAI_API_KEY or CODEX_API_KEY, and optionally OPENAI_BASE_URL,
+  ;; in your environment.
+  (let ((openai-api-key (getenv "OPENAI_API_KEY"))
+        (codex-api-key (getenv "CODEX_API_KEY"))
+        (openai-base-url (getenv "OPENAI_BASE_URL")))
+    (setopt agent-shell-openai-codex-acp-command
+            (append '("codex-acp")
+                    (when openai-base-url
+                      (list "--config"
+                            (format "openai_base_url=%s" openai-base-url)))))
+
+    (cond
+     (codex-api-key
+      (setopt agent-shell-openai-authentication
+              (agent-shell-openai-make-authentication :codex-api-key codex-api-key)))
+     (openai-api-key
+      (setopt agent-shell-openai-authentication
+              (agent-shell-openai-make-authentication :api-key openai-api-key)))
+     (t
+      (setopt agent-shell-openai-authentication
+              (agent-shell-openai-make-authentication :login t))))))
+
+(config-unit! agent-shell-jira-mcp :after agent-shell
+  :requires agent-shell
+  :env JIRA_API_TOKEN
+  :executable uvx
+  :config
+  (setopt agent-shell-mcp-servers
+          '(((name . "mcp-atlassian")
+             (command . "uvx")
+             (args . ("mcp-atlassian"))
+             (env . (((name . "JIRA_URL")
+                      (value . "https://new-talpasolutions.atlassian.net"))
+                     ((name . "JIRA_USERNAME")
+                      (value . "randall@talpa-solutions.com"))
+                     ((name . "JIRA_API_TOKEN")
+                      (value . (lambda ()
+                                 (getenv "JIRA_API_TOKEN"))))))))))
+
+(config-unit! agent-shell-beautify :after agent-shell
+  :requires (agent-shell visual-fill-column)
+  :config
+  (setopt agent-shell-header-style 'text)
+  (setopt agent-shell-show-context-usage-indicator 'detailed)
+  (setopt agent-shell-show-session-id nil)
+  (setopt agent-shell-thought-process-expand-by-default nil)
+
+  (defun backbone/agent-shell-beautify ()
+    "Apply lightweight layout tweaks to agent-shell buffers."
+    (setq-local buffer-face-mode-face
+                '(:family "BlexMono Nerd Font Mono" :height 140))
+    (buffer-face-mode 1)
+    (visual-line-mode 1)
+    (setq-local visual-fill-column-width 130
+                visual-fill-column-center-text t)
+    (visual-fill-column-mode 1)
+    (setq-local scroll-conservatively 101))
+
+  (add-hook 'agent-shell-mode-hook #'backbone/agent-shell-beautify))
+
+(config-unit! agent-shell-ediff :after agent-shell
+  :requires agent-shell-ediff
+  :config
+  (setopt agent-shell-ediff-quick-quit t)
+  (agent-shell-ediff-mode 1))
+
+(config-unit! agent-shell-manager :after agent-shell
+  :requires agent-shell-manager
+  :config
+  (setopt agent-shell-manager-side 'bottom))
 
 (require 'org-tempo)
 
@@ -1694,7 +1695,7 @@ On cancel, inserts bare @ for manual typing."
 
   ;; Prevent typing an underscore from becoming a subscript
   (setopt org-use-sub-superscripts '{}
-        org-export-with-sub-superscripts nil))
+          org-export-with-sub-superscripts nil))
 
 (package! org-modern)
 
@@ -1746,53 +1747,53 @@ On cancel, inserts bare @ for manual typing."
   (add-hook 'org-mode-hook #'org-fragtog-mode))
 
 (config-unit! org-babel-python-pytest :after org
-    :executable pytest
-    :config
-    (defun org-babel-execute:python-with-pytest (body params)
-      "Execute a python source block with pytest if :pytest is specified.
+  :executable pytest
+  :config
+  (defun org-babel-execute:python-with-pytest (body params)
+    "Execute a python source block with pytest if :pytest is specified.
 Uses :timeout parameter (default 3 seconds) with pytest-timeout package."
-      (if (assq :pytest params)
-          (let* ((temporary-file-directory default-directory)
-                 (temp-file (make-temp-file "pytest-" nil ".py"))
-                 (timeout (or (cdr (assq :timeout params)) "3"))
-                 (pytest-command (format "pytest -v -s --timeout=%s %s"
-                                         (shell-quote-argument timeout)
-                                         (shell-quote-argument temp-file))))
-            (with-temp-file temp-file
-              (insert body))
-            (unwind-protect
-                (org-babel-eval pytest-command "")
-              (delete-file temp-file)))
-        (org-babel-execute:python-default body params)))
+    (if (assq :pytest params)
+        (let* ((temporary-file-directory default-directory)
+               (temp-file (make-temp-file "pytest-" nil ".py"))
+               (timeout (or (cdr (assq :timeout params)) "3"))
+               (pytest-command (format "pytest -v -s --timeout=%s %s"
+                                       (shell-quote-argument timeout)
+                                       (shell-quote-argument temp-file))))
+          (with-temp-file temp-file
+            (insert body))
+          (unwind-protect
+              (org-babel-eval pytest-command "")
+            (delete-file temp-file)))
+      (org-babel-execute:python-default body params)))
 
-    ;; Override default Python execution with pytest-aware version
-    (advice-add 'org-babel-execute:python :override #'org-babel-execute:python-with-pytest))
+  ;; Override default Python execution with pytest-aware version
+  (advice-add 'org-babel-execute:python :override #'org-babel-execute:python-with-pytest))
 
 (config-unit! leetcode-templates :after org
-    :config
-    (require 'tempo)
+  :config
+  (require 'tempo)
 
-    (defun get-formatted-filename ()
-      "Get the current buffer's filename without extension, replacing dashes with spaces."
-      (let ((filename (file-name-sans-extension (buffer-name))))
-        (replace-regexp-in-string "-" " " filename)))
+  (defun get-formatted-filename ()
+    "Get the current buffer's filename without extension, replacing dashes with spaces."
+    (let ((filename (file-name-sans-extension (buffer-name))))
+      (replace-regexp-in-string "-" " " filename)))
 
-    (tempo-define-template
-     "leetcode-solution"
-     '("* Problem: " (get-formatted-filename)
-       n
-       p
-       n
-       "* Solution"
-       n
-       "#+begin_src python :pytest"
-       n
-       "#+end_src"
-       n
-       "* Note"
-       n
-       "* Reflection"
-       "
+  (tempo-define-template
+   "leetcode-solution"
+   '("* Problem: " (get-formatted-filename)
+     n
+     p
+     n
+     "* Solution"
+     n
+     "#+begin_src python :pytest"
+     n
+     "#+end_src"
+     n
+     "* Note"
+     n
+     "* Reflection"
+     "
 Do an analysis for the problem and solutions.
 
 What are the key takeaways and lessons from this problem?
@@ -1800,41 +1801,41 @@ What are the key takeaways and lessons from this problem?
 What techniques can I learn from it to apply to other problems?
 "))
 
-    (defun insert-leetcode-solution ()
-      "Insert leetcode solution template at point."
-      (interactive)
-      (tempo-template-leetcode-solution))
+  (defun insert-leetcode-solution ()
+    "Insert leetcode solution template at point."
+    (interactive)
+    (tempo-template-leetcode-solution))
 
-    ;; Cleanup utilities for leetcode files
-    (defun remove-consecutive-blank-lines ()
-      "Remove multiple consecutive blank lines in the buffer, skipping src blocks."
-      (interactive)
-      (save-excursion
-        (goto-char (point-min))
-        (let ((in-src-block nil))
-          (while (not (eobp))
-            (cond
-             ((looking-at "^#\\+begin_src")
-              (setq in-src-block t)
-              (forward-line))
-             ((looking-at "^#\\+end_src")
-              (setq in-src-block nil)
-              (forward-line))
-             ((and (not in-src-block)
-                   (looking-at "\n\\{3,\\}"))
-              (replace-match "\n\n"))
-             (t (forward-line)))))))
+  ;; Cleanup utilities for leetcode files
+  (defun remove-consecutive-blank-lines ()
+    "Remove multiple consecutive blank lines in the buffer, skipping src blocks."
+    (interactive)
+    (save-excursion
+      (goto-char (point-min))
+      (let ((in-src-block nil))
+        (while (not (eobp))
+          (cond
+           ((looking-at "^#\\+begin_src")
+            (setq in-src-block t)
+            (forward-line))
+           ((looking-at "^#\\+end_src")
+            (setq in-src-block nil)
+            (forward-line))
+           ((and (not in-src-block)
+                 (looking-at "\n\\{3,\\}"))
+            (replace-match "\n\n"))
+           (t (forward-line)))))))
 
-    (defun format-leetcode-solution ()
-      "Format the current buffer by removing consecutive blank lines,
+  (defun format-leetcode-solution ()
+    "Format the current buffer by removing consecutive blank lines,
 trailing whitespaces, and ensuring a newline at the end of the file."
-      (interactive)
-      (remove-consecutive-blank-lines)
-      (delete-trailing-whitespace)
-      (save-excursion
-        (goto-char (point-max))
-        (unless (looking-back "\n" 1)
-          (newline)))))
+    (interactive)
+    (remove-consecutive-blank-lines)
+    (delete-trailing-whitespace)
+    (save-excursion
+      (goto-char (point-max))
+      (unless (looking-back "\n" 1)
+        (newline)))))
 
 (package! ob-mermaid)
 
@@ -1898,7 +1899,7 @@ trailing whitespaces, and ensuring a newline at the end of the file."
      ("s" "scratch" (lambda () (interactive) (pop-to-buffer "*scratch*")))
      ("u" "appine URL" backbone/appine-open-url)
      ("e" "config.org" (lambda () (interactive)
-                           (find-file (expand-file-name "config.org" emacs-backbone-user-directory))))])
+                         (find-file (expand-file-name "config.org" emacs-backbone-user-directory))))])
 
   (keymap-set global-map "C-c o" #'my/open-menu))
 

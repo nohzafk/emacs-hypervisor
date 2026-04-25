@@ -53,30 +53,38 @@ test:
       -l tests/elisp/emacs-hypervisor-bootstrap-test.el \
       -f ert-run-tests-batch-and-exit
 
-[group('Test')]
-clean-home home="/tmp/test3":
-    rm -rf {{home}}
+[group('Emacs')]
+home action="live" path="/tmp/test3" binary=(justfile_directory() + "/target/release/emacs-hypervisor"):
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-[group('Test')]
-init-home home="/tmp/test3":
-    ./target/release/emacs-hypervisor init --home {{home}}
-
-[group('Test')]
-env-home home="/tmp/test3":
-    ./target/release/emacs-hypervisor env --home {{home}}
-
-[group('Test')]
-reset-home home="/tmp/test3":
-    just clean-home {{home}}
-    just init-home {{home}}
-
-[group('Test')]
-run-emacs home="/tmp/test3" binary=(justfile_directory() + "/target/release/emacs-hypervisor"):
-    EMACS_HYPERVISOR_BIN={{binary}} emacs --init-directory={{home}}
-
-[group('Test')]
-live-test home="/tmp/test3":
-    just build
-    just reset-home {{home}}
-    cp early-init.el config.el {{home}}
-    just run-emacs {{home}}
+    case "{{action}}" in
+      clean)
+        rm -rf "{{path}}"
+        ;;
+      init)
+        ./target/release/emacs-hypervisor init --home "{{path}}"
+        ;;
+      env)
+        ./target/release/emacs-hypervisor env --home "{{path}}"
+        ;;
+      reset)
+        rm -rf "{{path}}"
+        ./target/release/emacs-hypervisor init --home "{{path}}"
+        ;;
+      run)
+        EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
+        ;;
+      live)
+        just build
+        rm -rf "{{path}}"
+        ./target/release/emacs-hypervisor init --home "{{path}}"
+        cp early-init.el config.el "{{path}}"
+        EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
+        ;;
+      *)
+        printf 'unknown home action: %s\n' "{{action}}" >&2
+        printf 'expected one of: clean, init, env, reset, run, live\n' >&2
+        exit 64
+        ;;
+    esac
