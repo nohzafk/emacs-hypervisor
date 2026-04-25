@@ -1,4 +1,6 @@
-;;; init.el --- Minimal Emacs Hypervisor bootstrap -*- lexical-binding: t; -*-
+;;; home-startup.el --- Emacs Hypervisor home startup wrapper -*- lexical-binding: t; -*-
+
+;; This template is appended after the bundled trusted bootstrap modules.
 
 (defvar emacs-hypervisor-home-directory
   (file-name-directory
@@ -21,12 +23,6 @@
 (setq default-directory emacs-hypervisor-home-directory)
 (setq user-emacs-directory
       (file-name-as-directory emacs-hypervisor-home-directory))
-
-(add-to-list 'load-path
-             (file-name-as-directory
-              (expand-file-name "lisp" emacs-hypervisor-home-directory)))
-
-(require 'emacs-hypervisor-bootstrap)
 
 ;; Bootstrap binary resolution rule:
 ;; 1. Prefer EMACS_HYPERVISOR_BIN when already set.

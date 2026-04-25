@@ -1,8 +1,10 @@
 # Host Bootstrap Rules
 
-`host/` builds the shipped native `emacs-hypervisor` binary. The generated
-`init.el` is intentionally minimal and follows a strict bootstrap rule for
-finding the host executable.
+`host/` builds the shipped native `emacs-hypervisor` binary. `emacs-hypervisor
+init` writes a single bundled `init.el` into the provisioned Emacs home. The
+authored bootstrap source stays split under `host/emacs-kernel/`; the
+generated file is the deployment artifact and follows a strict bootstrap rule
+for finding the host executable.
 
 ## Binary Resolution Order
 
@@ -47,6 +49,13 @@ emacs --init-directory ~/.config/emacs
 Each generated Emacs home is isolated. Runtime state, package installs, and
 local caches live under that selected home.
 
+Generated homes contain `init.el` as the managed bootstrap artifact. User
+configuration belongs in `config.el`, and environment snapshots belong in
+`env`.
+
+The kernel files still keep normal `require`/`provide` module boundaries so
+development and tests can load them directly with `-L host/emacs-kernel`.
+
 Temporary testing with an explicit binary path:
 
 ```bash
@@ -67,6 +76,7 @@ PATH=/path/to/bin:$PATH emacs --init-directory /tmp/test-home
 - the shipped runtime is embedded into the host at build time
 - `session-base` uses packed `:forms`, the rest currently embed source text
 - the generic Elle loader consumes embedded module specs only
-- `host/templates/lisp/` bootstrap files are not part of `elisp_pack`
+- `host/emacs-kernel/` bootstrap files are bundled into generated `init.el`
+  separately and are not part of `elisp_pack`
 
 See `host/ELISP-PACK.md` for the design boundary and future structured-pack path.

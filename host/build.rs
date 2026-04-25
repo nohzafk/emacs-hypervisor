@@ -64,6 +64,10 @@ fn main() {
         "cargo:rerun-if-changed={}",
         repo_dir.join("elle/runtime-forms").display()
     );
+    println!(
+        "cargo:rerun-if-changed={}",
+        repo_dir.join("host/emacs-kernel").display()
+    );
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR should be set"));
     let output_path = out_dir.join("embedded_backend.rs");

@@ -61,7 +61,8 @@ flowchart TD
 The resident Emacs side is intentionally small:
 
 - generated `init.el`
-- trusted bootstrap kernel under `host/templates/lisp/`
+- trusted bootstrap kernel authored under `host/emacs-kernel/` and bundled
+  into the generated `init.el`
 - `sexp-rpc` process filter, request dispatch, and session state
 - declaration/export surface for `package!` and `config-unit!`
 - trusted `:eval` surface for Elle-emitted forms
@@ -189,7 +190,7 @@ and failed units, and includes per-unit cleanup details.
 ## Startup Flow
 
 1. A provisioned Emacs home loads generated `init.el`.
-2. `init.el` loads the trusted kernel and starts the native host subprocess.
+2. `init.el` evaluates the bundled trusted kernel and starts the native host subprocess.
 3. Elle sends `:hello` and `:boot-context`.
 4. Emacs loads `config.el`, collecting declarations.
 5. Elle requests `:session-data` for packages, units, and env.
@@ -202,8 +203,8 @@ and failed units, and includes per-unit cleanup details.
 ## File Guide
 
 - `config.el` is the repo test configuration source.
-- `host/templates/lisp/` contains install-time trusted kernel templates.
-- `host/templates/init.el` is the generated-home startup template.
+- `host/emacs-kernel/` contains trusted Emacs kernel source modules and the
+  home startup wrapper that are bundled into generated homes.
 - `elle/hypervisor.lisp` is the shared backend entrypoint.
 - `elle/protocol.lisp` contains `sexp-rpc` helpers and wire decoding.
 - `elle/graph.lisp`, `elle/preflight.lisp`, `elle/boot-policy.lisp`,
