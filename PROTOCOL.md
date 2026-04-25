@@ -91,7 +91,7 @@ The current shared-path event topics are:
 - `:shutdown`
 - `:package`
 
-`:package` is currently used by the Stage 1 Elpaca tracker bridge for:
+`:package` is currently used by the emitted Elpaca tracker bridge for:
 
 - `(:phase :packages :kind :installed :name "...")`
 - `(:phase :packages :kind :finished :reason "...")`
@@ -106,11 +106,8 @@ The current startup flow is:
 3. Elle sends `:boot-context`
 4. Emacs responds with session-level facts such as:
    - `:session-name`
-   - `:ui`
-   - `:transport`
+   - `:config-file`
    - `:repo-dir`
-   - `:stage1-user-emacs-directory`
-   - `:elpaca-manager-root`
 5. Elle sends `:session-data`
 6. Emacs responds with:
    - `:packages`
@@ -120,9 +117,9 @@ The current startup flow is:
 8. Elle emits `:plan`, `:progress`, `:log`, `:report`, and `:shutdown` events
 
 This is the current shared-path handshake, not the desired steady-state size of
-the Emacs runtime. The architecture reset direction is to keep the handshake
-shape but shrink the amount of runtime Elisp that gets installed by
-step 7.
+the Emacs runtime. The architecture direction is to keep the handshake shape
+small and make runtime helper forms transient execution substrate rather than a
+resident policy engine.
 
 ## Why `sexp-rpc`
 
@@ -215,9 +212,9 @@ The current normalized failure payload shapes are:
   - `(:source :tracker :error :timeout)`
   - `(:source :queue :error "...")`
 
-## Stage Boundaries
+## Runtime Boundaries
 
-Stage 0 remains the trusted Emacs kernel:
+The trusted Emacs kernel is responsible for:
 
 - start the backend
 - parse incoming `sexp-rpc` messages
@@ -231,18 +228,17 @@ Current shared path:
 - Elle installs transient session helper forms inside Emacs
 - those helper forms currently include Elpaca bootstrap hookup, tracker
   callbacks, and unit execution helpers
-- the old shared runtime file is no longer required on the main startup path
+- config-unit bodies are carried as structured Lisp forms, not strings
 
 Target direction:
 
 - Emacs keeps only the trusted kernel plus declaration/export surface
 - Elle emits smaller, more transient runtime forms for package/config execution
 - large persistent helper layers in Emacs are transitional, not architectural
-- `Stage 1` should be treated as a migration label, not a durable subsystem
 
 ## Compatibility Note
 
-The shared Stage 0 bootstrap is now `sexp-rpc`-only.
+The shared trusted bootstrap is now `sexp-rpc`-only.
 
 Historical numbered spike files that still speak older ad hoc top-level
 messages remain useful as design snapshots, but they are no longer a

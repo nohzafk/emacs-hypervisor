@@ -15,18 +15,20 @@ The current project direction is:
 This repository is still in spike mode.
 The current implementation history lives in
 [PROJECT-LOG.md](/Users/randall/projects/emacs-hypervisor/PROJECT-LOG.md).
-The current architecture reset target lives in
-[ARCHITECTURE-RESET.md](/Users/randall/projects/emacs-hypervisor/ARCHITECTURE-RESET.md).
+The current architecture target lives in
+[README.md](/Users/randall/projects/emacs-hypervisor/README.md).
 
 ## Layout
 
+- [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
+  - current architecture target and Lisp-to-Lisp runtime boundary
 - [config.el](/Users/randall/projects/emacs-hypervisor/config.el)
   - primary repo config declarations source used when provisioning a test home
 - [env](/Users/randall/projects/emacs-hypervisor/env)
   - optional env snapshot example in the same Lisp format emitted by `emacs-hypervisor env`
 - [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
   - install-time trusted Emacs kernel template: process, framing, async filter, RPC dispatch
-- [lisp/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/lisp/emacs-hypervisor-declarations.el)
+- [elle/runtime-forms/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-declarations.el)
   - `package!` and `config-unit!` declaration/export surface
 - [elle](/Users/randall/projects/emacs-hypervisor/elle)
   - shared Elle protocol, graph, preflight, planning, execution, and hypervisor modules
@@ -229,16 +231,18 @@ The working rule is:
 - MCP is for impact, structure, and safe refactoring
 - portrait is for understanding one file deeply before changing it
 
-## Current Next Step
+## Current Working Direction
 
-The current next implementation step is:
+The current implementation direction is:
 
-1. freeze the trusted Emacs kernel boundary around
+1. keep the trusted Emacs kernel boundary small around
    [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
-2. keep package/config execution policy and generated runtime forms in
+2. keep package/config execution policy in
    [elle](/Users/randall/projects/emacs-hypervisor/elle)
    and
    [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
-3. keep using provisioned Emacs homes during testing
-4. keep generated `init.el` as thin startup glue and avoid re-growing resident Emacs wrappers
-5. keep using local analysis and MCP before structural changes to shared Elle modules
+3. preserve the Lisp-to-Lisp config-unit body path described in
+   [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
+4. keep using provisioned Emacs homes during testing
+5. keep generated `init.el` as thin startup glue and avoid re-growing resident Emacs wrappers
+6. keep using local analysis and MCP before structural changes to shared Elle modules

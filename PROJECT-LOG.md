@@ -1,7 +1,7 @@
 # Emacs Hypervisor Project Log
 
-Last updated: 2026-04-23
-Status: shared session/init path working, with remaining productization work
+Last updated: 2026-04-25
+Status: Lisp-to-Lisp config-unit execution path working; README is the current architecture contract
 
 ## Purpose
 
@@ -3734,7 +3734,7 @@ This clarifies an important distinction:
 
 This milestone updated the repo documentation so it matches the reset target:
 
-- [ARCHITECTURE-RESET.md](/Users/randall/projects/emacs-hypervisor/ARCHITECTURE-RESET.md)
+- [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
   - defines the reset target
   - now includes a concrete keep/shrink/move/delete matrix for current
     Emacs-side files
@@ -3949,7 +3949,7 @@ This milestone changed:
   [AGENTS.md](/Users/randall/projects/emacs-hypervisor/AGENTS.md)
   to remove the file from the current layout and next-step description
 - updated
-  [ARCHITECTURE-RESET.md](/Users/randall/projects/emacs-hypervisor/ARCHITECTURE-RESET.md)
+  [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
   so the runtime-form path is the active model
 
 Historical milestone entries still mention the deleted file where that was the
@@ -4341,7 +4341,7 @@ This milestone changed:
   - removed from the active codebase
 - [AGENTS.md](/Users/randall/projects/emacs-hypervisor/AGENTS.md)
   - updated the active file layout and next-step notes
-- [ARCHITECTURE-RESET.md](/Users/randall/projects/emacs-hypervisor/ARCHITECTURE-RESET.md)
+- [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
   - updated the reset notes to reflect that init-path glue now lives in
     `init.el`
 
@@ -4891,7 +4891,7 @@ This milestone changed:
   - removed from the active codebase
 - [AGENTS.md](/Users/randall/projects/emacs-hypervisor/AGENTS.md)
   - updated the active file layout and next-step notes
-- [ARCHITECTURE-RESET.md](/Users/randall/projects/emacs-hypervisor/ARCHITECTURE-RESET.md)
+- [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
   - updated the reset notes to reflect the smaller resident Elisp surface
 
 ### Verification
