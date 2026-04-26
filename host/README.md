@@ -31,6 +31,9 @@ emacs-hypervisor init --home ~/.config/emacs
 emacs-hypervisor env --home ~/.config/emacs
 emacs --init-directory ~/.config/emacs
 
+# Refresh generated bootstrap files after upgrading the binary
+emacs-hypervisor init --home ~/.config/emacs --upgrade
+
 # Override the binary path for testing
 EMACS_HYPERVISOR_BIN=/path/to/emacs-hypervisor emacs --init-directory /tmp/test-home
 

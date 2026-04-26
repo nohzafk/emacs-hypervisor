@@ -11,6 +11,7 @@
 (defvar emacs-hypervisor--last-progress-message)
 (defvar emacs-hypervisor--shutdown-reason)
 (defvar emacs-hypervisor--completed)
+(defvar emacs-hypervisor--startup-warnings)
 
 (defvar emacs-hypervisor--report-buffer-name "*emacs-hypervisor-report*")
 
@@ -138,11 +139,14 @@
    (emacs-hypervisor--package-installation-active
     "Installing packages")
    (emacs-hypervisor--completed
-    (pcase (emacs-hypervisor--startup-summary-status)
-      (:failed "Finished with failures")
-      (:invalid "Finished with invalid units")
-      (:skipped "Finished with skipped units")
-      (_ "Finished")))
+    (if (eq emacs-hypervisor--state :failed)
+        (format "Failed: %s"
+                (or (emacs-hypervisor-failure-summary) "startup failed"))
+      (pcase (emacs-hypervisor--startup-summary-status)
+        (:failed "Finished with failures")
+        (:invalid "Finished with invalid units")
+        (:skipped "Finished with skipped units")
+        (_ "Finished"))))
    (emacs-hypervisor--last-progress-message
     (let* ((payload (emacs-hypervisor--message-payload emacs-hypervisor--last-progress-message))
            (phase (plist-get payload :phase))
@@ -190,6 +194,8 @@
               (if (string-empty-p executable) "-" executable))))
    ((plist-get details :error)
     (format "%s" (plist-get details :error)))
+   ((plist-get details :summary)
+    (format "%s" (plist-get details :summary)))
    (t
     (format "%S" details))))
 
@@ -238,10 +244,20 @@
       nil))
 
 (defun emacs-hypervisor--problem-reports ()
-  (seq-filter
-   (lambda (report)
-     (memq (plist-get report :status) '(:skipped :failed :invalid)))
-   (emacs-hypervisor--unit-report-basis)))
+  (append
+   (when (eq emacs-hypervisor--state :failed)
+     (list
+      (list
+       :name "startup"
+       :status :failed
+       :reason (or emacs-hypervisor--shutdown-reason :startup)
+       :details (list :summary
+                      (or (emacs-hypervisor-failure-summary)
+                          "startup failed")))))
+   (seq-filter
+    (lambda (report)
+      (memq (plist-get report :status) '(:skipped :failed :invalid)))
+    (emacs-hypervisor--unit-report-basis))))
 
 (defun emacs-hypervisor--unit-plan-items ()
   (or (emacs-hypervisor--plan-items :units) nil))
@@ -451,6 +467,15 @@
                 "\n"))
       (insert "\n"))))
 
+(defun emacs-hypervisor--insert-warnings-section ()
+  (when emacs-hypervisor--startup-warnings
+    (emacs-hypervisor--insert-section "Warnings")
+    (dolist (warning (reverse (copy-sequence emacs-hypervisor--startup-warnings)))
+      (insert "  "
+              (or (plist-get warning :message) "startup warning")
+              "\n"))
+    (insert "\n")))
+
 (defun emacs-hypervisor--insert-activity-section ()
   (let* ((plan-names (emacs-hypervisor--unit-plan-names))
          (states (emacs-hypervisor--unit-terminal-state-table))
@@ -519,6 +544,7 @@
     (let ((inhibit-read-only t))
       (erase-buffer)
       (emacs-hypervisor--insert-banner)
+      (emacs-hypervisor--insert-warnings-section)
       (emacs-hypervisor--insert-metrics-section)
       (emacs-hypervisor--insert-packages-section)
       (emacs-hypervisor--insert-activity-section)

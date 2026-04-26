@@ -87,7 +87,7 @@ Failure:
 | `:report` | Elle | Planned and executed report items |
 | `:metric` | Elle | Benchmark timing data (when enabled) |
 | `:package` | Emacs | Elpaca package install/finish/timeout events |
-| `:shutdown` | Elle | Session complete, with reason |
+| `:shutdown` | Elle | Session finished, with reason and optional failure status |
 
 ### Package event payloads
 
@@ -126,6 +126,22 @@ sequenceDiagram
         Emacs-)Elle: :package events
     end
     Elle-)Emacs: :report, :shutdown
+```
+
+Config load failures are reported as graceful failed shutdowns instead of Elle
+runtime crashes:
+
+```lisp
+(:rpc :protocol :sexp-rpc :version 1 :kind :event :topic :log
+ :payload (:level :error :phase :startup :step :load-config
+           :source "/path/to/config.org"
+           :message "config load failed for /path/to/config.org: ..."
+           :details "...full Emacs error and backtrace..."))
+
+(:rpc :protocol :sexp-rpc :version 1 :kind :event :topic :shutdown
+ :payload (:reason :config-load-failed :status :failed
+           :phase :startup :step :load-config
+           :source "/path/to/config.org"))
 ```
 
 ### Boot-context response fields

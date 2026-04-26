@@ -13,8 +13,11 @@
 (defvar emacs-hypervisor--last-process-event nil)
 (defvar emacs-hypervisor--last-progress-message nil)
 (defvar emacs-hypervisor--last-log-message nil)
+(defvar emacs-hypervisor--last-error-message nil)
 (defvar emacs-hypervisor--shutdown-reason nil)
 (defvar emacs-hypervisor--completed nil)
+(defvar emacs-hypervisor--finish-notified nil)
+(defvar emacs-hypervisor--startup-warnings nil)
 (defvar emacs-hypervisor-process-sentinel-function nil)
 (defvar emacs-hypervisor-loaded-env-file nil)
 (defvar emacs-hypervisor-loaded-env-vars nil)
@@ -26,6 +29,21 @@
 (defun emacs-hypervisor--report-value (function &rest args)
   (when (fboundp function)
     (apply function args)))
+
+(defun emacs-hypervisor--notify-session-finished (&optional proc event)
+  "Run the session-finished hooks once for PROC and EVENT."
+  (unless emacs-hypervisor--finish-notified
+    (setq emacs-hypervisor--finish-notified t)
+    (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-finished)
+    (when (functionp emacs-hypervisor-process-sentinel-function)
+      (funcall emacs-hypervisor-process-sentinel-function proc event))))
+
+(defun emacs-hypervisor-record-startup-warning (kind message &rest details)
+  "Record a startup warning with KIND, MESSAGE, and DETAILS."
+  (let ((entry (append (list :kind kind :message message) details)))
+    (push entry emacs-hypervisor--startup-warnings)
+    (emacs-hypervisor--report-call 'emacs-hypervisor-report-refresh)
+    entry))
 
 (defun emacs-hypervisor-benchmark-enabled-p ()
   "Return non-nil when Hypervisor benchmarking is enabled."
@@ -45,8 +63,11 @@
   (setq emacs-hypervisor--last-process-event nil)
   (setq emacs-hypervisor--last-progress-message nil)
   (setq emacs-hypervisor--last-log-message nil)
+  (setq emacs-hypervisor--last-error-message nil)
   (setq emacs-hypervisor--shutdown-reason nil)
   (setq emacs-hypervisor--completed nil)
+  (setq emacs-hypervisor--finish-notified nil)
+  (setq emacs-hypervisor--startup-warnings nil)
   (setq emacs-hypervisor-loaded-env-file nil)
   (setq emacs-hypervisor-loaded-env-vars nil)
   (setq emacs-hypervisor-process-sentinel-function nil)
@@ -82,6 +103,24 @@ that should not prevent local config reloads."
     (unless buffer
       (error "No Hypervisor process buffer is available"))
     (pop-to-buffer buffer)))
+
+(defun emacs-hypervisor--one-line-message (value)
+  "Return the first line of VALUE formatted as a user-facing message."
+  (when value
+    (car (split-string (format "%s" value) "[\r\n]+" t))))
+
+(defun emacs-hypervisor-failure-summary (&optional status)
+  "Return the best short failure summary from STATUS or current state."
+  (let* ((status (or status (emacs-hypervisor-status)))
+         (last-log (plist-get status :last-log)))
+    (or (emacs-hypervisor--one-line-message
+         (plist-get status :last-error))
+        (emacs-hypervisor--one-line-message
+         (plist-get last-log :message))
+        (emacs-hypervisor--one-line-message
+         (plist-get status :shutdown))
+        (emacs-hypervisor--one-line-message
+         (plist-get status :last-process-event)))))
 
 (defun emacs-hypervisor-init-elapsed-ms ()
   "Return the Emacs init duration in milliseconds."
@@ -122,6 +161,8 @@ that should not prevent local config reloads."
    :last-process-event emacs-hypervisor--last-process-event
    :last-progress emacs-hypervisor--last-progress-message
    :last-log emacs-hypervisor--last-log-message
+   :last-error emacs-hypervisor--last-error-message
+   :warnings (reverse (copy-sequence emacs-hypervisor--startup-warnings))
    :timings (emacs-hypervisor-startup-metrics)
    :reports (length emacs-hypervisor--report-messages)
    :messages (length emacs-hypervisor--message-log)))

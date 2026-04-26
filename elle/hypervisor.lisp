@@ -28,6 +28,17 @@
     {:path source-path
      :forms (read-all forms-source)}))
 
+(defn emacs-hypervisor-config-load-failure-message [config-file config-org-file error]
+  (string
+   "config load failed for "
+   (or config-org-file config-file "<unknown config>")
+   ": "
+   error))
+
+(defn emacs-hypervisor-send-shutdown [payload]
+  (protocol:send-event :shutdown payload)
+  (sys/exit 0))
+
 (protocol:with-mailbox-reader
  mailbox
  (fn []
@@ -54,11 +65,10 @@
                     "expected successful :boot-context response")
           boot-context
           (protocol:from-wire (protocol:message-payload boot-context-response))
-          {:session-name boot-session-name
-           :config-file boot-config-file
-           :config-org-file boot-config-org-file
-           :repo-dir boot-repo-dir}
-          boot-context
+          boot-session-name (get boot-context :session-name)
+          boot-config-file (get boot-context :config-file)
+          boot-config-org-file (get boot-context :config-org-file)
+          boot-repo-dir (get boot-context :repo-dir)
           report-core-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_FORMS"
@@ -178,144 +188,165 @@
            :metric-kind :runtime-setup
            :phase :startup))))
      (let [config-load-result (protocol:await-response mailbox 4)]
-       (assert (protocol:response-ok? config-load-result)
-               (string "config load should succeed: "
-                       (or (protocol:response-error config-load-result)
-                           :unknown-error))))
-     (protocol:send-event
-      :progress
-      '(:phase :startup :step :config-loaded :done 2 :total 10))
-     (protocol:send-request
-      5
-      :session-data
-      '(:fields (:packages :units :env)))
-     (let* [session-data-response (protocol:await-response mailbox 5)
-            _ (assert (protocol:response-ok? session-data-response)
-                      "expected successful :session-data response")
-            {:packages raw-packages :units raw-units :env raw-env}
-            (protocol:from-wire-session-data
-             (protocol:message-payload session-data-response))
-            packages (or raw-packages ())
-            units (or raw-units ())
-            env (or raw-env ())
-            session-analysis-started-at (clock/monotonic)
-            {:reports planned-package-reports}
-            (benchmark:measure
-             :planning
-             :derive-package-reports
-             (fn [] (policy:derive-package-reports packages)))
-            package-names (graph:known-names packages)
-            {:reports executable-reports}
-            (benchmark:measure
-             :preflight
-             :probe-executables
-             (fn []
-               (preflight:probe-executables
-                (preflight:units-with-executables units)
-                10)))
-            {:reports planned-unit-reports}
-            (benchmark:measure
-             :planning
-             :derive-unit-reports
-             (fn []
-               (policy:derive-unit-reports
-                units
-                package-names
-                planned-package-reports
-                env
-                executable-reports)))
-            package-plan
-            (benchmark:measure
-             :planning
-             :derive-package-plan
-             (fn []
-               (planning:derive-package-plan packages planned-package-reports)))
-            unit-plan
-            (benchmark:measure
-             :planning
-             :derive-unit-plan
-             (fn []
-               (planning:derive-unit-plan units planned-unit-reports)))]
-        (benchmark:emit-metric
-         :planning
-         :session-analysis-total
-         (benchmark:elapsed-ms session-analysis-started-at)
-         nil
-         nil)
-        (protocol:send-event
-         :progress
-         '(:phase :handshake :step :session-data-parsed :done 3 :total 10))
-        (protocol:send-event
-         :log
-         `(:level :info
-           :message ,(string "prepared session helper forms for " session-name)))
-        (protocol:send-request
-         6
-         :eval
-         (benchmark:eval-payload
-          `(:form ,(runtime-forms:install-session-helpers-form
-                    session-base-module
-                    elpaca-bridge-module
-                    package-runtime-module
-                    unit-runtime-module)
-            :metric-name :install-session-helpers
-            :metric-kind :runtime-setup
-            :phase :startup)))
-        (let [runtime-result (protocol:await-response mailbox 6)]
-          (assert (protocol:response-ok? runtime-result)
-                  (string "session helper install should succeed: "
-                          (or (protocol:response-error runtime-result)
-                              :unknown-error))))
-        (protocol:send-event
-         :progress
-         '(:phase :planning :step :policy-derived :done 4 :total 10))
-        (policy:emit-report-message :planned :packages planned-package-reports)
-        (policy:emit-report-message :planned :units planned-unit-reports)
-        (policy:emit-report-logs "planned-package" planned-package-reports)
-        (policy:emit-report-logs "planned-unit" planned-unit-reports)
-        (planning:emit-plan-message package-plan)
-        (planning:emit-plan-message unit-plan)
-        (protocol:send-event
-         :progress
-         '(:phase :planning :step :plans-emitted :done 5 :total 10))
-        (let* [executed-package-plan
-               (execution:execute-package-entry-plan-tracker
-                (planning:plan-items package-plan)
-                30)
-               package-reports
-               (planning:merge-executed-reports
-                planned-package-reports
-                (get executed-package-plan :reports))
-               {:next-id next-id}
-               executed-package-plan
-               executed-unit-plan
-               (execution:execute-unit-plan
-                (planning:plan-items unit-plan)
-                package-reports
-                next-id)
-               unit-reports
-               (planning:merge-executed-reports
-                planned-unit-reports
-                (get executed-unit-plan :reports))]
-          (policy:emit-report-logs "package" package-reports)
-          (policy:emit-report-message :executed :packages package-reports)
-          (protocol:send-event
-           :progress
-           '(:phase :packages :step :executed :done 6 :total 10))
-          (policy:emit-report-logs "unit" unit-reports)
-          (policy:emit-report-message :executed :units unit-reports)
-          (protocol:send-event
-           :progress
-           '(:phase :units :step :executed :done 7 :total 10))
-          (protocol:send-event
-           :progress
-           '(:phase :reporting :step :reports-emitted :done 8 :total 10))
-          (protocol:send-event
-           :progress
-           '(:phase :events :step :execution-recorded :done 9 :total 10))
-          (protocol:send-event
-           :progress
-           '(:phase :shutdown :step :ready :done 10 :total 10))
-          (protocol:send-event
-           :shutdown
-           '(:reason :hypervisor-session-complete)))))))
+       (if (protocol:response-ok? config-load-result)
+         (begin
+           (protocol:send-event
+            :progress
+            '(:phase :startup :step :config-loaded :done 2 :total 10))
+           (protocol:send-request
+            5
+            :session-data
+            '(:fields (:packages :units :env)))
+           (let* [session-data-response (protocol:await-response mailbox 5)
+                  _ (assert (protocol:response-ok? session-data-response)
+                            "expected successful :session-data response")
+                  {:packages raw-packages :units raw-units :env raw-env}
+                  (protocol:from-wire-session-data
+                   (protocol:message-payload session-data-response))
+                  packages (or raw-packages ())
+                  units (or raw-units ())
+                  env (or raw-env ())
+                  session-analysis-started-at (clock/monotonic)
+                  {:reports planned-package-reports}
+                  (benchmark:measure
+                   :planning
+                   :derive-package-reports
+                   (fn [] (policy:derive-package-reports packages)))
+                  package-names (graph:known-names packages)
+                  {:reports executable-reports}
+                  (benchmark:measure
+                   :preflight
+                   :probe-executables
+                   (fn []
+                     (preflight:probe-executables
+                      (preflight:units-with-executables units)
+                      10)))
+                  {:reports planned-unit-reports}
+                  (benchmark:measure
+                   :planning
+                   :derive-unit-reports
+                   (fn []
+                     (policy:derive-unit-reports
+                      units
+                      package-names
+                      planned-package-reports
+                      env
+                      executable-reports)))
+                  package-plan
+                  (benchmark:measure
+                   :planning
+                   :derive-package-plan
+                   (fn []
+                     (planning:derive-package-plan packages planned-package-reports)))
+                  unit-plan
+                  (benchmark:measure
+                   :planning
+                   :derive-unit-plan
+                   (fn []
+                     (planning:derive-unit-plan units planned-unit-reports)))]
+             (benchmark:emit-metric
+              :planning
+              :session-analysis-total
+              (benchmark:elapsed-ms session-analysis-started-at)
+              nil
+              nil)
+             (protocol:send-event
+              :progress
+              '(:phase :handshake :step :session-data-parsed :done 3 :total 10))
+             (protocol:send-event
+              :log
+              `(:level :info
+                :message ,(string "prepared session helper forms for " session-name)))
+             (protocol:send-request
+              6
+              :eval
+              (benchmark:eval-payload
+               `(:form ,(runtime-forms:install-session-helpers-form
+                         session-base-module
+                         elpaca-bridge-module
+                         package-runtime-module
+                         unit-runtime-module)
+                 :metric-name :install-session-helpers
+                 :metric-kind :runtime-setup
+                 :phase :startup)))
+             (let [runtime-result (protocol:await-response mailbox 6)]
+               (assert (protocol:response-ok? runtime-result)
+                       (string "session helper install should succeed: "
+                               (or (protocol:response-error runtime-result)
+                                   :unknown-error))))
+             (protocol:send-event
+              :progress
+              '(:phase :planning :step :policy-derived :done 4 :total 10))
+             (policy:emit-report-message :planned :packages planned-package-reports)
+             (policy:emit-report-message :planned :units planned-unit-reports)
+             (policy:emit-report-logs "planned-package" planned-package-reports)
+             (policy:emit-report-logs "planned-unit" planned-unit-reports)
+             (planning:emit-plan-message package-plan)
+             (planning:emit-plan-message unit-plan)
+             (protocol:send-event
+              :progress
+              '(:phase :planning :step :plans-emitted :done 5 :total 10))
+             (let* [executed-package-plan
+                    (execution:execute-package-entry-plan-tracker
+                     (planning:plan-items package-plan)
+                     30)
+                    package-reports
+                    (planning:merge-executed-reports
+                     planned-package-reports
+                     (get executed-package-plan :reports))
+                    {:next-id next-id}
+                    executed-package-plan
+                    executed-unit-plan
+                    (execution:execute-unit-plan
+                     (planning:plan-items unit-plan)
+                     package-reports
+                     next-id)
+                    unit-reports
+                    (planning:merge-executed-reports
+                     planned-unit-reports
+                     (get executed-unit-plan :reports))]
+               (policy:emit-report-logs "package" package-reports)
+               (policy:emit-report-message :executed :packages package-reports)
+               (protocol:send-event
+                :progress
+                '(:phase :packages :step :executed :done 6 :total 10))
+               (policy:emit-report-logs "unit" unit-reports)
+               (policy:emit-report-message :executed :units unit-reports)
+               (protocol:send-event
+                :progress
+                '(:phase :units :step :executed :done 7 :total 10))
+               (protocol:send-event
+                :progress
+                '(:phase :reporting :step :reports-emitted :done 8 :total 10))
+               (protocol:send-event
+                :progress
+                '(:phase :events :step :execution-recorded :done 9 :total 10))
+               (protocol:send-event
+                :progress
+                '(:phase :shutdown :step :ready :done 10 :total 10))
+               (emacs-hypervisor-send-shutdown
+                '(:reason :hypervisor-session-complete)))))
+         (let* [config-error
+                (or (protocol:response-error config-load-result) :unknown-error)
+                config-source (or config-org-file config-file "<unknown config>")
+                config-message
+                (emacs-hypervisor-config-load-failure-message
+                 config-file
+                 config-org-file
+                 config-error)]
+           (protocol:send-event
+            :log
+            `(:level :error
+              :phase :startup
+              :step :load-config
+              :source ,config-source
+              :message ,config-message
+              :details ,config-error))
+           (emacs-hypervisor-send-shutdown
+            `(:reason :config-load-failed
+              :status :failed
+              :phase :startup
+              :step :load-config
+              :source ,config-source
+              :message ,config-message
+              :details ,config-error))))))))

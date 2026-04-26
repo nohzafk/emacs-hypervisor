@@ -46,6 +46,7 @@
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-unit-runtime)
 (require 'emacs-hypervisor-compose)
+(require 'emacs-hypervisor-report)
 
 (defvar emacs-hypervisor-config-file nil)
 (defvar emacs-hypervisor-config-org-file nil)
@@ -1084,6 +1085,44 @@
   (should (eq emacs-hypervisor--shutdown-reason :hypervisor-session-complete))
   (should emacs-hypervisor--completed)
   (should (eq emacs-hypervisor--state :completed)))
+
+(ert-deftest emacs-hypervisor-dispatch-rpc-event-records-failed-shutdown ()
+  (let (notified)
+    (emacs-hypervisor-reset)
+    (setq emacs-hypervisor-process-sentinel-function
+          (lambda (_proc event)
+            (push event notified)))
+    (emacs-hypervisor--dispatch
+     (emacs-hypervisor-test--event
+      :log
+      '(:level :error
+        :message "config load failed: (error \"bad key\")\nbacktrace...")))
+    (emacs-hypervisor--dispatch
+     (emacs-hypervisor-test--event
+      :shutdown
+      '(:reason :config-load-failed)))
+    (should (eq emacs-hypervisor--shutdown-reason :config-load-failed))
+    (should emacs-hypervisor--completed)
+    (should (eq emacs-hypervisor--state :failed))
+    (should (equal notified '(":config-load-failed\n")))
+    (should (equal emacs-hypervisor--last-error-message
+                   "config load failed: (error \"bad key\")\nbacktrace..."))
+    (should (equal (emacs-hypervisor-failure-summary)
+                   "config load failed: (error \"bad key\")"))
+    (emacs-hypervisor-record-startup-warning
+     :bootstrap-hash
+     "generated init.el is stale")
+    (unwind-protect
+        (progn
+          (emacs-hypervisor--render-report-buffer)
+          (with-current-buffer (emacs-hypervisor-report-buffer)
+            (let ((contents (buffer-string)))
+              (should (string-match-p "Warnings" contents))
+              (should (string-match-p "generated init.el is stale" contents))
+              (should (string-match-p "Problems" contents))
+              (should (string-match-p "startup" contents))
+              (should (string-match-p "config load failed" contents)))))
+      (kill-buffer emacs-hypervisor--report-buffer-name))))
 
 (ert-deftest emacs-hypervisor-runtime-package-callbacks-emit-installed-and-finish-once ()
   (let (sent noted)

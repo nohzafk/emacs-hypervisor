@@ -14,6 +14,7 @@
 (defvar emacs-hypervisor--state :idle)
 (defvar emacs-hypervisor--last-progress-message nil)
 (defvar emacs-hypervisor--last-log-message nil)
+(defvar emacs-hypervisor--last-error-message nil)
 (defvar emacs-hypervisor--shutdown-reason nil)
 (defvar emacs-hypervisor--completed nil)
 (defvar emacs-hypervisor-context-function nil)
@@ -21,6 +22,7 @@
 
 (declare-function emacs-hypervisor--record "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor-benchmark-enabled-p "emacs-hypervisor-session-state")
+(declare-function emacs-hypervisor--notify-session-finished "emacs-hypervisor-session-state")
 
 (defun emacs-hypervisor--sexp-string (value)
   "Serialize VALUE as a reader-compatible single-line S-expression.
@@ -126,6 +128,12 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
      (* 1000.0 (- (float-time) started-at))
      (emacs-hypervisor--rpc-metric-details id op payload))))
 
+(defun emacs-hypervisor--failed-shutdown-p (payload)
+  "Return non-nil when shutdown PAYLOAD represents a failed session."
+  (or (eq (plist-get payload :status) :failed)
+      (memq (plist-get payload :reason)
+            '(:config-load-failed))))
+
 (defun emacs-hypervisor--dispatch-rpc-eval (id form)
   (condition-case err
       (let ((value (eval form)))
@@ -198,9 +206,12 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
        (emacs-hypervisor--report-call 'emacs-hypervisor-report-note-progress)
        t)
       (:log
-       (setq emacs-hypervisor--last-log-message
-             (append '(:log) payload))
-       (push (append '(:log) payload) emacs-hypervisor--log-messages)
+       (let ((entry (append '(:log) payload)))
+         (setq emacs-hypervisor--last-log-message entry)
+         (when (eq (plist-get payload :level) :error)
+           (setq emacs-hypervisor--last-error-message
+                 (plist-get payload :message)))
+         (push entry emacs-hypervisor--log-messages))
        (emacs-hypervisor--report-call 'emacs-hypervisor-report-note-log)
        t)
       (:report
@@ -222,9 +233,14 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
       (:shutdown
        (setq emacs-hypervisor--shutdown-reason
              (plist-get payload :reason))
-       (setq emacs-hypervisor--state :completed)
+       (setq emacs-hypervisor--state
+             (if (emacs-hypervisor--failed-shutdown-p payload)
+                 :failed
+               :completed))
        (setq emacs-hypervisor--completed t)
-       (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-finished)
+       (emacs-hypervisor--notify-session-finished
+        emacs-hypervisor--process
+        (format "%s\n" emacs-hypervisor--shutdown-reason))
        t)
       (_ nil))))
 

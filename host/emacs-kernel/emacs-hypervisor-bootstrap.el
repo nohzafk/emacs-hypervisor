@@ -50,9 +50,7 @@ unreadable. Returns the names of envvars that were changed."
     (unless emacs-hypervisor--completed
       (setq emacs-hypervisor--state :failed)
       (setq emacs-hypervisor--shutdown-reason :process-exited))
-    (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-finished)
-    (when (functionp emacs-hypervisor-process-sentinel-function)
-      (funcall emacs-hypervisor-process-sentinel-function proc event))))
+    (emacs-hypervisor--notify-session-finished proc event)))
 
 (defun emacs-hypervisor-start (command &optional process-name)
   (let ((buffer (get-buffer-create emacs-hypervisor--buffer-name)))

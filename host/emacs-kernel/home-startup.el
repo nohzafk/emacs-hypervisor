@@ -63,6 +63,75 @@
                  (concat "Could not find `emacs-hypervisor' via "
                          "EMACS_HYPERVISOR_BIN or PATH"))))))
 
+(defun emacs-hypervisor--trim-string (value)
+  "Return VALUE without leading or trailing ASCII whitespace."
+  (replace-regexp-in-string
+   "\\`[ \t\r\n]+\\|[ \t\r\n]+\\'" ""
+   value))
+
+(defun emacs-hypervisor--generated-init-file ()
+  "Return the generated init.el path for the current Hypervisor home."
+  (expand-file-name "init.el" emacs-hypervisor-home-directory))
+
+(defun emacs-hypervisor--current-init-content-hash ()
+  "Return the content hash recorded in generated init.el, or nil."
+  (let ((init-file (emacs-hypervisor--generated-init-file)))
+    (when (file-exists-p init-file)
+      (with-temp-buffer
+        (insert-file-contents init-file nil 0 4096)
+        (goto-char (point-min))
+        (when (re-search-forward
+               "^;; emacs-hypervisor-content-hash: \\(.+\\)$"
+               nil
+               t)
+          (match-string 1))))))
+
+(defun emacs-hypervisor--binary-bootstrap-hash (binary)
+  "Ask BINARY for the init.el bootstrap hash it would generate."
+  (with-temp-buffer
+    (when (= (call-process binary nil t nil "bootstrap-hash") 0)
+      (emacs-hypervisor--trim-string (buffer-string)))))
+
+(defun emacs-hypervisor--record-bootstrap-warning (message &rest details)
+  "Record and display a bootstrap warning MESSAGE with DETAILS."
+  (apply #'emacs-hypervisor-record-startup-warning
+         :bootstrap-hash
+         message
+         details)
+  (unless noninteractive
+    (message "[Hypervisor] warning: %s" message)))
+
+(defun emacs-hypervisor-check-bootstrap-hash ()
+  "Warn when generated init.el does not match the current binary."
+  (let* ((binary (emacs-hypervisor-resolve-binary))
+         (current-hash (emacs-hypervisor--current-init-content-hash))
+         (expected-hash (emacs-hypervisor--binary-bootstrap-hash binary))
+         (upgrade-command
+          (format "%s init --home %s --upgrade"
+                  binary
+                  (directory-file-name emacs-hypervisor-home-directory))))
+    (cond
+     ((and current-hash expected-hash (not (equal current-hash expected-hash)))
+      (emacs-hypervisor--record-bootstrap-warning
+       (format "generated init.el is stale; run `%s`" upgrade-command)
+       :current-hash current-hash
+       :expected-hash expected-hash
+       :binary binary
+       :home emacs-hypervisor-home-directory))
+     ((and (null current-hash) expected-hash)
+      (emacs-hypervisor--record-bootstrap-warning
+       (format "generated init.el has no content hash; run `%s`" upgrade-command)
+       :expected-hash expected-hash
+       :binary binary
+       :home emacs-hypervisor-home-directory))
+     ((and current-hash (null expected-hash))
+      (emacs-hypervisor--record-bootstrap-warning
+       (format "could not read bootstrap hash from `%s`; reinstall the current binary"
+               binary)
+       :current-hash current-hash
+       :binary binary
+       :home emacs-hypervisor-home-directory)))))
+
 (defun emacs-hypervisor-empty-session-data (&optional fields)
   "Return an explicit empty session-data payload."
   (let ((requested (or fields '(:packages :units :env)))
@@ -85,6 +154,7 @@
   (emacs-hypervisor-reset)
   (emacs-hypervisor-load-envvars-file emacs-hypervisor-env-file t)
   (emacs-hypervisor-resolve-binary)
+  (emacs-hypervisor-check-bootstrap-hash)
   (setq emacs-hypervisor-context-function
         (lambda ()
           (append
@@ -109,10 +179,12 @@
               (if (eq (plist-get status :state) :failed)
                   (progn
                     (message "[Hypervisor] session failed: %s"
-                             (or (plist-get status :last-process-event)
-                                 (plist-get status :shutdown)))
+                             (or (emacs-hypervisor-failure-summary status)
+                                 :failed))
                     (when emacs-hypervisor-open-buffer-on-abnormal-exit
-                      (emacs-hypervisor-open-process-buffer)))
+                      (if (fboundp 'emacs-hypervisor-open-report-buffer)
+                          (emacs-hypervisor-open-report-buffer)
+                        (emacs-hypervisor-open-process-buffer))))
                 (message "[Hypervisor] session complete: %s"
                          (or (plist-get status :shutdown) :ok)))))))
   (emacs-hypervisor-start
