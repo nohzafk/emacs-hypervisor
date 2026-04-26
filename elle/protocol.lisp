@@ -64,45 +64,45 @@
 
   (defn plist-get [xs key]
     (match xs
-      (() nil)
-      ((k v & rest)
+      () nil
+      (k v & rest)
        (if (= k key)
          v
-         (plist-get rest key)))
-      (_ nil)))
+         (plist-get rest key))
+      _ nil))
 
   (defn plist-like? [xs]
     (match xs
-      (() true)
-      ((k _ & rest)
+      () true
+      (k _ & rest)
        (and (= (type-of k) :keyword)
-            (plist-like? rest)))
-      (_ false)))
+            (plist-like? rest))
+      _ false))
 
   (defn from-wire-plist [xs]
     (match xs
-      (() {})
-      ((k v & rest)
+      () {}
+      (k v & rest)
        (put
         (from-wire-plist rest)
         k
-        (from-wire v)))
-      (_ {})))
+        (from-wire v))
+      _ {}))
 
   (defn raw-wire-field? [raw-keys key]
     (any? (fn [raw-key] (= raw-key key)) raw-keys))
 
   (defn from-wire-plist-preserving [xs raw-keys]
     (match xs
-      (() {})
-      ((k v & rest)
+      () {}
+      (k v & rest)
        (put
         (from-wire-plist-preserving rest raw-keys)
         k
         (if (raw-wire-field? raw-keys k)
           v
-          (from-wire v))))
-      (_ {})))
+          (from-wire v)))
+      _ {}))
 
   (defn from-wire [value]
     (case (type-of value)
@@ -229,22 +229,22 @@
 
   (defn route-queue [mailbox route]
     (match route
-      ((:response id) (get (mailbox-responses mailbox) id ()))
-      ((:event topic) (get (mailbox-events mailbox) topic ()))
-      (_ (mailbox-other mailbox))))
+      (:response id) (get (mailbox-responses mailbox) id ())
+      (:event topic) (get (mailbox-events mailbox) topic ())
+      _ (mailbox-other mailbox)))
 
   (defn set-route-queue [mailbox route queue]
     (match route
-      ((:response id)
+      (:response id)
        (set-mailbox-responses
         mailbox
-        (put (mailbox-responses mailbox) id queue)))
-      ((:event topic)
+        (put (mailbox-responses mailbox) id queue))
+      (:event topic)
        (set-mailbox-events
         mailbox
-        (put (mailbox-events mailbox) topic queue)))
-      (_
-       (set-mailbox-other mailbox queue))))
+        (put (mailbox-events mailbox) topic queue))
+      _
+       (set-mailbox-other mailbox queue)))
 
   (defn enqueue-routed-message [mailbox route message]
     (set-route-queue
@@ -260,12 +260,12 @@
 
   (defn remove-first-route [routes expected]
     (match routes
-      (() ())
-      ((route & rest)
+      () ()
+      (route & rest)
        (if (= route expected)
          rest
-         (cons route (remove-first-route rest expected))))
-      (_ ())))
+         (cons route (remove-first-route rest expected)))
+      _ ()))
 
   (defn pop-route-message [mailbox route]
     (let [queue (route-queue mailbox route)]

@@ -78,12 +78,12 @@
 
   (defn find-entry [entries name]
     (match entries
-      (() nil)
-      ((entry & rest)
+      () nil
+      (entry & rest)
        (if (= (entry-name entry) name)
          entry
-         (find-entry rest name)))
-      (_ nil)))
+         (find-entry rest name))
+      _ nil))
 
   (defn report-status [reports name]
     (if-let [entry (find-entry reports name)]

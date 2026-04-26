@@ -42,7 +42,7 @@ start-elle-mcp:
 [group('Test')]
 test:
     cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
-    ./.elle/target/debug/elle tests/elle/hypervisor-runtime.lisp
+    ./.elle/target/release/elle tests/elle/hypervisor-runtime.lisp
     emacs --batch -Q \
       -L host/emacs-kernel \
       -L elle/runtime-forms \

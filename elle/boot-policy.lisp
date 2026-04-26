@@ -52,13 +52,13 @@
   (defn next-package-report [entry reports]
     (let [blockers (blocked-deps reports (graph:entry-field entry :deps))]
       (match (empty? blockers)
-        (true
-         (ready-package-report entry))
-        (_
+        true
+         (ready-package-report entry)
+        _
          (blocked-report
           (graph:entry-name entry)
           :blocked-by-package
-          blockers)))))
+          blockers))))
 
   (defn derive-package-reports [packages]
     (let [package-names (graph:known-names packages)
@@ -94,22 +94,22 @@
               (empty? unit-blockers)
               (empty? env-missing)
               (empty? executable-missing)]
-        ([false _ _ _]
+        [false _ _ _]
          (blocked-report
           (graph:entry-name entry)
           :blocked-by-package
-          package-blockers))
-        ([true false _ _]
+          package-blockers)
+        [true false _ _]
          (blocked-report
           (graph:entry-name entry)
           :blocked-by-unit
-          unit-blockers))
-        ([true true false _]
-         (preflight-report entry env-missing executable-missing))
-        ([true true _ false]
-         (preflight-report entry env-missing executable-missing))
-        (_
-         (ready-unit-report entry)))))
+          unit-blockers)
+        [true true false _]
+         (preflight-report entry env-missing executable-missing)
+        [true true _ false]
+         (preflight-report entry env-missing executable-missing)
+        _
+         (ready-unit-report entry))))
 
   (defn derive-unit-reports [units package-names package-reports env executable-reports]
     (let [unit-names (graph:known-names units)

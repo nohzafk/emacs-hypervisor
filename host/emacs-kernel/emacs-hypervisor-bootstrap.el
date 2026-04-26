@@ -2,6 +2,7 @@
 
 (defvar emacs-hypervisor-context-function #'emacs-hypervisor-default-context)
 (defvar emacs-hypervisor-session-data-function #'emacs-hypervisor-default-session-data)
+(defvar emacs-hypervisor--stderr-buffer-name " *emacs-hypervisor stderr*")
 
 (require 'emacs-hypervisor-session-state)
 (require 'emacs-hypervisor-sexp-rpc)
@@ -70,6 +71,7 @@ unreadable. Returns the names of envvars that were changed."
            :coding 'utf-8-unix
            :connection-type 'pipe
            :filter #'emacs-hypervisor-sexp-rpc-filter
+           :stderr (get-buffer-create emacs-hypervisor--stderr-buffer-name)
            :sentinel #'emacs-hypervisor--sentinel
            :noquery t))
     emacs-hypervisor--process))

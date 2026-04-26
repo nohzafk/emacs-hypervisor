@@ -15,7 +15,7 @@
           forms (module-forms module-spec)
           source (module-source module-spec)]
       (cond
-       (forms
+       forms
         (let [module-forms-literal (list 'quote forms)]
           `((let ((emacs-hypervisor-source-path ,path)
                   (emacs-hypervisor-module-forms ,module-forms-literal))
@@ -33,9 +33,9 @@
                 (set-buffer-modified-p nil)
                 (setq-local buffer-file-name nil)
                 (setq-local load-file-name nil)
-                ,ready-marker)))))
+                ,ready-marker))))
 
-       (source
+       source
         `((let ((emacs-hypervisor-source-path ,path)
                 (emacs-hypervisor-source-text ,source))
             (with-temp-buffer
@@ -49,10 +49,10 @@
               (set-buffer-modified-p nil)
               (setq-local buffer-file-name nil)
               (setq-local load-file-name nil)
-              ,ready-marker))))
+              ,ready-marker)))
 
-       (true
+       true
         (assert false
-                (string "expected embedded module forms or source for " path))))))
+                (string "expected embedded module forms or source for " path)))))
 
   {:load-module-form load-module-form})

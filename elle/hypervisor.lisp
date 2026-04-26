@@ -57,8 +57,7 @@
           {:session-name boot-session-name
            :config-file boot-config-file
            :config-org-file boot-config-org-file
-           :repo-dir boot-repo-dir
-           & _boot-context}
+           :repo-dir boot-repo-dir}
           boot-context
           report-core-module
           (emacs-hypervisor-embedded-module-spec

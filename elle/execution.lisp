@@ -52,9 +52,9 @@
 
   (defn append-recipe-spec [recipe spec]
     (match spec
-      ((enabled fields)
-       (append-recipe-fields recipe enabled fields))
-      (_ recipe)))
+      (enabled fields)
+       (append-recipe-fields recipe enabled fields)
+      _ recipe))
 
   (defn package-entry-order [entry]
     (let* [{:name name-string
@@ -326,16 +326,16 @@
 
   (defn tracker-failure-details [reason]
     (match reason
-      (nil
-       {:source :tracker :error :missing-install-callback})
-      ("timeout"
-       {:source :tracker :error :timeout})
-      ((:queue-start-error error)
-       {:source :queue :error error})
-      (_
+      nil
+       {:source :tracker :error :missing-install-callback}
+      "timeout"
+       {:source :tracker :error :timeout}
+      (:queue-start-error error)
+       {:source :queue :error error}
+      _
        {:source :tracker
         :error :missing-install-callback
-        :finished-reason reason})))
+        :finished-reason reason}))
 
   (defn tracker-process-result-id? [message process-id]
     (and (= (protocol:message-kind message) :response)
@@ -368,30 +368,30 @@
             name (get payload :name)
             reason (get payload :reason)]
         (match [(get payload :phase) (get payload :kind)]
-          ([:packages :installed]
+          [:packages :installed]
            (collect-package-tracker-state
             process-id
             (tracker-installed installed name)
             finished-reason
-            process-result))
-          ([:packages :finished]
+            process-result)
+          [:packages :finished]
            (collect-package-tracker-state
             process-id
             installed
             reason
-            process-result))
-          ([:packages :timeout]
+            process-result)
+          [:packages :timeout]
            (collect-package-tracker-state
             process-id
             installed
             (or reason "timeout")
-            process-result))
-          (_
+            process-result)
+          _
            (collect-package-tracker-state
             process-id
             installed
             finished-reason
-            process-result))))
+            process-result)))
       (collect-package-tracker-state
        process-id
        installed
@@ -432,20 +432,20 @@
     (let [queued-report (graph:find-entry queued-package-reports name)]
       (match [(queued-package-report? queued-report)
               (member? installed-names name)]
-        ([false _]
-         queued-report)
-        ([true true]
-         (executed-package-report name entry))
-        (_
+        [false _]
+         queued-report
+        [true true]
+         (executed-package-report name entry)
+        _
          (let [package-blockers
                (report-blockers
                 final-package-reports
                 (graph:entry-field entry :deps))]
            (match (empty? package-blockers)
-             (true
-              (failed-package-report name finished-reason))
-             (_
-              (blocked-report name :blocked-by-package package-blockers))))))))
+             true
+              (failed-package-report name finished-reason)
+             _
+              (blocked-report name :blocked-by-package package-blockers))))))
 
   (defn derive-tracker-package-reports
       [plan-items queued-package-reports installed-names finished-reason]
@@ -501,19 +501,19 @@
           unit-blockers
           (report-blockers executed-unit-reports (graph:entry-field entry :after))]
       (match [(empty? package-blockers) (empty? unit-blockers)]
-        ([false _]
+        [false _]
          (blocked-report-state
           name
           current-id
           :blocked-by-package
-          package-blockers))
-        ([true false]
+          package-blockers)
+        [true false]
          (blocked-report-state
           name
           current-id
           :blocked-by-unit
-          unit-blockers))
-        (_
+          unit-blockers)
+        _
          (let [result
                (eval-form
                 current-id
@@ -526,7 +526,7 @@
             current-id
             name
             (executed-unit-report name entry)
-            result))))))
+            result)))))
 
   (defn execute-package-entry-plan-tracker [plan-items next-id]
     (let [{:reports queued-package-reports :next-id process-id}

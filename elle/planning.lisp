@@ -67,15 +67,15 @@
 
   (defn plan-message-item [{:phase phase :entry entry :name name}]
     (match phase
-      (:packages
+      :packages
        (list
         :name name
-        :deps (graph:entry-field entry :deps)))
-      (_
+        :deps (graph:entry-field entry :deps))
+      _
        (list
         :name name
         :requires (graph:entry-field entry :requires)
-        :after (graph:entry-field entry :after)))))
+        :after (graph:entry-field entry :after))))
 
   (defn emit-plan-message [{:phase phase :items items}]
     (protocol:send-event
