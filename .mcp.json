@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "elle-mcp": {
-      "command": "scripts/start-elle-mcp",
+      "command": "./scripts/start-elle-mcp",
       "args": []
     }
   }

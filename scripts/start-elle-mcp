@@ -4,103 +4,33 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
-elle_bin=${ELLE_BIN:-"$repo_dir/.elle/target/release/elle"}
+elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 store_dir=${ELLE_MCP_STORE:-"$repo_dir/.elle-mcp/store"}
 
-has_oxigraph_plugin() {
-    for path in \
-        "$repo_dir/.elle/target/release/libelle_oxigraph.dylib" \
-        "$repo_dir/.elle/target/release/libelle_oxigraph.so" \
-        "$repo_dir/.elle/target/debug/libelle_oxigraph.dylib" \
-        "$repo_dir/.elle/target/debug/libelle_oxigraph.so"; do
-        if [ -f "$path" ]; then
-            return 0
-        fi
-    done
+usage() {
+    cat <<EOF
+usage: scripts/start-elle-mcp
 
-    return 1
+Starts the repo-local Elle MCP server:
+  cd "$elle_dir"
+  target/release/elle mcp/mcp-server.lisp -- "$store_dir"
+EOF
 }
 
-resolve_server() {
-    if [ -n "${ELLE_MCP_SERVER:-}" ] && [ -f "${ELLE_MCP_SERVER}" ]; then
-        printf '%s\n' "${ELLE_MCP_SERVER}"
-        return 0
-    fi
-
-    for path in \
-        "$repo_dir/.elle/mcp/mcp-server.lisp" \
-        "$repo_dir/.elle/mcp/tools/mcp-server.lisp" \
-        "$repo_dir/.vendor/elle-mcp/mcp-server.lisp" \
-        "$repo_dir/.vendor/elle-mcp/tools/mcp-server.lisp" \
-        "$repo_dir/../elle-mcp/mcp-server.lisp" \
-        "$repo_dir/../elle-mcp/tools/mcp-server.lisp"; do
-        if [ -f "$path" ]; then
-            printf '%s\n' "$path"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-if ! server_file=$(resolve_server); then
-    cat <<'EOF' >&2
-Elle MCP server not found.
-
-Expected one of:
-- ELLE_MCP_SERVER=/path/to/mcp-server.lisp
-- .elle/mcp/mcp-server.lisp
-- .elle/mcp/tools/mcp-server.lisp
-- ../elle-mcp/mcp-server.lisp
-- ../elle-mcp/tools/mcp-server.lisp
-- .vendor/elle-mcp/mcp-server.lisp
-- .vendor/elle-mcp/tools/mcp-server.lisp
-
-Once available, this wrapper will start the MCP server with a repo-local store
-at .elle-mcp/store by default.
-EOF
-    exit 1
-fi
-
-if [ ! -x "$elle_bin" ]; then
-    cat >&2 <<EOF
-Elle binary not found at:
-- $elle_bin
-
-Set ELLE_BIN to an existing Elle binary or run:
-- scripts/bootstrap-elle
-EOF
-    exit 1
-fi
-
-if ! has_oxigraph_plugin; then
-    cat >&2 <<'EOF'
-Elle MCP plugin not found.
-
-Expected one of:
-- .elle/target/release/libelle_oxigraph.dylib
-- .elle/target/release/libelle_oxigraph.so
-- .elle/target/debug/libelle_oxigraph.dylib
-- .elle/target/debug/libelle_oxigraph.so
-
-Run:
-- scripts/bootstrap-elle
-
-That bootstrap flow builds the repo-local Elle binary and the MCP plugins in
-one pass.
-EOF
-    exit 1
-fi
-
-mkdir -p "$store_dir"
-cd "$repo_dir"
-
-# oxigraph 0.4.x panics in rocksdb_wrapper when RLIMIT_NOFILE is unlimited
-# (TryFromIntError casting the soft limit to i32). Cap it if needed.
-current_nofile=$(ulimit -n 2>/dev/null || echo unlimited)
-case "$current_nofile" in
-    unlimited|*[!0-9]*) ulimit -n 10240 ;;
-    *) [ "$current_nofile" -gt 1048576 ] && ulimit -n 10240 ;;
+case "${1-}" in
+    "")
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    *)
+        usage >&2
+        exit 64
+        ;;
 esac
 
-exec "$elle_bin" "$server_file" -- "$store_dir"
+mkdir -p "$(dirname "$store_dir")"
+
+cd "$elle_dir"
+exec target/release/elle mcp/mcp-server.lisp -- "$store_dir"

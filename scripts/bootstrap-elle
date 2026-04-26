@@ -21,7 +21,8 @@ submodules, build the release binary, and build the MCP plugins:
 Environment overrides:
 - ELLE_DIR  destination checkout directory (default: $repo_dir/.elle)
 - ELLE_REPO clone URL (default: $elle_repo)
-- LIBCLANG_PATH  passed through to the MCP plugin build when set
+- LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script
+  auto-detects Xcode's libclang when available
 EOF
 }
 
@@ -112,7 +113,7 @@ Artifacts:
 - $elle_dir/target/release/libelle_oxigraph
 - $elle_dir/target/release/libelle_syn
 
-scripts/start-elle-mcp should now resolve the repo-local binary and required MCP
-plugins automatically. Override with ELLE_BIN if you need a different binary
-build.
+Start the MCP server with:
+
+  just start-elle-mcp
 EOF
