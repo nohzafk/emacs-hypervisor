@@ -1,6 +1,6 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-test_home := justfile_directory() + "/.test-home"
+test_emacs_home := justfile_directory() + "/.test-emacs-home"
 test_config_home := justfile_directory() + "/.test-config-home"
 hypervisor_binary := justfile_directory() + "/target/release/emacs-hypervisor"
 
@@ -51,7 +51,7 @@ test:
       -f ert-run-tests-batch-and-exit
 
 [group('Emacs')]
-emacs-home-reset path=test_home config_home=test_config_home:
+emacs-home-reset path=test_emacs_home config_home=test_config_home:
     rm -rf "{{path}}" "{{config_home}}"
     XDG_CONFIG_HOME="{{config_home}}" ./target/release/emacs-hypervisor init --home "{{path}}"
     mkdir -p "{{config_home}}/emacs-hypervisor"
@@ -59,11 +59,11 @@ emacs-home-reset path=test_home config_home=test_config_home:
     cp -r config/ "{{config_home}}/emacs-hypervisor"
 
 [group('Emacs')]
-emacs-home-run path=test_home binary=hypervisor_binary config_home=test_config_home:
+emacs-home-run path=test_emacs_home binary=hypervisor_binary config_home=test_config_home:
     XDG_CONFIG_HOME="{{config_home}}" EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
 
 [group('Emacs')]
-emacs-home-live-test path=test_home binary=hypervisor_binary:
+emacs-home-live-test path=test_emacs_home binary=hypervisor_binary:
     just build
     just emacs-home-reset "{{path}}"
     just emacs-home-run "{{path}}" "{{binary}}"
