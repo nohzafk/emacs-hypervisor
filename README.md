@@ -1,262 +1,459 @@
 # Emacs Hypervisor
 
-`emacs-hypervisor` is an Elle-native external control plane for Emacs
-configuration. Emacs stays a small trusted Lisp evaluation kernel; Elle owns
-graph resolution, boot policy, orchestration, and runtime code generation.
+A single native binary for deterministic, reloadable Emacs configuration
+orchestration.
 
-**Attention Conservation Notice**
+Hypervisor is a small foundation for building your own Emacs config, not a
+distribution. You keep ownership of `config.el`; Hypervisor provides package
+declarations, config-unit declarations, dependency planning, reload support,
+and a Lisp-native control plane around Emacs.
 
-For: Contributors working on startup, protocol, runtime forms, or config units
+## Motivation
 
-What: Current architecture and file ownership for the Lisp-to-Lisp runtime path
+Hypervisor grew out of
+[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which treated
+Emacs config as a dependency graph instead of a long, order-sensitive script.
+Three ideas drove the evolution from Backbone to Hypervisor:
 
-Action: Read this before changing the kernel boundary or Elle orchestration
+**Config as a fault-tolerant dependency graph.** Backbone proved that
+topological sorting and explicit dependencies make config deterministic. Hypervisor
+takes this further: startup becomes an observable orchestration session with
+preflight checks, failure propagation, execution plans, and reports. The
+long-term direction is Erlang-style supervisor trees for config units.
 
-Skip if: You only need command syntax; see `NATIVE-HOST.md` instead
+**Lisp-to-Lisp homoiconicity.** Backbone used Gleam + JSON-RPC to communicate
+with Emacs --- any language can talk to Emacs over a wire protocol, but using
+another Lisp has a unique advantage: config-unit bodies travel as structured
+Lisp data, not opaque strings. Elle (a Janet-like Lisp over Rust) can inspect
+and rewrite Elisp forms directly. This powers effect-aware reload: Hypervisor
+can recognize `(add-hook 'my-hook (lambda () ...))`, rewrite the lambda to a
+named function, and automatically remove it before re-applying the unit.
 
-## Current Status
+**Single binary, no framework to clone.** Traditional Emacs config frameworks
+require cloning a repo into `~/.config/emacs` because Emacs must load an
+`init.el` written in Elisp. Hypervisor compiles to a single binary with all
+Elle source and runtime Elisp embedded. The only file in your Emacs home is a
+small generated `init.el` (a stable kernel for sexp-rpc), plus your own
+`config.el`.
 
-The core Lisp-to-Lisp path is now in place.
+## User-Facing Model
 
-Config units are exported from Emacs as structured Lisp forms, sent over
-`sexp-rpc` as S-expressions, preserved as raw code data inside Elle session
-data, and sent back to Emacs as quoted forms for evaluation. This removes the
-old string-read execution path while keeping protocol metadata available as
-ordinary Elle data.
+The entire user-facing surface is two macros:
 
-The project is still in spike/productization mode. The architecture is stable
-enough to treat the README as the canonical target, but runtime helpers are
-still being simplified.
+| Macro | Purpose |
+|---|---|
+| `package!` | Declare packages and their dependencies |
+| `config-unit!` | Declare named blocks of configuration |
 
-## Architecture
+This gives you a bare framework for organizing your own configuration. It does
+not choose your packages, keybindings, UI, editing model, or workflow.
 
-```mermaid
-flowchart TD
-    Home["Provisioned Emacs home"] --> Init["generated init.el"]
-    Init --> Kernel["trusted Emacs kernel"]
-    Kernel <--> RPC["sexp-rpc over stdio"]
-    RPC <--> Elle["Elle backend"]
+## Features
 
-    Config["config.el"] --> Decls["package and config declarations"]
-    Kernel --> Config
-    Decls --> RPC
+- **Single binary** --- `emacs-hypervisor` with the embedded Elle backend,
+  runtime Elisp, and all orchestration logic.
+- **Generated `init.el`** --- a small trusted kernel; your config lives in
+  `config.el`.
+- **Elpaca-backed packages** --- `package!` declarations feed into Elpaca for
+  installation.
+- **Topological sorting** --- packages and config units resolve in deterministic
+  order.
+- **Preflight checks** --- missing packages, missing dependencies, cycles, env
+  vars, executables, and required features are caught before execution.
+- **Eager, fail-fast startup** --- surface errors immediately instead of hiding
+  them behind lazy loading.
+- **Selective reload** --- apply only new and changed units in a running session.
+- **Effect-aware reload** --- automatically clean old hooks and advice before
+  re-applying a changed unit.
+- **Startup reports** --- progress events, package events, status inspection,
+  and optional metrics.
 
-    Elle --> Graph["graph and preflight"]
-    Elle --> Policy["boot policy and planning"]
-    Elle --> Runtime["runtime form generation"]
+## Why Eager Startup
 
-    Runtime --> RPC
-    Kernel --> Eval["trusted eval surface"]
-    Eval --> Elpaca["Elpaca package work"]
-    Eval --> Units["config unit execution"]
+Hypervisor treats startup as the place to prove your config is internally
+consistent. Lazy loading can hide broken config until hours into a session,
+when the original context is gone. Hypervisor takes the opposite tradeoff:
+resolve the graph, run config units in deterministic order, surface errors
+immediately.
 
-    Elpaca --> Events["package events"]
-    Units --> Events
-    Events --> RPC
-    Elle --> Reports["plans reports metrics shutdown"]
-```
+Eager does not mean force-loading every package. `:requires` should be used
+only when the body truly needs a feature loaded first (package-local variables,
+keymaps, macros, non-autoloaded functions). Hook registration, global
+keybindings, autoloaded commands, and pre-load-safe variable setup can run
+eagerly without `:requires`.
 
-## Runtime Split
-
-The resident Emacs side is intentionally small:
-
-- generated `init.el`
-- trusted bootstrap kernel authored under `host/emacs-kernel/` and bundled
-  into the generated `init.el`
-- `sexp-rpc` process filter, request dispatch, and session state
-- declaration/export surface for `package!` and `config-unit!`
-- trusted `:eval` surface for Elle-emitted forms
-
-Elle owns the behavior that should not live permanently in Emacs:
-
-- protocol mailboxing and request correlation
-- package graph and config-unit graph handling
-- preflight checks
-- boot policy
-- package and unit planning
-- execution ordering
-- failure propagation
-- report derivation
-- runtime Elisp form generation
-
-The emitted runtime forms under `elle/runtime-forms/` are the execution
-substrate. They may install Elpaca bridges, report helpers, and unit execution
-helpers into the live Emacs session, but they should not become a second
-resident policy engine.
-
-## Lisp-To-Lisp Boundary
-
-The important invariant is that protocol data and code data are decoded with
-different rules.
-
-Protocol metadata is decoded into normal Elle data so graph and planning code
-can work with structs, lists, arrays, strings, and keywords.
-
-Config-unit bodies remain Lisp code data. Elle must not recursively convert
-plist-like lists inside `:body`, because Elisp forms such as
-`(foo (:a 1 :b 2))` are code/data and not protocol plists.
-
-The current path is:
-
-1. `config-unit!` captures the body as `(progn ... t)`.
-2. Emacs canonicalizes reader-hostile forms while preserving semantics.
-3. Emacs sends session data through `sexp-rpc`.
-4. Elle decodes package/unit/env metadata, preserving each unit `:body` raw.
-5. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
-6. Emacs evaluates the structured body directly.
-
-This is the Lisp-to-Lisp homoiconic surface that unlocks later advanced
-features such as structural inspection, targeted rewrites, interactive
-remediation, and live reload without re-parsing opaque strings.
-
-## Reload Features
-
-`emacs-hypervisor-reload-config` reloads `config.el` into a running Emacs
-session. It wires together two distinct features:
-
-- selective reload decides which `config-unit!` declarations need work
-- effect-aware reload cleans recognized old effects before replacing or
-  removing a unit
+## Reload
 
 ### Selective Reload
 
-Selective reload captures the previous exported `config-unit!` declarations,
-resets and reloads declarations from `config.el`, then compares old and new
-units by `:name` and exported structure:
+`M-x emacs-hypervisor-reload-config` reloads `config.el` in a running session.
+It diffs the previous declarations against the new ones:
 
-- unchanged units are skipped
-- new units are applied
-- changed units are applied
-- removed units are not evaluated
+- **Unchanged** units are skipped.
+- **New** and **changed** units are applied.
+- **Removed** units are not evaluated again.
 
-This is a core strength of the Lisp-to-Lisp runtime boundary. Because
-config-unit bodies are preserved as structured Lisp forms, Hypervisor can make
-targeted reload decisions without reparsing strings or treating config as an
-opaque blob.
+Edit one unit without replaying every package integration, mode setup, and hook
+registration in the session.
 
 ### Effect-Aware Reload
 
-Effect-aware reload automatically resets supported effects before applying a
-changed unit. This prevents the most common reload drift: duplicate hooks and
-stale advice left behind by an older version of a config unit.
+Before re-applying a changed unit, Hypervisor cleans up recognized effects from
+the previous version. This prevents the most common reload drift in long-lived
+sessions: duplicate hook entries, duplicated advice, and stale generated
+functions.
 
-For a changed unit, Hypervisor looks at the previous unit body, runs cleanup
-for supported effects, then evaluates the new body. For a removed unit,
-Hypervisor runs cleanup for supported effects from the old body and does not
-evaluate that unit again.
+```elisp
+;; On reload, the old hook entry is removed before the new body is applied
+(config-unit! project-hooks
+  :config
+  (add-hook 'prog-mode-hook #'display-line-numbers-mode))
 
-Currently supported automatic resets:
+;; On reload, the old advice is removed before the new body is applied
+(config-unit! save-behavior
+  :config
+  (advice-add 'save-buffer :before #'delete-trailing-whitespace))
+```
 
-- `add-hook`
-  - previous `(add-hook 'HOOK FUNCTION)` resets with
-    `(remove-hook 'HOOK FUNCTION)`
-  - previous `(add-hook 'HOOK FUNCTION DEPTH)` resets with
-    `(remove-hook 'HOOK FUNCTION)`
-  - previous `(add-hook 'HOOK FUNCTION DEPTH nil)` resets with
-    `(remove-hook 'HOOK FUNCTION)`
-  - anonymous `(lambda ...)` and `#'(lambda ...)` functions are rewritten to
-    generated internal function names before they are added, so they can be
-    removed on the next reload
-- `advice-add`
-  - previous `(advice-add 'TARGET WHERE FUNCTION)` resets with
-    `(advice-remove 'TARGET FUNCTION)`
-  - anonymous `(lambda ...)` and `#'(lambda ...)` functions are rewritten to
-    generated internal function names before advice is installed
+The recognizer is intentionally conservative. Unknown or computed effects are
+reported as **opaque** instead of being reset unsafely.
 
-The recognizer is intentionally conservative. Hook names and advice targets
-must be literal quoted symbols. Functions must be symbols or function-quoted
-symbols, or anonymous lambdas in the supported positions above.
+| Recognized form | Cleanup action |
+|---|---|
+| `(add-hook 'HOOK FN)` | `(remove-hook 'HOOK FN)` |
+| `(add-hook 'HOOK FN DEPTH)` | `(remove-hook 'HOOK FN)` |
+| `(add-hook 'HOOK FN DEPTH nil)` | `(remove-hook 'HOOK FN)` |
+| `(advice-add 'TARGET WHERE FN)` | `(advice-remove 'TARGET FN)` |
 
-Everything else is treated as opaque and reported without being reset
-unsafely. Opaque does not automatically mean restart recommended. This
-includes computed hook names, computed advice targets, lambdas hidden inside
-computed expressions, local hooks, timers, processes, file/network effects,
-package-manager effects, theme state, faces, variables, keybindings, and
-buffer-local side effects.
+### Anonymous Lambdas
 
-Reload still preserves the existing guardrails:
+Anonymous functions are normally impossible to remove because each reload
+creates a new lambda object. Hypervisor rewrites hook and advice lambdas to
+generated named functions before installing them:
 
-- it refuses to run while a Hypervisor session is actively starting/running
-- it reloads the configured env file before loading `config.el`
-- it keeps preflight checks for env vars, executables, required features, new
-  packages, `:after` ordering, cycles, and blocked units
-- it warns when new package declarations require a restart/package sync
+```elisp
+;; You write:
+(config-unit! text-editing
+  :config
+  (add-hook 'text-mode-hook
+            (lambda () (setq-local fill-column 80))))
 
-The latest reload report is stored in
-`emacs-hypervisor-last-soft-reload-report` with kind
-`:config-reload`. The report summarizes applied, removed, unchanged, cleaned,
-and failed units, and includes per-unit cleanup details.
+;; Hypervisor emits:
+(defalias 'emacs-hypervisor--generated--text-editing--add-hook--text-mode-hook--HASH
+  #'(lambda () (setq-local fill-column 80)))
+(add-hook 'text-mode-hook
+          #'emacs-hypervisor--generated--text-editing--add-hook--text-mode-hook--HASH)
+```
 
-## Startup Flow
+On the next reload, the old named function is removed from the hook before the
+new body is applied. This is the Lisp-to-Lisp advantage: the unit body is
+structured Lisp data, so Hypervisor can recognize the form and emit a safer
+version without string parsing.
 
-1. A provisioned Emacs home loads generated `init.el`.
-2. `init.el` evaluates the bundled trusted kernel and starts the native host subprocess.
-3. Elle sends `:hello` and `:boot-context`.
-4. Emacs loads `config.el`, collecting declarations.
-5. Elle requests `:session-data` for packages, units, and env.
-6. Elle derives package and config-unit plans.
-7. Elle installs transient runtime helper forms into Emacs.
-8. Elle queues package work and tracks package events.
-9. Elle executes runnable config units in dependency order.
-10. Elle sends plan, progress, report, metric, and shutdown events.
+## Config Example
+
+```elisp
+(package! magit)
+(package! transient
+  :repo "magit/transient"
+  :branch "main")
+
+(config-unit! magit-ui
+  :requires (magit)
+  :executable (git)
+  :config
+  (keymap-set global-map "C-x g" #'magit-status))
+
+(config-unit! project-hooks
+  :after (magit-ui)
+  :config
+  (add-hook 'magit-mode-hook
+            (lambda ()
+              (setq-local truncate-lines t))))
+```
+
+`magit-ui` requires the `magit` feature before it runs. `project-hooks` only
+needs `magit-ui` to have completed first; its hook registration can run eagerly
+without loading another package feature.
+
+## Usage
+
+Download the `emacs-hypervisor` binary for your platform, make it executable,
+and place it somewhere on `PATH`.
+
+```bash
+mkdir -p ~/.local/bin
+chmod +x emacs-hypervisor
+mv emacs-hypervisor ~/.local/bin/emacs-hypervisor
+```
+
+Initialize an Emacs home:
+
+```bash
+emacs-hypervisor init --home ~/.config/emacs
+```
+
+`init` refuses to initialize a non-empty home. This is deliberate: the generated
+`init.el` is a managed bootstrap artifact, while your configuration belongs in
+`config.el`.
+
+Create or edit:
+
+```text
+~/.config/emacs/config.el
+```
+
+Optionally capture the current shell environment for Emacs:
+
+```bash
+emacs-hypervisor env --home ~/.config/emacs
+```
+
+`env` writes a Lisp list of `"KEY=VALUE"` strings. The generated startup loads
+that file before `config.el`, updates `process-environment`, rebuilds
+`exec-path` from `PATH`, and updates `shell-file-name` from `SHELL`.
+
+Start Emacs:
+
+```bash
+emacs --init-directory ~/.config/emacs
+```
+
+If GUI Emacs cannot see your shell `PATH`, or if you want to test a specific
+binary, launch Emacs with `EMACS_HYPERVISOR_BIN`:
+
+```bash
+EMACS_HYPERVISOR_BIN=/path/to/emacs-hypervisor \
+  emacs --init-directory ~/.config/emacs
+```
+
+`EMACS_HYPERVISOR_BIN` is an absolute or relative path to the host binary the
+generated `init.el` should launch. It wins over `PATH` lookup and is useful for
+temporary testing, GUI launches, and installations where the binary is not in
+Emacs's inherited environment.
+
+## Subcommands
+
+| Command | Purpose |
+|---|---|
+| `emacs-hypervisor` | Start the stdio backend (alias for `serve`) |
+| `emacs-hypervisor serve` | Start the stdio backend explicitly |
+| `emacs-hypervisor init [--home DIR]` | Write the generated `init.el` into an Emacs home |
+| `emacs-hypervisor env [--home DIR] [-o FILE]` | Write a shell environment snapshot |
+
+Default Emacs home: `$XDG_CONFIG_HOME/emacs` if set, otherwise
+`$HOME/.config/emacs`.
+
+## Generated Home Layout
+
+Do not edit `init.el`. Put user configuration in `config.el` and bootstrap
+customization in `early-init.el`.
+
+```
+~/.config/emacs/
+├── init.el        # generated, managed by Hypervisor
+├── early-init.el  # optional, user-owned
+├── config.el      # your package! and config-unit! declarations
+└── env            # optional, generated by `emacs-hypervisor env`
+```
+
+## Reference
+
+### `package!` options
+
+| Option | Purpose |
+|---|---|
+| `:repo` | Git repository (e.g. `"magit/transient"`) |
+| `:host` | Git host (`"github"`, `"gitlab"`, etc.) |
+| `:branch` | Branch to track |
+| `:tag` | Tag to pin |
+| `:ref` | Exact ref to pin |
+| `:files` | File patterns to include |
+| `:deps` | Package dependencies |
+| `:local` | Local filesystem path |
+| `:no-compilation` | Skip native compilation |
+
+### `config-unit!` options
+
+| Option | Purpose |
+|---|---|
+| `:after` | Run this unit only after the named units have completed |
+| `:requires` | Load these package features before running the body |
+| `:env` | Skip this unit if any of these environment variables are unset |
+| `:executable` | Skip this unit if any of these binaries are missing from `PATH` |
+| `:config` | The configuration body |
+
+### Elisp bootstrap variables
+
+Set these in `early-init.el` before the generated `init.el` runs.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `emacs-hypervisor-config-file` | `config.el` in Emacs home | Config file to load |
+| `emacs-hypervisor-env-file` | `env` in Emacs home | Env snapshot file (or `EMACS_HYPERVISOR_ENV_FILE`) |
+| `emacs-hypervisor-binary-name` | `"emacs-hypervisor"` | Binary name for `PATH` lookup |
+| `emacs-hypervisor-open-buffer-on-abnormal-exit` | `t` | Show process buffer on abnormal exit |
+
+## Architecture
+
+One rule: **Emacs keeps a small trusted kernel; Elle owns orchestration
+policy.**
+
+```mermaid
+flowchart TD
+    subgraph Emacs
+        Kernel["trusted kernel<br/>sexp-rpc · session state · eval surface"]
+        Decls["package! / config-unit! declarations"]
+        Runtime["emitted runtime helpers<br/>Elpaca bridge · unit execution · reload · reports"]
+    end
+
+    subgraph Binary["emacs-hypervisor binary"]
+        Elle["Elle backend"]
+        Embedded["embedded Elle source + runtime Elisp"]
+    end
+
+    Kernel <-- "sexp-rpc over stdio" --> Elle
+    Decls -- "export session data" --> Elle
+    Elle -- "emit forms via :eval" --> Runtime
+    Embedded -. "bundled at compile time" .-> Elle
+```
+
+| Layer | Lifetime | Owns |
+|---|---|---|
+| **Emacs kernel** | Resident, small | Process startup, session state, sexp-rpc dispatch, `package!` / `config-unit!` macros, trusted `:eval` surface |
+| **Elle backend** | Runs in binary | Dependency graphs, preflight checks, boot policy, execution ordering, failure propagation, reports |
+| **Runtime forms** | Transient, per session | Elpaca bridge, unit execution, reload, report rendering --- execution substrate, not a second policy engine |
+
+### Three-Stage Bootstrap
+
+```mermaid
+flowchart LR
+    subgraph S1["Stage 1 — Stable Kernel"]
+        direction TB
+        A["Emacs home"] --> B["load generated init.el"]
+        B --> C["kernel boots"]
+    end
+
+    subgraph S2["Stage 2 — Control Plane"]
+        direction TB
+        D["launch emacs-hypervisor serve"]
+        D --> E["sexp-rpc session established"]
+    end
+
+    subgraph S3["Stage 3 — Session Runtime"]
+        direction TB
+        F["emit runtime forms"]
+        F --> G["package planning"]
+        G --> H["config-unit execution"]
+        H --> I["reload + reports ready"]
+    end
+
+    S1 --> S2 --> S3
+```
+
+**Stage 1 --- Stable kernel.** The generated `init.el` contains the trusted
+Emacs kernel: process startup, session state, sexp-rpc parsing, request
+dispatch, and the small eval surface used by the host.
+
+**Stage 2 --- Control plane.** Emacs launches `emacs-hypervisor serve`, then
+Emacs and Elle exchange request, response, and event messages over stdio using
+S-expressions.
+
+**Stage 3 --- Session runtime.** The binary embeds Elle source and runtime
+Elisp forms; Elle sends them into Emacs for the current session, then runs
+package planning, config-unit execution, reload support, reports, and shutdown.
+
+### Lisp-to-Lisp Data Flow
+
+The key invariant: **protocol metadata and code data are decoded with different
+rules.** Protocol fields become normal Elle data for graph and planning code.
+Config-unit `:body` fields remain raw Lisp code --- Elle never recursively
+converts plist-like lists inside a body, because `(foo (:a 1 :b 2))` is
+code/data, not a protocol plist.
+
+The path through the system:
+
+1. `config-unit!` captures the body as `(progn ... t)`.
+2. Emacs canonicalizes reader-hostile forms while preserving semantics.
+3. Emacs sends session data through sexp-rpc.
+4. Elle decodes package, unit, and env metadata; each unit `:body` stays raw.
+5. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
+6. Emacs evaluates the structured body directly.
+
+This homoiconic surface is what makes structural inspection, targeted rewrites,
+effect-aware reload, and interactive remediation practical without re-parsing
+opaque strings.
 
 ## File Guide
 
-- `config.el` is the repo test configuration source.
-- `host/emacs-kernel/` contains trusted Emacs kernel source modules and the
-  home startup wrapper that are bundled into generated homes.
-- `elle/hypervisor.lisp` is the shared backend entrypoint.
-- `elle/protocol.lisp` contains `sexp-rpc` helpers and wire decoding.
-- `elle/graph.lisp`, `elle/preflight.lisp`, `elle/boot-policy.lisp`,
-  `elle/planning.lisp`, and `elle/execution.lisp` own orchestration policy.
-- `elle/runtime-forms.lisp` coordinates emitted runtime modules.
-- `elle/runtime-forms/` contains transient Emacs helper modules.
-- `elle/runtime-forms/emacs-hypervisor-selective-reload.el` owns reload unit
-  diffing and `:after` scheduling for changed units.
-- `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el` owns recognized
-  effect detection and cleanup.
-- `elle/runtime-forms/emacs-hypervisor-compose.el` wires reload features into
-  `emacs-hypervisor-reload-config`.
-- `tests/elle/hypervisor-runtime.lisp` covers shared Elle runtime semantics.
-- `tests/elisp/emacs-hypervisor-bootstrap-test.el` covers the trusted kernel
-  and runtime helper behavior.
-
-## Developer Commands
-
-```bash
-just test
-just analyze-runtime
-just build
-just home-live-test
+```
+emacs-hypervisor/
+├── host/                              # Rust native host
+│   ├── src/main.rs                    # CLI entrypoint (init, env, serve)
+│   ├── build.rs                       # embeds Elle source + Elisp at compile time
+│   ├── emacs-kernel/                  # trusted Emacs kernel (bundled into init.el)
+│   │   ├── home-startup.el            #   home bootstrap wrapper
+│   │   ├── emacs-hypervisor-bootstrap.el    #   process startup, sexp-rpc, eval surface
+│   │   ├── emacs-hypervisor-session-state.el#   session state management
+│   │   └── emacs-hypervisor-sexp-rpc.el     #   S-expression wire protocol
+│   └── elisp_pack/                    # build-time Elisp packer (Rust crate)
+│       └── src/lib.rs
+│
+├── elle/                              # Elle backend (embedded in binary)
+│   ├── hypervisor.lisp                # backend entrypoint
+│   ├── protocol.lisp                  # sexp-rpc helpers, wire decoding
+│   ├── graph.lisp                     # dependency graph construction
+│   ├── preflight.lisp                 # preflight validation checks
+│   ├── boot-policy.lisp               # boot policy decisions
+│   ├── planning.lisp                  # execution plan generation
+│   ├── execution.lisp                 # config-unit execution
+│   ├── runtime-forms.lisp             # coordinates emitted runtime modules
+│   └── runtime-forms/                 # transient Elisp emitted per session
+│       ├── module-loader.lisp         #   module loading coordinator
+│       ├── emacs-hypervisor-declarations.el       #   package!/config-unit! macros
+│       ├── emacs-hypervisor-elpaca-bridge.el       #   Elpaca integration
+│       ├── emacs-hypervisor-package-runtime.el     #   package event handling
+│       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
+│       ├── emacs-hypervisor-session-base.el        #   session lifecycle
+│       ├── emacs-hypervisor-selective-reload.el    #   reload diffing + scheduling
+│       ├── emacs-hypervisor-effect-aware-reload.el #   effect detection + cleanup
+│       ├── emacs-hypervisor-compose.el             #   wires reload into M-x command
+│       ├── emacs-hypervisor-report-core.el         #   report data structures
+│       └── emacs-hypervisor-report.el              #   startup report rendering
+│
+├── tests/
+│   ├── elle/hypervisor-runtime.lisp               # Elle runtime semantics tests
+│   └── elisp/emacs-hypervisor-bootstrap-test.el   # kernel + runtime helper tests
+│
+├── scripts/
+│   └── analyze-runtime.lisp           # compile-aware analysis script
+│
+├── config.el                          # repo test configuration
+├── early-init.el                      # repo test early-init
+└── justfile                           # build, test, and dev commands
 ```
 
-Use `just analyze-runtime` after changes to shared Elle modules. Use a
-provisioned Emacs home for live startup tests.
+## Development
 
-Repo-local live test home:
-
-```bash
-just build
-just home-reset
-just home-run
-```
-
-One-shot repo-local live test:
+For working on Hypervisor itself, not normal user configuration.
 
 ```bash
-just home-live-test
+just bootstrap-elle          # use repo-local Elle checkout
+just build                   # build the binary
+just test                    # run tests
+just analyze-runtime         # compile-aware analysis after Elle changes
+just emacs-home-live-test    # full live Emacs home test
 ```
 
-## Related Docs
+Step-by-step live testing: `just build && just emacs-home-reset && just emacs-home-run`
 
-- `PROTOCOL.md` documents `sexp-rpc` message shape and failure payloads.
-- `NATIVE-HOST.md` documents normal host binary usage.
-- `LISP-TO-LISP-FUTURES.md` captures future capabilities unlocked by
-  preserving config-unit bodies as structured Lisp data.
-- `docs/2026-04-25-selective-and-effect-aware-reload-spec.md` specifies the
-  implemented selective reload and effect-aware reload features.
-- `host/README.md` documents generated-home bootstrap rules.
-- `host/ELISP-PACK.md` documents the static Elisp packing boundary.
-- `PROJECT-LOG.md` is historical implementation context, not the current
-  architecture contract.
-- `AGENTS.md` is the agent workflow guide for this repository.
+## Further Reading
+
+| Document | Topic |
+|---|---|
+| [`PROTOCOL.md`](PROTOCOL.md) | sexp-rpc message shape and failure payloads |
+| [`LISP-TO-LISP-FUTURES.md`](LISP-TO-LISP-FUTURES.md) | Future capabilities from homoiconic config bodies |
+| [`host/README.md`](host/README.md) | Generated-home bootstrap rules |
+| [`host/ELISP-PACK.md`](host/ELISP-PACK.md) | Static Elisp packing boundary |
+| [`PROJECT-LOG.md`](PROJECT-LOG.md) | Historical implementation context |
+| `docs/` | Historical design notes and captured ideas |

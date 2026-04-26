@@ -1,49 +1,48 @@
-# `sexp-rpc` Notes
+# sexp-rpc Protocol
 
-`emacs-hypervisor` now uses a small Lisp-native RPC/event protocol named
-`sexp-rpc`.
+Emacs Hypervisor uses a Lisp-native RPC/event protocol called sexp-rpc. It is
+JSON-RPC-shaped in semantics (request/response correlation, async events,
+versioned envelope) but uses S-expressions as the wire format, preserving the
+Lisp-to-Lisp properties the project needs:
 
-The current wire contract is:
+- Emacs parses incoming values with `read`.
+- Elle constructs messages with quasiquote/unquote.
+- Payloads stay native Lisp data instead of becoming JSON objects.
+- Code-as-data remains available where the trusted `:eval` surface is needed.
 
-- transport: `stdio`
-- lifecycle: session-scoped subprocess
-- framing: one serialized message per line
-- payload format: S-expressions
-- envelope: `:request`, `:response`, and `:event`
+## Transport
 
-This is intentionally JSON-RPC-shaped in semantics, but not JSON-RPC in
-encoding.
+- **Stdio** between Emacs and the `emacs-hypervisor` subprocess.
+- **One message per line** --- newline is the frame boundary.
+- **Strings are escaped** during serialization (`print-escape-newlines`,
+  `print-escape-control-characters`) so embedded newlines never break framing.
+- The Emacs process filter buffers partial chunks and uses incremental `read`,
+  not a blocking loop that assumes whole messages arrive at once.
 
 ## Envelope
 
-Every protocol message is a top-level `:rpc` form:
+Every message is a top-level `:rpc` plist:
 
 ```lisp
-(:rpc :protocol :sexp-rpc :version 1 :kind :request ...)
-(:rpc :protocol :sexp-rpc :version 1 :kind :response ...)
-(:rpc :protocol :sexp-rpc :version 1 :kind :event ...)
+(:rpc :protocol :sexp-rpc :version 1 :kind <kind> ...)
 ```
 
-### Request
+### Request (Elle to Emacs)
 
 ```lisp
-(:rpc
- :protocol :sexp-rpc
- :version 1
+(:rpc :protocol :sexp-rpc :version 1
  :kind :request
  :id 3
  :op :session-data
  :payload (:fields (:packages :units :env)))
 ```
 
-### Response
+### Response (Emacs to Elle)
 
-Successful:
+Success:
 
 ```lisp
-(:rpc
- :protocol :sexp-rpc
- :version 1
+(:rpc :protocol :sexp-rpc :version 1
  :kind :response
  :id 3
  :ok t
@@ -53,193 +52,157 @@ Successful:
 Failure:
 
 ```lisp
-(:rpc
- :protocol :sexp-rpc
- :version 1
+(:rpc :protocol :sexp-rpc :version 1
  :kind :response
  :id 4
  :ok nil
  :error "(error \"...\")")
 ```
 
-### Event
+### Event (Elle to Emacs, or Emacs to Elle for `:package`)
 
 ```lisp
-(:rpc
- :protocol :sexp-rpc
- :version 1
+(:rpc :protocol :sexp-rpc :version 1
  :kind :event
  :topic :report
  :payload (:stage :executed :phase :units :items (...)))
 ```
 
-## Current Shared-Path Operations
+## Operations
 
-The shared backend currently uses these request operations:
+| Op | Purpose |
+|---|---|
+| `:hello` | Handshake; Emacs responds with protocol, version, mode, transport |
+| `:boot-context` | Emacs responds with session-level facts |
+| `:session-data` | Emacs responds with exported packages, units, env |
+| `:eval` | Emacs evaluates a form from `:payload :form` |
 
-- `:hello`
-- `:boot-context`
-- `:session-data`
-- `:eval`
+## Event Topics
 
-The current shared-path event topics are:
+| Topic | Source | Purpose |
+|---|---|---|
+| `:plan` | Elle | Execution plans for packages and units |
+| `:progress` | Elle | Step-by-step progress updates during startup |
+| `:log` | Elle | Informational log messages |
+| `:report` | Elle | Planned and executed report items |
+| `:metric` | Elle | Benchmark timing data (when enabled) |
+| `:package` | Emacs | Elpaca package install/finish/timeout events |
+| `:shutdown` | Elle | Session complete, with reason |
 
-- `:plan`
-- `:progress`
-- `:log`
-- `:report`
-- `:shutdown`
-- `:package`
+### Package event payloads
 
-`:package` is currently used by the emitted Elpaca tracker bridge for:
+Emitted by the Elpaca bridge on the Emacs side, consumed by Elle:
 
-- `(:phase :packages :kind :installed :name "...")`
-- `(:phase :packages :kind :finished :reason "...")`
-- `(:phase :packages :kind :timeout :reason "...")`
+```lisp
+(:phase :packages :kind :installed :name "magit")
+(:phase :packages :kind :finished)              ;; :reason is optional
+(:phase :packages :kind :timeout)               ;; :reason is optional
+```
 
 ## Handshake
 
-The current startup flow is:
+```mermaid
+sequenceDiagram
+    participant Elle
+    participant Emacs
 
-1. Elle sends `:hello`
-2. Emacs responds with protocol/version/mode/transport facts
-3. Elle sends `:boot-context`
-4. Emacs responds with session-level facts such as:
-   - `:session-name`
-   - `:config-file`
-   - `:repo-dir`
-5. Elle sends `:session-data`
-6. Emacs responds with:
-   - `:packages`
-   - `:units`
-   - `:env`
-7. Elle sends `:eval` to install transient session helpers inside Emacs
-8. Elle emits `:plan`, `:progress`, `:log`, `:report`, and `:shutdown` events
+    Elle->>+Emacs: :hello
+    Emacs-->>-Elle: protocol, version, mode
 
-This is the current shared-path handshake, not the desired steady-state size of
-the Emacs runtime. The architecture direction is to keep the handshake shape
-small and make runtime helper forms transient execution substrate rather than a
-resident policy engine.
+    Elle->>+Emacs: :boot-context
+    Emacs-->>-Elle: session-name, config-file, ...
 
-## Why `sexp-rpc`
+    Elle->>+Emacs: :eval — install config surface
+    Emacs-->>-Elle: ok
+    Elle->>+Emacs: :eval — load config.el
+    Emacs-->>-Elle: ok
+    Elle->>+Emacs: :session-data
+    Emacs-->>-Elle: packages, units, env
+    Elle->>+Emacs: :eval — install session helpers
+    Emacs-->>-Elle: ok
 
-This preserves the Lisp-to-Lisp properties the project wants:
+    loop execution
+        Elle->>Emacs: :eval — run packages/units
+        Emacs-)Elle: :package events
+    end
+    Elle-)Emacs: :report, :shutdown
+```
 
-- Emacs can parse incoming values with `read`
-- Elle can construct messages naturally with quasiquote/unquote
-- protocol payloads stay native Lisp data instead of becoming JSON objects
-- code-as-data remains available where the trusted `:eval` escape hatch is
-  necessary
+### Boot-context response fields
 
-At the same time, it keeps the parts of RPC discipline that matter:
+| Field | Purpose |
+|---|---|
+| `:session-name` | Session identifier |
+| `:config-file` | Path to `config.el` |
+| `:repo-dir` | Emacs home directory |
+| `:ui` | `batch` or `interactive` |
+| `:transport` | `s-expression` |
+| `:benchmark-enabled` | Whether to emit `:metric` events |
 
-- request/response correlation with `:id`
-- explicit async events
-- explicit success/failure responses
-- a stable versioned envelope
+## Mailbox
 
-## Transport Rule
+sexp-rpc is request/response correlated by `:id`, but the transport is one
+shared async stream. Elle cannot discard unrelated messages while waiting for a
+specific response or event.
 
-The current transport rule is:
-
-- each protocol message must serialize to a single physical line
-- string payloads must be escaped during serialization
-- readers may treat newline as the frame boundary
-
-The async Emacs process filter still must handle incomplete S-expressions.
-Newline is the outer message frame boundary, but process I/O can still deliver
-partial chunks. The trusted kernel therefore needs incremental buffering plus
-`read`, not a blocking loop that assumes whole messages arrive at once.
-
-This is why Emacs now uses explicit S-expression serialization for outbound
-messages instead of raw `prin1-to-string`.
-
-Length-prefixed framing is still possible later if the project needs a more
-general transport boundary, but it is not required for the current shared
-session path.
-
-## Matching Semantics
-
-`sexp-rpc` is request/response correlated by `:id`, but the transport is still
-one shared async stream.
-
-That means Elle must not discard unrelated messages while waiting for:
-
-- a specific `:response`
-- a specific `:event` topic
-
-The shared protocol helpers therefore keep an in-memory pending-message mailbox.
-If Elle reads a valid `sexp-rpc` message that does not satisfy the current
+The protocol helpers keep an in-memory mailbox that routes incoming messages by
+`(:response id)` or `(:event topic)`. If a message does not satisfy the current
 waiter, it is buffered and retried by later waits instead of being dropped.
-
-This keeps the current line-framed stdio design simple while avoiding a class
-of ordering bugs where package events or later eval responses can arrive while
+This avoids ordering bugs where package events or eval responses arrive while
 another waiter is active.
 
-## Failure Representation
+## Failure Payloads
 
-Reports remain the source of truth for execution outcomes.
+Reports are the source of truth for execution outcomes. Each report item has
+`:name`, `:status`, `:reason`, and `:details`.
 
-Important report item fields:
+### Status
 
-- `:status`
-  - `:ok`
-  - `:skipped`
-  - `:failed`
-  - `:invalid`
-- `:reason`
-  - examples: `:executed`, `:blocked-by-package`, `:blocked-by-unit`,
-    `:preflight`, `:missing-deps`, `:missing-after-units`, `:execution`
-- `:details`
-  - structured reason payload
+| Status | Meaning |
+|---|---|
+| `:ok` | Succeeded |
+| `:skipped` | Skipped due to upstream failure |
+| `:failed` | Execution failed |
+| `:invalid` | Structurally invalid (missing deps, cycles, preflight) |
 
-The current normalized failure payload shapes are:
+### Reason
 
-- missing references:
-  - `(:missing (...))`
-- dependency blockers:
-  - `(:blockers (...))`
-- cycles:
-  - `(:members (...))`
-- preflight:
-  - `(:env (...) :executable (...))`
-- eval failures:
-  - `(:source :eval :error "...")`
-- package-event failures:
-  - `(:source :package-event :error "...")`
-- tracker/queue failures:
-  - `(:source :tracker ...)`
-  - `(:source :tracker :error :timeout)`
-  - `(:source :queue :error "...")`
+| Reason | Used for |
+|---|---|
+| `:executed` | Successfully executed |
+| `:queued` | Package queued to Elpaca |
+| `:blocked-by-package` | Upstream package failed |
+| `:blocked-by-unit` | Upstream unit failed |
+| `:missing-deps` | Package has unresolved `:deps` |
+| `:missing-required-packages` | Unit has unresolved `:requires` |
+| `:missing-after-units` | Unit has unresolved `:after` |
+| `:cycle` | Part of a dependency cycle |
+| `:preflight` | Failed env or executable check |
+| `:execution` | Eval or runtime error |
 
-## Runtime Boundaries
+### Detail shapes
 
-The trusted Emacs kernel is responsible for:
+```lisp
+;; missing references (packages or units)
+(:missing (...))
 
-- start the backend
-- parse incoming `sexp-rpc` messages
-- answer core requests
-- store only the minimum session state needed for lifecycle and inspection
-- handle shutdown and process-sentinel state
-- support incremental parsing of chunked stdio input
+;; dependency blockers
+(:blockers (...))
 
-Current shared path:
+;; cycle members
+(:members (...))
 
-- Elle installs transient session helper forms inside Emacs
-- those helper forms currently include Elpaca bootstrap hookup, tracker
-  callbacks, and unit execution helpers
-- config-unit bodies are carried as structured Lisp forms, not strings
+;; preflight failures
+(:env (...) :executable (...))
 
-Target direction:
+;; eval failures
+(:source :eval :error "...")
 
-- Emacs keeps only the trusted kernel plus declaration/export surface
-- Elle emits smaller, more transient runtime forms for package/config execution
-- large persistent helper layers in Emacs are transitional, not architectural
+;; tracker failures
+(:source :tracker :error :timeout)
+(:source :tracker :error :missing-install-callback)
+(:source :tracker :error :missing-install-callback :finished-reason "...")
 
-## Compatibility Note
-
-The shared trusted bootstrap is now `sexp-rpc`-only.
-
-Historical numbered spike files that still speak older ad hoc top-level
-messages remain useful as design snapshots, but they are no longer a
-compatibility target for the shared bootstrap/runtime path.
+;; queue failures
+(:source :queue :error "...")
+```
