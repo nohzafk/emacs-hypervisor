@@ -253,8 +253,9 @@ emacs-hypervisor env --home ~/.config/emacs
 ```
 
 `env` writes a Lisp list of `"KEY=VALUE"` strings. The generated startup loads
-that file before user config, updates `process-environment`, rebuilds
-`exec-path` from `PATH`, and updates `shell-file-name` from `SHELL`.
+that file before user config, updates `process-environment`, and rebuilds
+`exec-path` from `PATH`. It intentionally leaves `shell-file-name` to user
+config.
 
 Start Emacs:
 

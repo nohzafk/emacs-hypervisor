@@ -995,9 +995,10 @@
          (temp-file (make-temp-file "emacs-hypervisor-env" nil ".el"))
          (process-environment (copy-sequence process-environment))
          (exec-path (copy-sequence exec-path))
-         (shell-file-name shell-file-name))
+         (previous-shell-file-name (default-value 'shell-file-name)))
     (unwind-protect
         (progn
+          (setq-default shell-file-name "/bin/original-shell")
           (with-temp-file temp-file
             (insert "(\"PATH=/tmp/emacs-hypervisor-test-bin:/usr/bin\" "
                     "\"SHELL=/bin/fish\" "
@@ -1009,10 +1010,13 @@
               "SHELL=/bin/fish"
               "HYPERVISOR_TEST=value")))
           (should (equal (getenv "HYPERVISOR_TEST") "value"))
-          (should (equal shell-file-name "/bin/fish"))
+          (should (equal (getenv "SHELL") "/bin/fish"))
+          (should (equal (default-value 'shell-file-name)
+                         "/bin/original-shell"))
           (should (equal (car exec-path) path-dir))
           (should (equal emacs-hypervisor-loaded-env-file
                          (expand-file-name temp-file))))
+      (setq-default shell-file-name previous-shell-file-name)
       (delete-file temp-file))))
 
 (ert-deftest emacs-hypervisor-dispatch-rpc-request-handles-core-ops ()

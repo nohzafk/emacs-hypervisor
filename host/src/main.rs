@@ -376,12 +376,20 @@ fn escape_lisp_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn build_env_file_contents() -> String {
-    let mut entries = env::vars()
+fn build_env_entries(vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+    let mut entries = vars
+        .into_iter()
         .filter(|(name, _)| valid_env_name(name))
+        .filter(|(name, _)| name != "SHELL")
         .map(|(name, value)| format!("{}={}", name, value))
         .collect::<Vec<_>>();
+
     entries.sort();
+    entries
+}
+
+fn build_env_file_contents() -> String {
+    let entries = build_env_entries(env::vars());
 
     let mut contents = String::from(";; -*- mode: lisp-interaction; coding: utf-8-unix; -*-\n");
     contents.push_str(
@@ -474,5 +482,17 @@ mod tests {
         assert!(!home.join("lisp").exists());
 
         fs::remove_dir_all(&home).expect("test home cleanup should succeed");
+    }
+
+    #[test]
+    fn env_entries_skip_shell() {
+        let entries = build_env_entries(vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("SHELL".to_string(), "/bin/zsh".to_string()),
+            ("USER".to_string(), "randall".to_string()),
+        ]);
+
+        assert!(!entries.contains(&"SHELL=/bin/zsh".to_string()));
+        assert!(entries.contains(&"USER=randall".to_string()));
     }
 }

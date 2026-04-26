@@ -32,10 +32,7 @@ unreadable. Returns the names of envvars that were changed."
            (append env (default-value 'process-environment))
            exec-path
            (append (split-string (getenv "PATH") path-separator t)
-                   (list exec-directory))
-           shell-file-name
-           (or (getenv "SHELL")
-               (default-value 'shell-file-name)))
+                   (list exec-directory)))
           (setq emacs-hypervisor-loaded-env-file (expand-file-name file)
                 emacs-hypervisor-loaded-env-vars env)
           (when-let ((newtz (getenv-internal "TZ")))
