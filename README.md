@@ -1,40 +1,60 @@
 # Emacs Hypervisor
 
-A single native binary for deterministic, reloadable Emacs configuration
-orchestration.
+A single native binary for deterministic, reloadable Emacs configuration.
 
-Hypervisor is a small foundation for building your own Emacs config, not a
-distribution. You keep ownership of `config.org` (or `config.el`); Hypervisor
-provides package declarations, config-unit declarations, dependency planning,
-reload support, and a Lisp-native control plane around Emacs.
+Emacs configuration is notoriously fragile. Traditional setups --- whether
+hand-rolled `use-package` files, Doom Emacs, or Spacemacs --- are long,
+order-sensitive scripts where lazy loading hides broken config until hours into
+a session, when the original context is long gone. A missing dependency, a
+misordered `require`, a stale hook from a reload: these bugs are intermittent,
+hard to reproduce, and painful to diagnose.
 
-## Motivation
+Hypervisor treats your Emacs config as a **dependency graph** instead of a
+script. It resolves the graph with topological sorting, forces everything to
+load at startup in an exact, deterministic order, and surfaces errors
+immediately rather than letting them lurk behind deferred execution. If
+something is broken, you find out in the first five seconds, not two hours
+later.
 
-Hypervisor grew out of
-[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which treated
-Emacs config as a dependency graph instead of a long, order-sensitive script.
-Three ideas drove the evolution from Backbone to Hypervisor:
+It is a small foundation for building your own config, not a distribution. You
+keep ownership of `config.org` (or `config.el`); Hypervisor provides the
+package declarations, config-unit declarations, dependency planning, reload
+support, and a Lisp-native control plane around Emacs.
 
-**Config as a fault-tolerant dependency graph.** Backbone proved that
-topological sorting and explicit dependencies make config deterministic. Hypervisor
-takes this further: startup becomes an observable orchestration session with
-preflight checks, failure propagation, execution plans, and reports. The
-long-term direction is Erlang-style supervisor trees for config units.
+## How It Works
 
-**Lisp-to-Lisp homoiconicity.** Backbone used Gleam + JSON-RPC to communicate
-with Emacs --- any language can talk to Emacs over a wire protocol, but using
-another Lisp has a unique advantage: config-unit bodies travel as structured
-Lisp data, not opaque strings. Elle (a Janet-like Lisp over Rust) can inspect
-and rewrite Elisp forms directly. This powers effect-aware reload: Hypervisor
-can recognize `(add-hook 'my-hook (lambda () ...))`, rewrite the lambda to a
-named function, and automatically remove it before re-applying the unit.
+Hypervisor is written in [Elle](https://github.com/nohzafk/elle) (a modern
+Lisp over Rust) and compiles to a **single native binary** with all
+orchestration logic, Elle source, and runtime Elisp embedded. No external
+runtime, no framework repo to clone --- just drop the binary on your `PATH`.
 
-**Single binary, no framework to clone.** Traditional Emacs config frameworks
+At startup, Emacs loads a tiny generated kernel that launches the Hypervisor
+binary over stdio. From there, Hypervisor takes over: it reads your
+declarations, builds the dependency graph, runs preflight checks, and feeds
+Emacs the exact ordered commands to install packages and execute config units.
+
+Three properties make this architecture distinctive:
+
+**Deterministic startup as a dependency graph.** Hypervisor grew out of
+[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which proved
+that topological sorting and explicit dependencies eliminate non-determinism in
+Emacs config. Hypervisor takes the idea further: startup becomes an observable
+orchestration session with preflight validation, failure propagation, execution
+plans, and reports.
+
+**Lisp-to-Lisp homoiconicity.** Because Elle is a Lisp, config-unit bodies
+travel between Hypervisor and Emacs as structured Lisp data, not opaque
+strings. Elle can inspect and rewrite Elisp forms directly. This is what
+powers effect-aware reload: Hypervisor can recognize
+`(add-hook 'my-hook (lambda () ...))`, rewrite the lambda to a named function,
+and automatically remove it before re-applying the unit --- all without string
+parsing.
+
+**Single binary, zero framework overhead.** Traditional Emacs config frameworks
 require cloning a repo into `~/.config/emacs` because Emacs must load an
-`init.el` written in Elisp. Hypervisor compiles to a single binary with all
-Elle source and runtime Elisp embedded. Your Emacs home contains generated
-bootstrap files, while your own `config.org` or `config.el` lives in the
-Hypervisor config directory.
+`init.el` written in Elisp. Hypervisor compiles everything into one binary.
+Your Emacs home contains only generated bootstrap files; your own config lives
+cleanly in the Hypervisor config directory.
 
 ## User-Facing Model
 
@@ -50,38 +70,44 @@ not choose your packages, keybindings, UI, editing model, or workflow.
 
 ## Features
 
-- **Single binary** --- `emacs-hypervisor` with the embedded Elle backend,
-  runtime Elisp, and all orchestration logic.
+- **Single binary** --- drop one executable on your `PATH`; no Rust toolchain,
+  no framework repo to clone, no external runtime.
 - **Generated bootstrap** --- a small trusted kernel in the Emacs home; your
-  config lives in the Hypervisor config directory.
-- **Literate config** --- `config.org` is auto-tangled at startup and reload;
-  no manual tangle step needed.
+  config lives separately and is never overwritten.
+- **Literate config** --- write `config.org` and Hypervisor auto-tangles it at
+  startup and reload; no manual tangle step needed.
 - **Elpaca-backed packages** --- `package!` declarations feed into Elpaca for
-  installation.
+  async, reproducible installation.
 - **Topological sorting** --- packages and config units resolve in deterministic
-  order.
-- **Preflight checks** --- missing packages, missing dependencies, cycles, env
-  vars, executables, and required features are caught before execution.
-- **Eager, fail-fast startup** --- surface errors immediately instead of hiding
-  them behind lazy loading.
-- **Selective reload** --- apply only new and changed units in a running session.
+  order, eliminating the class of bugs caused by load-order sensitivity.
+- **Preflight checks** --- missing packages, circular dependencies, unset env
+  vars, missing executables, and absent features are caught *before* execution
+  begins.
+- **Eager, fail-fast startup** --- surface errors in the first five seconds
+  instead of hiding them behind lazy loading for hours.
+- **Selective reload** --- edit one unit and apply only what changed, without
+  replaying the entire config.
 - **Effect-aware reload** --- automatically clean old hooks and advice before
-  re-applying a changed unit.
+  re-applying a changed unit, preventing the stale-state drift that plagues
+  long-lived sessions.
 - **Startup reports** --- progress events, package events, status inspection,
-  and optional metrics.
+  and optional metrics give you full visibility into what happened and why.
 
 ## Why Eager Startup
 
-Hypervisor treats startup as the place to prove your config is internally
-consistent. Lazy loading can hide broken config until hours into a session,
-when the original context is gone. Hypervisor takes the opposite tradeoff:
-resolve the graph, run config units in deterministic order, surface errors
-immediately.
+Lazy loading is the default tradeoff in most Emacs configs: defer everything
+to make startup fast, and hope nothing is broken. The cost is that errors
+surface hours into a session --- in the middle of real work, with no context
+about what went wrong.
+
+Hypervisor takes the opposite tradeoff: resolve the entire dependency graph,
+run config units in deterministic order, and prove the config is internally
+consistent at startup. If something is broken, you know immediately.
 
 Eager does not mean force-loading every package. `:requires` should be used
 only when the body truly needs a feature loaded first (package-local variables,
 keymaps, macros, non-autoloaded functions). Hook registration, global
-keybindings, autoloaded commands, and pre-load-safe variable setup can run
+keybindings, autoloaded commands, and pre-load-safe variable setup can all run
 eagerly without `:requires`.
 
 ## Reload
@@ -97,14 +123,18 @@ the new ones:
 - **Removed** units are not evaluated again.
 
 Edit one unit without replaying every package integration, mode setup, and hook
-registration in the session.
+registration in your session.
 
 ### Effect-Aware Reload
 
-Before re-applying a changed unit, Hypervisor cleans up recognized effects from
-the previous version. This prevents the most common reload drift in long-lived
-sessions: duplicate hook entries, duplicated advice, and stale generated
-functions.
+The hardest part of reloading Emacs config is not re-evaluating code --- it is
+cleaning up the *effects* of the previous version. Without cleanup, you
+accumulate duplicate hook entries, stale advice, and ghost functions that drift
+further from your actual config with every reload.
+
+Hypervisor solves this by inspecting the structured Lisp body of each unit
+before re-applying it, and automatically reversing recognized side effects from
+the previous version:
 
 ```elisp
 ;; On reload, the old hook entry is removed before the new body is applied
