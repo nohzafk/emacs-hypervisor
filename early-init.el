@@ -1,8 +1,5 @@
 ;;; -*- lexical-binding: t; -*-
 
-;; Enable emacs-backbone debug mode
-(setq emacs-backbone-enable-debug nil)
-
 ;; Temporarily increase GC threshold during startup
 (setq gc-cons-threshold most-positive-fixnum)
 

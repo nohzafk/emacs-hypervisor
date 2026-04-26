@@ -4,9 +4,9 @@ A single native binary for deterministic, reloadable Emacs configuration
 orchestration.
 
 Hypervisor is a small foundation for building your own Emacs config, not a
-distribution. You keep ownership of `config.el`; Hypervisor provides package
-declarations, config-unit declarations, dependency planning, reload support,
-and a Lisp-native control plane around Emacs.
+distribution. You keep ownership of `config.org` (or `config.el`); Hypervisor
+provides package declarations, config-unit declarations, dependency planning,
+reload support, and a Lisp-native control plane around Emacs.
 
 ## Motivation
 
@@ -34,7 +34,7 @@ require cloning a repo into `~/.config/emacs` because Emacs must load an
 `init.el` written in Elisp. Hypervisor compiles to a single binary with all
 Elle source and runtime Elisp embedded. The only file in your Emacs home is a
 small generated `init.el` (a stable kernel for sexp-rpc), plus your own
-`config.el`.
+`config.org` or `config.el`.
 
 ## User-Facing Model
 
@@ -53,7 +53,9 @@ not choose your packages, keybindings, UI, editing model, or workflow.
 - **Single binary** --- `emacs-hypervisor` with the embedded Elle backend,
   runtime Elisp, and all orchestration logic.
 - **Generated `init.el`** --- a small trusted kernel; your config lives in
-  `config.el`.
+  `config.org` or `config.el`.
+- **Literate config** --- `config.org` is auto-tangled at startup and reload;
+  no manual tangle step needed.
 - **Elpaca-backed packages** --- `package!` declarations feed into Elpaca for
   installation.
 - **Topological sorting** --- packages and config units resolve in deterministic
@@ -86,8 +88,9 @@ eagerly without `:requires`.
 
 ### Selective Reload
 
-`M-x emacs-hypervisor-reload-config` reloads `config.el` in a running session.
-It diffs the previous declarations against the new ones:
+`M-x emacs-hypervisor-reload-config` reloads `config.org`, when present, or
+`config.el` in a running session. It diffs the previous declarations against
+the new ones:
 
 - **Unchanged** units are skipped.
 - **New** and **changed** units are applied.
@@ -150,6 +153,40 @@ new body is applied. This is the Lisp-to-Lisp advantage: the unit body is
 structured Lisp data, so Hypervisor can recognize the form and emit a safer
 version without string parsing.
 
+## Literate Config (config.org)
+
+Hypervisor supports literate configuration via Org-mode. Place a `config.org`
+in your Emacs home instead of `config.el`, and Hypervisor will automatically
+tangle it before loading. No manual tangle step is required.
+
+```org
+* Magit
+
+#+begin_src emacs-lisp
+(package! magit)
+(config-unit! magit-ui
+  :requires (magit)
+  :executable (git)
+  :config
+  (keymap-set global-map "C-x g" #'magit-status))
+#+end_src
+```
+
+When `config.org` is present, `config.el` is not needed. Hypervisor
+automatically tangles all `elisp` and `emacs-lisp` source blocks into a hidden
+`.config.tangled.el` and loads that. No `:tangle` header is required on your
+blocks. Blocks with `:tangle no` are still respected and skipped.
+
+If both `config.org` and `config.el` exist, Hypervisor uses `config.org` and
+warns that `config.el` is ignored.
+
+`M-x emacs-hypervisor-reload-config` also tangles `config.org` before reloading,
+so edits to the Org file take effect immediately.
+
+Tangling uses Emacs's built-in `org-babel-tangle-file` with a language filter
+for `elisp` and `emacs-lisp`. The typical overhead is under 200ms for a
+2000-line config.
+
 ## Config Example
 
 ```elisp
@@ -195,12 +232,14 @@ emacs-hypervisor init --home ~/.config/emacs
 
 `init` refuses to initialize a non-empty home. This is deliberate: the generated
 `init.el` is a managed bootstrap artifact, while your configuration belongs in
-`config.el`.
+`config.org` or `config.el`.
 
-Create or edit:
+Create or edit your config. Use either a literate Org file or a plain Elisp
+file:
 
 ```text
-~/.config/emacs/config.el
+~/.config/emacs/config.org     # literate config (recommended)
+~/.config/emacs/config.el      # or plain Elisp
 ```
 
 Optionally capture the current shell environment for Emacs:
@@ -210,7 +249,7 @@ emacs-hypervisor env --home ~/.config/emacs
 ```
 
 `env` writes a Lisp list of `"KEY=VALUE"` strings. The generated startup loads
-that file before `config.el`, updates `process-environment`, rebuilds
+that file before user config, updates `process-environment`, rebuilds
 `exec-path` from `PATH`, and updates `shell-file-name` from `SHELL`.
 
 Start Emacs:
@@ -246,14 +285,15 @@ Default Emacs home: `$XDG_CONFIG_HOME/emacs` if set, otherwise
 
 ## Generated Home Layout
 
-Do not edit `init.el`. Put user configuration in `config.el` and bootstrap
-customization in `early-init.el`.
+Do not edit `init.el`. Put user configuration in `config.org` (or `config.el`)
+and bootstrap customization in `early-init.el`.
 
 ```
 ~/.config/emacs/
 ├── init.el        # generated, managed by Hypervisor
 ├── early-init.el  # optional, user-owned
-├── config.el      # your package! and config-unit! declarations
+├── config.org     # literate config (preferred, auto-tangled)
+├── config.el      # plain config fallback
 └── env            # optional, generated by `emacs-hypervisor env`
 ```
 
@@ -289,7 +329,8 @@ Set these in `early-init.el` before the generated `init.el` runs.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `emacs-hypervisor-config-file` | `config.el` in Emacs home | Config file to load |
+| `emacs-hypervisor-config-file` | `config.el` in Emacs home | Plain config file to load when `config.org` is absent |
+| `emacs-hypervisor-config-org-file` | `config.org` in Emacs home | Literate config file to tangle and load when present |
 | `emacs-hypervisor-env-file` | `env` in Emacs home | Env snapshot file (or `EMACS_HYPERVISOR_ENV_FILE`) |
 | `emacs-hypervisor-binary-name` | `"emacs-hypervisor"` | Binary name for `PATH` lookup |
 | `emacs-hypervisor-open-buffer-on-abnormal-exit` | `t` | Show process buffer on abnormal exit |
@@ -428,7 +469,8 @@ emacs-hypervisor/
 ├── scripts/
 │   └── analyze-runtime.lisp           # compile-aware analysis script
 │
-├── config.el                          # repo test configuration
+├── config.org                         # repo test configuration
+├── config/                            # repo-local support files for config.org
 ├── early-init.el                      # repo test early-init
 └── justfile                           # build, test, and dev commands
 ```

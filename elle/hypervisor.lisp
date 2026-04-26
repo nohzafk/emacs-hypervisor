@@ -56,6 +56,7 @@
           (protocol:from-wire (protocol:message-payload boot-context-response))
           {:session-name boot-session-name
            :config-file boot-config-file
+           :config-org-file boot-config-org-file
            :repo-dir boot-repo-dir
            & _boot-context}
           boot-context
@@ -103,6 +104,7 @@
           (or boot-config-file
               (and boot-repo-dir
                    (string boot-repo-dir "/config.el")))
+          config-org-file boot-config-org-file
           _ (assert config-file
                     "expected :config-file or :repo-dir in boot context")
           benchmark-enabled
@@ -144,17 +146,38 @@
      (protocol:send-event
       :progress
       '(:phase :startup :step :config-surface-installed :done 1 :total 10))
+     (when config-org-file
+       (protocol:send-event
+        :log
+        `(:level :info
+          :message ,(string "tangling " config-org-file " before loading config"))))
      (protocol:send-request
      4
       :eval
       (benchmark:eval-payload
-       `(:form (progn
-                 (emacs-hypervisor-reset-declarations)
-                 (load-file ,config-file)
-                 :ok)
-         :metric-name :load-config
-         :metric-kind :runtime-setup
-         :phase :startup)))
+       (if config-org-file
+         `(:form (let ((tangled-file
+                        (expand-file-name
+                         ".config.tangled.el"
+                         (file-name-directory ,config-org-file))))
+                   (emacs-hypervisor-reset-declarations)
+                   (require (quote ob-tangle))
+                   (org-babel-tangle-file
+                    ,config-org-file
+                    tangled-file
+                    (rx string-start (or "elisp" "emacs-lisp") string-end))
+                   (load-file tangled-file)
+                   :ok)
+           :metric-name :load-config
+           :metric-kind :runtime-setup
+           :phase :startup)
+         `(:form (progn
+                   (emacs-hypervisor-reset-declarations)
+                   (load-file ,config-file)
+                   :ok)
+           :metric-name :load-config
+           :metric-kind :runtime-setup
+           :phase :startup))))
      (let [config-load-result (protocol:await-response mailbox 4)]
        (assert (protocol:response-ok? config-load-result)
                (string "config load should succeed: "

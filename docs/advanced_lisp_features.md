@@ -109,7 +109,7 @@ Combined with the existing reload diff infrastructure in
 this enables:
 
 - **"What changed in my magit config since last week?"** — a structural diff
-  between two body hashes, not a text diff of config.el.
+  between two body hashes, not a text diff of the config file.
 - **"Roll back my vertico unit to what it was yesterday"** — restore a previous
   body hash and reload selectively.
 - **Bisect a config regression** — binary search through body history to find
@@ -213,7 +213,7 @@ Because Elle can transform bodies before they reach Emacs, it can support
 **config profiles**—different body variants selected at boot time:
 
 ```lisp
-;; In config.el, the user writes:
+;; In the config file, the user writes:
 (config-unit! vertico
   :config
   (vertico-mode 1)
@@ -254,7 +254,7 @@ Elle could recognize `(require 'org-roam)` + `(org-roam-mode 1)` as a
 heavyweight block and skip it in a "fast boot" profile.
 
 **What this enables:**
-- Multiple Emacs personalities from one config.el.
+- Multiple Emacs personalities from one config.
 - "Fast boot" mode that strips heavy config automatically.
 - Per-machine specialization (laptop vs desktop, GUI vs terminal).
 

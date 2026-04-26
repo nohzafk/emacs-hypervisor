@@ -3,9 +3,9 @@
 This spec covers two related reload features that are wired together by
 `emacs-hypervisor-reload-config`.
 
-Selective reload lets a user edit `config.el` while Emacs is running, ask
-Hypervisor to reload it, and have Hypervisor apply only the `config-unit!`
-declarations that changed.
+Selective reload lets a user edit `config.org`, when present, or `config.el`
+while Emacs is running, ask Hypervisor to reload it, and have Hypervisor apply
+only the `config-unit!` declarations that changed.
 
 Effect-aware reload cleans up the previous version of a changed or removed
 unit for common repeated operations. The goal is to avoid duplicate hooks,
@@ -82,7 +82,7 @@ A config unit is identified by its exported `:name`.
 
 The reload command must capture previous units before calling
 `emacs-hypervisor-reset-declarations`, then capture current units after
-loading `config.el`.
+tangling/loading `config.org` or loading `config.el`.
 
 Previous state source:
 
@@ -226,7 +226,7 @@ The command should still:
 
 - reject reload while a Hypervisor session is actively starting/running
 - reload env vars from the configured env file
-- reload declarations from `config.el`
+- reload declarations from `config.org` or `config.el`
 - warn when new package declarations require restart
 
 The command should now:
@@ -382,7 +382,7 @@ Before merging implementation:
 
 - Existing startup tests pass.
 - Existing runtime execution tests pass.
-- Reload with an unchanged `config.el` reports skipped unchanged units.
+- Reload with an unchanged config reports skipped unchanged units.
 - Reload after changing one hook unit removes the old hook function and adds
   the new one.
 - Reload after changing one advice unit removes the old advice function and

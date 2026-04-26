@@ -22,8 +22,10 @@ The current architecture target lives in
 
 - [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
   - current architecture target and Lisp-to-Lisp runtime boundary
-- [config.el](/Users/randall/projects/emacs-hypervisor/config.el)
-  - primary repo config declarations source used when provisioning a test home
+- [config.org](/Users/randall/projects/emacs-hypervisor/config.org)
+  - primary repo literate config declarations source used when provisioning a test home
+- [config](/Users/randall/projects/emacs-hypervisor/config)
+  - repo-local support files loaded by the test config
 - [env](/Users/randall/projects/emacs-hypervisor/env)
   - optional env snapshot example in the same Lisp format emitted by `emacs-hypervisor env`
 - [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
@@ -57,8 +59,8 @@ The current architecture target lives in
 
 ## Home Environment Injection
 
-Provisioned Emacs homes can load an environment snapshot before
-[config.el](/Users/randall/projects/emacs-hypervisor/config.el) is evaluated.
+Provisioned Emacs homes can load an environment snapshot before user config is
+evaluated.
 
 - default file: `HOME/env` in the provisioned Emacs home
 - override path: `EMACS_HYPERVISOR_ENV_FILE`
@@ -76,7 +78,8 @@ This is a real Emacs runtime injection step, not just Elle preflight data:
 - updates `process-environment`
 - rebuilds `exec-path` from injected `PATH`
 - updates `shell-file-name`
-- happens before `config.el` is loaded
+- happens before `config.org` is tangled and loaded, or before `config.el` is
+  loaded when no Org config is present
 
 ## Agent Workflow With Elle Analysis And MCP
 

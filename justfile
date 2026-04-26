@@ -12,6 +12,11 @@ build:
     ./scripts/build-hypervisor
 
 [group('Build')]
+install bin_dir="/usr/local/bin":
+    just build
+    cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"
+
+[group('Build')]
 build-debug:
     ./scripts/build-hypervisor --debug
 
@@ -47,7 +52,8 @@ test:
 emacs-home-reset path=test_home:
     rm -rf "{{path}}"
     ./target/release/emacs-hypervisor init --home "{{path}}"
-    cp early-init.el config.el "{{path}}"
+    cp early-init.el config.org "{{path}}"
+    cp -r config/ "{{path}}"
 
 [group('Emacs')]
 emacs-home-run path=test_home binary=hypervisor_binary:

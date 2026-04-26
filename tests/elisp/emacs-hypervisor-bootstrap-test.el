@@ -45,6 +45,7 @@
 (require 'emacs-hypervisor-compose)
 
 (defvar emacs-hypervisor-config-file nil)
+(defvar emacs-hypervisor-config-org-file nil)
 (defvar emacs-hypervisor-env-file nil)
 
 (defun emacs-hypervisor-test--request (id op &optional payload)
@@ -789,6 +790,84 @@
                    #'emacs-hypervisor-test-hook-old)
       (remove-hook 'emacs-hypervisor-test-hook
                    #'emacs-hypervisor-test-hook-new)
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory temp-dir t))))
+
+(ert-deftest emacs-hypervisor-reload-config-tangles-config-org ()
+  (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
+         (config-file (expand-file-name "config.el" temp-dir))
+         (config-org-file (expand-file-name "config.org" temp-dir))
+         (tangled-file (expand-file-name ".config.tangled.el" temp-dir))
+         (env-file (expand-file-name "env" temp-dir))
+         (emacs-hypervisor-config-file config-file)
+         (emacs-hypervisor-config-org-file config-org-file)
+         (emacs-hypervisor-env-file env-file)
+         (emacs-hypervisor--process nil)
+         (emacs-hypervisor-test-runtime-value 0))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (with-temp-file config-org-file
+            (insert "#+begin_src elisp\n"
+                    "(config-unit! from-elisp\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value\n"
+                    "        (+ emacs-hypervisor-test-runtime-value 1)))\n"
+                    "#+end_src\n"
+                    "\n"
+                    "#+begin_src emacs-lisp\n"
+                    "(config-unit! from-emacs-lisp\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value\n"
+                    "        (+ emacs-hypervisor-test-runtime-value 41)))\n"
+                    "#+end_src\n"))
+          (should-not (file-exists-p config-file))
+          (should-not (file-exists-p tangled-file))
+          (let ((report (emacs-hypervisor-reload-config)))
+            (should (eq (plist-get report :kind) :config-reload))
+            (should-not (file-exists-p config-file))
+            (should (file-exists-p tangled-file))
+            (should
+             (emacs-hypervisor-test--report
+              (plist-get report :reports) "from-elisp"))
+            (should
+             (emacs-hypervisor-test--report
+              (plist-get report :reports) "from-emacs-lisp"))
+            (should (= emacs-hypervisor-test-runtime-value 42))))
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory temp-dir t))))
+
+(ert-deftest emacs-hypervisor-reload-config-org-skips-tangle-no-blocks ()
+  (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
+         (config-file (expand-file-name "config.el" temp-dir))
+         (config-org-file (expand-file-name "config.org" temp-dir))
+         (env-file (expand-file-name "env" temp-dir))
+         (emacs-hypervisor-config-file config-file)
+         (emacs-hypervisor-config-org-file config-org-file)
+         (emacs-hypervisor-env-file env-file)
+         (emacs-hypervisor--process nil)
+         (emacs-hypervisor-test-runtime-value 0))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (with-temp-file config-org-file
+            (insert "#+begin_src elisp\n"
+                    "(config-unit! active\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 1))\n"
+                    "#+end_src\n"
+                    "\n"
+                    "#+begin_src emacs-lisp :tangle no\n"
+                    "(config-unit! skipped\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 99))\n"
+                    "#+end_src\n"))
+          (let ((report (emacs-hypervisor-reload-config)))
+            (should (eq (plist-get report :kind) :config-reload))
+            (should (= emacs-hypervisor-test-runtime-value 1))
+            (should-not
+             (emacs-hypervisor-test--report
+              (plist-get report :reports) "skipped"))))
       (emacs-hypervisor-reset-declarations)
       (delete-directory temp-dir t))))
 

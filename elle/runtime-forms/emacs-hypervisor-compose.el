@@ -10,6 +10,10 @@
 (defvar emacs-hypervisor-last-soft-reload-report nil
   "Report plist from the last config reload.")
 
+(defconst emacs-hypervisor--config-org-elisp-lang-regexp
+  (rx string-start (or "elisp" "emacs-lisp") string-end)
+  "Org Babel language tags accepted for Emacs Lisp config blocks.")
+
 (defun emacs-hypervisor--repo-file (name)
   (expand-file-name name user-emacs-directory))
 
@@ -22,6 +26,13 @@
   (if (boundp 'emacs-hypervisor-config-org-file)
       emacs-hypervisor-config-org-file
     (emacs-hypervisor--repo-file "config.org")))
+
+(defun emacs-hypervisor--config-tangled-file ()
+  "Return the shadow file path for tangled config.org output."
+  (let ((org-file (emacs-hypervisor--config-org-file)))
+    (when org-file
+      (expand-file-name ".config.tangled.el"
+                        (file-name-directory org-file)))))
 
 (defun emacs-hypervisor--env-file ()
   (if (boundp 'emacs-hypervisor-env-file)
@@ -203,28 +214,42 @@
      "\n")))
 
 (defun emacs-hypervisor-tangle-config ()
-  "Tangle repo-root config.org into config.el."
+  "Tangle repo-root config.org into the shadow tangled file."
   (interactive)
-  (let ((config-org-file (emacs-hypervisor--config-org-file)))
-    (unless (file-exists-p config-org-file)
+  (let ((config-org-file (emacs-hypervisor--config-org-file))
+        (tangled-file (emacs-hypervisor--config-tangled-file)))
+    (unless (and config-org-file (file-exists-p config-org-file))
       (user-error "No config.org at %s" config-org-file))
     (require 'ob-tangle)
-    (org-babel-tangle-file config-org-file)))
+    (org-babel-tangle-file
+     config-org-file tangled-file
+     emacs-hypervisor--config-org-elisp-lang-regexp)))
 
 (defun emacs-hypervisor-reload-config ()
   "Reload changed config units into the current Emacs state.
 
-This command reloads declarations from `config.el', warns about new package
-declarations, skips unchanged config units, and cleans up recognized effects
-from previous changed or removed units before applying new bodies."
+If `config.org' exists, it is tangled to a shadow file before loading.
+This command reloads declarations, warns about new package declarations,
+skips unchanged config units, and cleans up recognized effects from
+previous changed or removed units before applying new bodies."
   (interactive)
   (when (emacs-hypervisor-session-active-p)
     (user-error "Hypervisor session is still active"))
   (let* ((config-file (emacs-hypervisor--config-file))
+         (config-org-file (emacs-hypervisor--config-org-file))
+         (use-org (and config-org-file (file-exists-p config-org-file)))
          (previous-packages (emacs-hypervisor--declared-package-names))
          (previous-units (emacs-hypervisor-export-config-units)))
+    (when use-org
+      (require 'ob-tangle)
+      (let ((tangled-file (emacs-hypervisor--config-tangled-file)))
+        (org-babel-tangle-file
+         config-org-file tangled-file
+         emacs-hypervisor--config-org-elisp-lang-regexp)
+        (setq config-file tangled-file)))
     (unless (file-exists-p config-file)
-      (error "No config.el at %s" config-file))
+      (error "No config file found at %s"
+             (if use-org config-org-file config-file)))
     (emacs-hypervisor-load-envvars-file (emacs-hypervisor--env-file) t)
     (emacs-hypervisor-reset-declarations)
     (load-file config-file)

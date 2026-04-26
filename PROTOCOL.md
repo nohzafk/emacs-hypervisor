@@ -110,11 +110,11 @@ sequenceDiagram
     Emacs-->>-Elle: protocol, version, mode
 
     Elle->>+Emacs: :boot-context
-    Emacs-->>-Elle: session-name, config-file, ...
+    Emacs-->>-Elle: session-name, config-file, config-org-file, ...
 
     Elle->>+Emacs: :eval — install config surface
     Emacs-->>-Elle: ok
-    Elle->>+Emacs: :eval — load config.el
+    Elle->>+Emacs: :eval — tangle/load config.org or load config.el
     Emacs-->>-Elle: ok
     Elle->>+Emacs: :session-data
     Emacs-->>-Elle: packages, units, env
@@ -133,7 +133,8 @@ sequenceDiagram
 | Field | Purpose |
 |---|---|
 | `:session-name` | Session identifier |
-| `:config-file` | Path to `config.el` |
+| `:config-file` | Path to fallback plain `config.el` |
+| `:config-org-file` | Path to `config.org`, when present |
 | `:repo-dir` | Emacs home directory |
 | `:ui` | `batch` or `interactive` |
 | `:transport` | `s-expression` |

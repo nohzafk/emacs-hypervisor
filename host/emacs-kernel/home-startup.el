@@ -9,6 +9,9 @@
 (defvar emacs-hypervisor-config-file
   (expand-file-name "config.el" emacs-hypervisor-home-directory))
 
+(defvar emacs-hypervisor-config-org-file
+  (expand-file-name "config.org" emacs-hypervisor-home-directory))
+
 (defvar emacs-hypervisor-env-file
   (expand-file-name
    (or (getenv "EMACS_HYPERVISOR_ENV_FILE") "env")
@@ -70,13 +73,16 @@
   (emacs-hypervisor-resolve-binary)
   (setq emacs-hypervisor-context-function
         (lambda ()
-          (list
-           :session-name "user-home-init"
-           :config-file emacs-hypervisor-config-file
-           :ui (if noninteractive 'batch 'interactive)
-           :transport 's-expression
-           :benchmark-enabled nil
-           :repo-dir emacs-hypervisor-home-directory)))
+          (append
+           (list
+            :session-name "user-home-init"
+            :config-file emacs-hypervisor-config-file
+            :ui (if noninteractive 'batch 'interactive)
+            :transport 's-expression
+            :benchmark-enabled nil
+            :repo-dir emacs-hypervisor-home-directory)
+           (when (file-exists-p emacs-hypervisor-config-org-file)
+             (list :config-org-file emacs-hypervisor-config-org-file)))))
   (setq emacs-hypervisor-session-data-function
         (lambda (&optional fields)
           (or (and (fboundp 'emacs-hypervisor-export-session-data)
@@ -99,9 +105,17 @@
    (list (emacs-hypervisor-resolve-binary) "serve")
    "emacs-hypervisor-init"))
 
-(if (file-exists-p emacs-hypervisor-config-file)
-    (progn
-      (emacs-hypervisor-start-home-session)
-      (unless noninteractive
-        (message "[Hypervisor] starting session %s" "user-home-init")))
-  (message "[Hypervisor] no config.el found at %s" emacs-hypervisor-config-file))
+(cond
+ ((file-exists-p emacs-hypervisor-config-org-file)
+  (when (file-exists-p emacs-hypervisor-config-file)
+    (message "[Hypervisor] both config.org and config.el found; using config.org (config.el is ignored)"))
+  (emacs-hypervisor-start-home-session)
+  (unless noninteractive
+    (message "[Hypervisor] starting session %s (literate config)" "user-home-init")))
+ ((file-exists-p emacs-hypervisor-config-file)
+  (emacs-hypervisor-start-home-session)
+  (unless noninteractive
+    (message "[Hypervisor] starting session %s" "user-home-init")))
+ (t
+  (message "[Hypervisor] no config.org or config.el found at %s"
+           emacs-hypervisor-home-directory)))
