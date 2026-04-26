@@ -10,9 +10,6 @@
 (defvar emacs-hypervisor-last-soft-reload-report nil
   "Report plist from the last config reload.")
 
-(defvar emacs-hypervisor-config-directory nil
-  "Directory containing user config.org or config.el.")
-
 (defconst emacs-hypervisor--config-org-elisp-lang-regexp
   (rx string-start (or "elisp" "emacs-lisp") string-end)
   "Org Babel language tags accepted for Emacs Lisp config blocks.")
@@ -20,22 +17,27 @@
 (defun emacs-hypervisor--repo-file (name)
   (expand-file-name name user-emacs-directory))
 
+(defun emacs-hypervisor--xdg-config-home ()
+  "Return the XDG config home directory with HOME/.config fallback."
+  (let ((xdg-config-home (getenv "XDG_CONFIG_HOME")))
+    (if (and xdg-config-home (not (equal xdg-config-home "")))
+        xdg-config-home
+      "~/.config")))
+
 (defun emacs-hypervisor--config-directory ()
-  "Return the directory used to resolve user config source files."
+  "Return the fixed user-owned Hypervisor config directory."
   (file-name-as-directory
    (expand-file-name
-    (or emacs-hypervisor-config-directory user-emacs-directory)
-    user-emacs-directory)))
+    "emacs-hypervisor"
+    (emacs-hypervisor--xdg-config-home))))
 
 (defun emacs-hypervisor--config-file ()
-  (if (and (boundp 'emacs-hypervisor-config-file)
-           emacs-hypervisor-config-file)
+  (if (boundp 'emacs-hypervisor-config-file)
       emacs-hypervisor-config-file
     (expand-file-name "config.el" (emacs-hypervisor--config-directory))))
 
 (defun emacs-hypervisor--config-org-file ()
-  (if (and (boundp 'emacs-hypervisor-config-org-file)
-           emacs-hypervisor-config-org-file)
+  (if (boundp 'emacs-hypervisor-config-org-file)
       emacs-hypervisor-config-org-file
     (expand-file-name "config.org" (emacs-hypervisor--config-directory))))
 

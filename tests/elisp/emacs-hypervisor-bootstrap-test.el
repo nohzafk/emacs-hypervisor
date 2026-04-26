@@ -5,6 +5,9 @@
 (require 'subr-x)
 (require 'emacs-hypervisor-bootstrap)
 
+(defconst emacs-hypervisor-test--source-directory
+  (file-name-directory (or load-file-name buffer-file-name default-directory)))
+
 (defvar elpaca-recipe-functions nil)
 (defvar elpaca--post-queues-hook nil)
 (defvar emacs-hypervisor-installed-packages nil)
@@ -46,7 +49,6 @@
 
 (defvar emacs-hypervisor-config-file nil)
 (defvar emacs-hypervisor-config-org-file nil)
-(defvar emacs-hypervisor-config-directory nil)
 (defvar emacs-hypervisor-env-file nil)
 
 (defun emacs-hypervisor-test--request (id op &optional payload)
@@ -81,6 +83,26 @@
   (cl-find name reports
            :key (lambda (entry) (plist-get entry :name))
            :test #'equal))
+
+(ert-deftest emacs-hypervisor-generated-early-init-loads-fixed-xdg-file ()
+  (let* ((xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))
+         (config-dir (expand-file-name "emacs-hypervisor" xdg-dir))
+         (user-early-init (expand-file-name "early-init.el" config-dir))
+         (process-environment (copy-sequence process-environment))
+         (emacs-hypervisor-test-runtime-value nil)
+         (generated-early-init
+          (expand-file-name
+           "../../host/emacs-kernel/early-init.el"
+           emacs-hypervisor-test--source-directory)))
+    (unwind-protect
+        (progn
+          (setenv "XDG_CONFIG_HOME" xdg-dir)
+          (make-directory config-dir t)
+          (with-temp-file user-early-init
+            (insert "(setq emacs-hypervisor-test-runtime-value :loaded)\n"))
+          (load-file generated-early-init)
+          (should (eq emacs-hypervisor-test-runtime-value :loaded)))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-config-unit-export-preserves-structured-body ()
   (emacs-hypervisor-reset-declarations)
@@ -725,37 +747,63 @@
       (should-error (emacs-hypervisor-reload-config)
                     :type 'user-error))))
 
-(ert-deftest emacs-hypervisor-config-directory-derives-default-config-paths ()
+(ert-deftest emacs-hypervisor-config-paths-use-fixed-xdg-config-directory ()
   (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
-         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))
+         (config-dir (expand-file-name "emacs-hypervisor" xdg-dir))
+         (process-environment (copy-sequence process-environment))
          (user-emacs-directory (file-name-as-directory home-dir))
-         (emacs-hypervisor-config-directory config-dir)
          (emacs-hypervisor-config-file nil)
          (emacs-hypervisor-config-org-file nil))
     (unwind-protect
         (progn
+          (makunbound 'emacs-hypervisor-config-file)
+          (makunbound 'emacs-hypervisor-config-org-file)
+          (setenv "XDG_CONFIG_HOME" xdg-dir)
           (should (equal (emacs-hypervisor--config-file)
                          (expand-file-name "config.el" config-dir)))
           (should (equal (emacs-hypervisor--config-org-file)
                          (expand-file-name "config.org" config-dir))))
       (delete-directory home-dir t)
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
-(ert-deftest emacs-hypervisor-explicit-config-files-override-config-directory ()
+(ert-deftest emacs-hypervisor-config-paths-fall-back-to-home-config-directory ()
   (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
-         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (runtime-home-dir (make-temp-file "emacs-hypervisor-runtime-home" t))
+         (config-dir (expand-file-name ".config/emacs-hypervisor" home-dir))
+         (process-environment (copy-sequence process-environment))
+         (user-emacs-directory (file-name-as-directory runtime-home-dir))
+         (emacs-hypervisor-config-file nil)
+         (emacs-hypervisor-config-org-file nil))
+    (unwind-protect
+        (progn
+          (makunbound 'emacs-hypervisor-config-file)
+          (makunbound 'emacs-hypervisor-config-org-file)
+          (setenv "XDG_CONFIG_HOME" nil)
+          (setenv "HOME" home-dir)
+          (should (equal (emacs-hypervisor--config-file)
+                         (expand-file-name "config.el" config-dir)))
+          (should (equal (emacs-hypervisor--config-org-file)
+                         (expand-file-name "config.org" config-dir))))
+      (delete-directory home-dir t)
+      (delete-directory runtime-home-dir t))))
+
+(ert-deftest emacs-hypervisor-explicit-config-files-override-fixed-config-directory ()
+  (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))
          (explicit-el (expand-file-name "other.el" home-dir))
          (explicit-org (expand-file-name "other.org" home-dir))
+         (process-environment (copy-sequence process-environment))
          (user-emacs-directory (file-name-as-directory home-dir))
-         (emacs-hypervisor-config-directory config-dir)
          (emacs-hypervisor-config-file explicit-el)
          (emacs-hypervisor-config-org-file explicit-org))
     (unwind-protect
         (progn
+          (setenv "XDG_CONFIG_HOME" xdg-dir)
           (should (equal (emacs-hypervisor--config-file) explicit-el))
           (should (equal (emacs-hypervisor--config-org-file) explicit-org)))
       (delete-directory home-dir t)
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-selective-reload-cleans-before-apply ()
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
@@ -870,14 +918,15 @@
       (emacs-hypervisor-reset-declarations)
       (delete-directory temp-dir t))))
 
-(ert-deftest emacs-hypervisor-reload-config-tangles-config-org-from-config-directory ()
+(ert-deftest emacs-hypervisor-reload-config-tangles-config-org-from-fixed-config-directory ()
   (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
-         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))
+         (config-dir (expand-file-name "emacs-hypervisor" xdg-dir))
          (config-org-file (expand-file-name "config.org" config-dir))
          (tangled-file (expand-file-name ".config.tangled.el" config-dir))
          (env-file (expand-file-name "env" home-dir))
+         (process-environment (copy-sequence process-environment))
          (user-emacs-directory (file-name-as-directory home-dir))
-         (emacs-hypervisor-config-directory config-dir)
          (emacs-hypervisor-config-file nil)
          (emacs-hypervisor-config-org-file nil)
          (emacs-hypervisor-env-file env-file)
@@ -885,10 +934,14 @@
          (emacs-hypervisor-test-runtime-value 0))
     (unwind-protect
         (progn
+          (makunbound 'emacs-hypervisor-config-file)
+          (makunbound 'emacs-hypervisor-config-org-file)
+          (setenv "XDG_CONFIG_HOME" xdg-dir)
+          (make-directory config-dir t)
           (emacs-hypervisor-reset-declarations)
           (with-temp-file config-org-file
             (insert "#+begin_src emacs-lisp\n"
-                    "(config-unit! from-config-directory\n"
+                    "(config-unit! from-fixed-config-directory\n"
                     "  :config\n"
                     "  (setq emacs-hypervisor-test-runtime-value 7))\n"
                     "#+end_src\n"))
@@ -897,11 +950,11 @@
             (should (file-exists-p tangled-file))
             (should
              (emacs-hypervisor-test--report
-              (plist-get report :reports) "from-config-directory"))
+              (plist-get report :reports) "from-fixed-config-directory"))
             (should (= emacs-hypervisor-test-runtime-value 7))))
       (emacs-hypervisor-reset-declarations)
       (delete-directory home-dir t)
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-org-skips-tangle-no-blocks ()
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))

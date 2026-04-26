@@ -6,17 +6,19 @@
   (file-name-directory
    (or load-file-name buffer-file-name user-init-file user-emacs-directory)))
 
-(defvar emacs-hypervisor-config-directory
-  emacs-hypervisor-home-directory
-  "Directory containing user config.org or config.el.
-Set this in early-init.el to keep config sources outside the Emacs home.")
+(defun emacs-hypervisor--xdg-config-home ()
+  "Return the XDG config home directory with HOME/.config fallback."
+  (let ((xdg-config-home (getenv "XDG_CONFIG_HOME")))
+    (if (and xdg-config-home (not (equal xdg-config-home "")))
+        xdg-config-home
+      "~/.config")))
 
 (defun emacs-hypervisor--config-directory ()
-  "Return the directory used to resolve user config source files."
+  "Return the fixed user-owned Hypervisor config directory."
   (file-name-as-directory
    (expand-file-name
-    emacs-hypervisor-config-directory
-    emacs-hypervisor-home-directory)))
+    "emacs-hypervisor"
+    (emacs-hypervisor--xdg-config-home))))
 
 (defvar emacs-hypervisor-config-file
   (expand-file-name "config.el" (emacs-hypervisor--config-directory)))
@@ -130,4 +132,4 @@ Set this in early-init.el to keep config sources outside the Emacs home.")
     (message "[Hypervisor] starting session %s" "user-home-init")))
  (t
   (message "[Hypervisor] no config.org or config.el found at %s"
-           emacs-hypervisor-home-directory)))
+           (emacs-hypervisor--config-directory))))
