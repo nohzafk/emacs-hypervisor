@@ -133,8 +133,8 @@ sequenceDiagram
 | Field | Purpose |
 |---|---|
 | `:session-name` | Session identifier |
-| `:config-file` | Path to fallback plain `config.el` |
-| `:config-org-file` | Path to `config.org`, when present |
+| `:config-file` | Path to fallback plain `config.el`, after Emacs-side config directory resolution |
+| `:config-org-file` | Path to `config.org`, when present, after Emacs-side config directory resolution |
 | `:repo-dir` | Emacs home directory |
 | `:ui` | `batch` or `interactive` |
 | `:transport` | `s-expression` |

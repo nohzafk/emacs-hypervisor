@@ -159,6 +159,16 @@ Hypervisor supports literate configuration via Org-mode. Place a `config.org`
 in your Emacs home instead of `config.el`, and Hypervisor will automatically
 tangle it before loading. No manual tangle step is required.
 
+To keep config sources outside the Emacs home, set the config directory in
+`early-init.el` before the generated `init.el` runs:
+
+```elisp
+(setq emacs-hypervisor-config-directory "/path/to/config/")
+```
+
+Hypervisor then reads `/path/to/config/config.org`, or
+`/path/to/config/config.el` when no Org config exists.
+
 ```org
 * Magit
 
@@ -329,6 +339,7 @@ Set these in `early-init.el` before the generated `init.el` runs.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `emacs-hypervisor-config-directory` | Emacs home | Directory used to derive `config.org` and `config.el` |
 | `emacs-hypervisor-config-file` | `config.el` in Emacs home | Plain config file to load when `config.org` is absent |
 | `emacs-hypervisor-config-org-file` | `config.org` in Emacs home | Literate config file to tangle and load when present |
 | `emacs-hypervisor-env-file` | `env` in Emacs home | Env snapshot file (or `EMACS_HYPERVISOR_ENV_FILE`) |

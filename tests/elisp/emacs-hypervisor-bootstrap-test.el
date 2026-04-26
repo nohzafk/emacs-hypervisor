@@ -46,6 +46,7 @@
 
 (defvar emacs-hypervisor-config-file nil)
 (defvar emacs-hypervisor-config-org-file nil)
+(defvar emacs-hypervisor-config-directory nil)
 (defvar emacs-hypervisor-env-file nil)
 
 (defun emacs-hypervisor-test--request (id op &optional payload)
@@ -724,6 +725,38 @@
       (should-error (emacs-hypervisor-reload-config)
                     :type 'user-error))))
 
+(ert-deftest emacs-hypervisor-config-directory-derives-default-config-paths ()
+  (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
+         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (user-emacs-directory (file-name-as-directory home-dir))
+         (emacs-hypervisor-config-directory config-dir)
+         (emacs-hypervisor-config-file nil)
+         (emacs-hypervisor-config-org-file nil))
+    (unwind-protect
+        (progn
+          (should (equal (emacs-hypervisor--config-file)
+                         (expand-file-name "config.el" config-dir)))
+          (should (equal (emacs-hypervisor--config-org-file)
+                         (expand-file-name "config.org" config-dir))))
+      (delete-directory home-dir t)
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-explicit-config-files-override-config-directory ()
+  (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
+         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (explicit-el (expand-file-name "other.el" home-dir))
+         (explicit-org (expand-file-name "other.org" home-dir))
+         (user-emacs-directory (file-name-as-directory home-dir))
+         (emacs-hypervisor-config-directory config-dir)
+         (emacs-hypervisor-config-file explicit-el)
+         (emacs-hypervisor-config-org-file explicit-org))
+    (unwind-protect
+        (progn
+          (should (equal (emacs-hypervisor--config-file) explicit-el))
+          (should (equal (emacs-hypervisor--config-org-file) explicit-org)))
+      (delete-directory home-dir t)
+      (delete-directory config-dir t))))
+
 (ert-deftest emacs-hypervisor-reload-config-selective-reload-cleans-before-apply ()
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
          (config-file (expand-file-name "config.el" temp-dir))
@@ -836,6 +869,39 @@
             (should (= emacs-hypervisor-test-runtime-value 42))))
       (emacs-hypervisor-reset-declarations)
       (delete-directory temp-dir t))))
+
+(ert-deftest emacs-hypervisor-reload-config-tangles-config-org-from-config-directory ()
+  (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
+         (config-dir (make-temp-file "emacs-hypervisor-config" t))
+         (config-org-file (expand-file-name "config.org" config-dir))
+         (tangled-file (expand-file-name ".config.tangled.el" config-dir))
+         (env-file (expand-file-name "env" home-dir))
+         (user-emacs-directory (file-name-as-directory home-dir))
+         (emacs-hypervisor-config-directory config-dir)
+         (emacs-hypervisor-config-file nil)
+         (emacs-hypervisor-config-org-file nil)
+         (emacs-hypervisor-env-file env-file)
+         (emacs-hypervisor--process nil)
+         (emacs-hypervisor-test-runtime-value 0))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (with-temp-file config-org-file
+            (insert "#+begin_src emacs-lisp\n"
+                    "(config-unit! from-config-directory\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 7))\n"
+                    "#+end_src\n"))
+          (let ((report (emacs-hypervisor-reload-config)))
+            (should (eq (plist-get report :kind) :config-reload))
+            (should (file-exists-p tangled-file))
+            (should
+             (emacs-hypervisor-test--report
+              (plist-get report :reports) "from-config-directory"))
+            (should (= emacs-hypervisor-test-runtime-value 7))))
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory home-dir t)
+      (delete-directory config-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-org-skips-tangle-no-blocks ()
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))

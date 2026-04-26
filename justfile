@@ -12,8 +12,9 @@ build:
     ./scripts/build-hypervisor
 
 [group('Build')]
-install bin_dir="/usr/local/bin":
+install bin_dir="$HOME/.local/bin":
     just build
+    mkdir -p "{{bin_dir}}"
     cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"
 
 [group('Build')]

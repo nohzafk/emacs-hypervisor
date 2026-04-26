@@ -6,11 +6,23 @@
   (file-name-directory
    (or load-file-name buffer-file-name user-init-file user-emacs-directory)))
 
+(defvar emacs-hypervisor-config-directory
+  emacs-hypervisor-home-directory
+  "Directory containing user config.org or config.el.
+Set this in early-init.el to keep config sources outside the Emacs home.")
+
+(defun emacs-hypervisor--config-directory ()
+  "Return the directory used to resolve user config source files."
+  (file-name-as-directory
+   (expand-file-name
+    emacs-hypervisor-config-directory
+    emacs-hypervisor-home-directory)))
+
 (defvar emacs-hypervisor-config-file
-  (expand-file-name "config.el" emacs-hypervisor-home-directory))
+  (expand-file-name "config.el" (emacs-hypervisor--config-directory)))
 
 (defvar emacs-hypervisor-config-org-file
-  (expand-file-name "config.org" emacs-hypervisor-home-directory))
+  (expand-file-name "config.org" (emacs-hypervisor--config-directory)))
 
 (defvar emacs-hypervisor-env-file
   (expand-file-name
