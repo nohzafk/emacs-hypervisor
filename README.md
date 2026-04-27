@@ -8,30 +8,27 @@ distribution. You keep ownership of `config.org` (or `config.el`); Hypervisor
 provides the package declarations, config-unit declarations, dependency
 planning, reload support, and a Lisp-native control plane around Emacs.
 
-Today, Hypervisor focuses on two sources of unpredictability in real-world
-Emacs configs:
+Today, Hypervisor tackles two sources of unpredictability in real-world Emacs
+configs:
 
-**Deterministic package and config loading.** Traditional setups --- whether
-hand-rolled `use-package` files, Doom Emacs, or Spacemacs --- are long,
-order-sensitive scripts where package installation, feature loading, and config
-execution are easy to blur together. Lazy loading can hide broken config until
-hours into a session, when the original context is gone. A missing dependency, a
-misordered `require`, or a package configured before it is installed or loaded
-becomes intermittent, hard to reproduce, and painful to diagnose.
+**Deterministic startup.** Most Emacs configs are order-sensitive scripts where
+package installation, feature loading, and configuration blur together. A
+missing dependency or misordered `require` becomes an intermittent bug that
+surfaces hours later, hidden behind lazy loading, with no context about what
+went wrong.
 
-Hypervisor treats your Emacs config as a **dependency graph** instead of a
-script. It resolves package and config-unit dependencies with topological
-sorting, runs preflight checks before execution, and surfaces failures
-immediately instead of letting them lurk behind deferred execution. If something
-is broken, you find out in the first five seconds, not two hours later.
+Hypervisor treats your config as a **dependency graph**. It resolves packages
+and config units with topological sorting, runs preflight checks, and surfaces
+every failure in the first five seconds --- not two hours later.
 
-**Reloads that match the file you edited.** Re-evaluating Elisp is easy;
-restoring the previous state is not. A normal reload can leave duplicate hook
-entries, stale advice, and old anonymous functions in a long-lived Emacs
-session. Hypervisor combines selective reload with effect-aware cleanup:
-unchanged units are skipped, changed units are re-applied, removed units are
-cleaned up, and recognized hook/advice effects from the previous version are
-retracted before the new version runs.
+**Dead effect cleanup.** Re-evaluating Elisp is easy; undoing what the old
+version did is not. A normal reload leaves duplicate hook entries, stale advice,
+and orphaned anonymous functions. After enough reloads, the live session no
+longer matches the file you edited.
+
+Hypervisor currently tracks `add-hook` and `advice-add` as runtime effect
+records. On reload, it retracts the previous effects before applying the new
+version. This is the killer feature for daily editing in long-lived sessions.
 
 ## User-Facing Model
 
