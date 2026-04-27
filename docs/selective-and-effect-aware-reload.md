@@ -10,6 +10,9 @@ Effect-aware reload cleans up the previous version of a changed or removed
 unit for recognized repeated operations, avoiding duplicate hooks, stale
 advice, and reload drift.
 
+The supported effect set is deliberately narrow. Hypervisor currently supports
+only `add-hook` and `advice-add` cleanup. Other side effects remain opaque.
+
 ## Design
 
 This is not rollback. Arbitrary Elisp cannot be safely undone. The valuable
@@ -57,10 +60,11 @@ Diff action shape:
  :current CURRENT-ENTRY)
 ```
 
-### Effect Records
+### Cleanup Effect Records
 
-Effect records describe cleanup Hypervisor performs before a changed or
-removed unit is applied.
+Cleanup effect records describe cleanup Hypervisor performs before a changed or
+removed unit is applied. The registry-backed path records richer runtime effect
+records; see [effect-registry.md](effect-registry.md).
 
 ```elisp
 (:kind KIND
@@ -96,10 +100,14 @@ Unsupported forms are reported as opaque:
  :reason :unsupported-form)
 ```
 
-The recognizer supports literal global hooks and literal advice targets. It
-does not clean up local hooks, computed hook names, computed advice targets,
-lambdas hidden inside computed expressions, timers, processes, or package
-manager side effects.
+The recognizer supports hook and advice targets that are literal or computed at
+runtime. It rewrites supported calls in executed body positions, including
+`progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and
+`dotimes`.
+
+The recognizer does not rewrite quoted data, function literals, lambda bodies,
+function definitions, unknown macro/helper-call bodies, timers, processes, or
+package manager side effects. Local hooks with non-nil `LOCAL` are not tracked.
 
 ### Reload Report
 
@@ -160,6 +168,20 @@ Effect-aware reload in
 (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
 ```
 
+Effect registry in
+`elle/runtime-forms/emacs-hypervisor-effect-registry.el`:
+
+```elisp
+(emacs-hypervisor-effect-registry-record effect)
+(emacs-hypervisor-effect-registry-effects-for-unit unit)
+(emacs-hypervisor-effect-registry-retract effect)
+(emacs-hypervisor-effect-registry-retract-unit unit)
+(emacs-hypervisor-register-hook-effect
+ :unit unit :target hook :function function :depth depth :local local)
+(emacs-hypervisor-register-advice-effect
+ :unit unit :target target :where where :function function)
+```
+
 `elle/runtime-forms/emacs-hypervisor-compose.el` wires both into
 `emacs-hypervisor-reload-config`.
 
@@ -183,11 +205,12 @@ Advice support:
 or anonymous `#'(lambda ...)`.
 
 Anonymous lambdas are rewritten to a generated internal function name derived
-from the unit name, effect kind, target symbol, and a hash of the lambda form.
-Cleanup derives the same name from the previous unit body, then removes the
+from the unit name, effect kind, concrete runtime target, and a hash of the
+function value. Cleanup uses the previous registry record, then removes the
 hook or advice by symbol.
 
-Other function shapes are reported as opaque.
+Unsupported source shapes outside the rewritten body positions are reported as
+opaque.
 
 ## Limitations
 
@@ -197,3 +220,5 @@ Other function shapes are reported as opaque.
   package-manager side effects.
 - Hook and advice cleanup only; keybindings, variables, themes, and faces are
   not yet tracked.
+- The registry contains hook and advice records only. Other effect kinds are
+  future vocabulary, not supported behavior.

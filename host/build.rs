@@ -105,6 +105,10 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
         "elle/runtime-forms/emacs-hypervisor-declarations.el",
     ),
     (
+        "EFFECT_REGISTRY",
+        "elle/runtime-forms/emacs-hypervisor-effect-registry.el",
+    ),
+    (
         "EFFECT_AWARE_RELOAD",
         "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el",
     ),

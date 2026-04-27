@@ -55,13 +55,14 @@ modules still use source-backed loading. The packer is ready for wider
 
 Packable files (all under `elle/runtime-forms/`):
 
-```
+```text
 emacs-hypervisor-session-base.el        # session lifecycle
 emacs-hypervisor-declarations.el        # package!/config-unit! macros
 emacs-hypervisor-elpaca-bridge.el       # Elpaca integration
 emacs-hypervisor-package-runtime.el     # package event handling
 emacs-hypervisor-unit-runtime.el        # unit execution helpers
 emacs-hypervisor-selective-reload.el    # reload diffing + scheduling
+emacs-hypervisor-effect-registry.el     # hook/advice effect records
 emacs-hypervisor-effect-aware-reload.el # effect detection + cleanup
 emacs-hypervisor-compose.el             # wires reload into M-x command
 emacs-hypervisor-report-core.el         # report data structures

@@ -154,6 +154,10 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
         embedded_forms: embedded::EMBEDDED_DECLARATIONS_FORMS,
     },
     PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_FORMS",
+        embedded_forms: embedded::EMBEDDED_EFFECT_REGISTRY_FORMS,
+    },
+    PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_FORMS",
         embedded_forms: embedded::EMBEDDED_EFFECT_AWARE_RELOAD_FORMS,
     },

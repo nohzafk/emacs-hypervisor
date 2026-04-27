@@ -141,7 +141,7 @@
              cleanup)
           (condition-case err
               (progn
-                (eval (emacs-hypervisor--unit-body entry))
+                (eval (emacs-hypervisor--unit-body entry) t)
                 (emacs-hypervisor--make-reload-report
                  name :ok :applied
                  (list :requires (emacs-hypervisor--unit-requires entry)

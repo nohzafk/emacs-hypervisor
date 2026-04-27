@@ -43,6 +43,7 @@
   :processed)
 
 (require 'emacs-hypervisor-package-runtime)
+(require 'emacs-hypervisor-effect-registry)
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-unit-runtime)
 (require 'emacs-hypervisor-compose)
@@ -138,7 +139,7 @@
                             [(+ emacs-hypervisor-test-runtime-value 1)])
                       t)))))
 
-(ert-deftest emacs-hypervisor-config-unit-export-names-supported-effect-lambdas ()
+(ert-deftest emacs-hypervisor-config-unit-export-wraps-supported-effect-lambdas ()
   (emacs-hypervisor-reset-declarations)
   (config-unit! lambda-hook-unit
     :config
@@ -147,17 +148,14 @@
                 :hook)))
   (let* ((unit (car (emacs-hypervisor-export-config-units)))
          (body (plist-get unit :body))
-         (defalias-form (nth 1 body))
-         (hook-form (nth 2 body))
-         (generated-symbol (cadr (nth 1 defalias-form))))
-    (should (eq (car defalias-form) 'defalias))
-    (should (string-prefix-p
-             "emacs-hypervisor--generated-lambda-hook-unit-add-hook-emacs-hypervisor-test-hook-"
-             (symbol-name generated-symbol)))
-    (should (equal hook-form
-                   `(add-hook 'emacs-hypervisor-test-hook
-                              (function ,generated-symbol))))
-    (should (equal (nth 3 body) t))))
+         (hook-form (nth 1 body)))
+    (should (eq (car hook-form) 'emacs-hypervisor-register-hook-effect))
+    (should (equal (plist-get (cdr hook-form) :unit) "lambda-hook-unit"))
+    (should (equal (plist-get (cdr hook-form) :target)
+                   '(quote emacs-hypervisor-test-hook)))
+    (should (equal (car (plist-get (cdr hook-form) :function))
+                   'lambda))
+    (should (equal (nth 2 body) t))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-generated-name-is-deterministic ()
   (let* ((lambda-form '(lambda () :hook))
@@ -238,7 +236,7 @@
                                   (cons (quote bar) (intern "1-"))
                                   (vector (intern "1+") (intern "{}"))))
                       t)))
-    (eval body)
+    (eval body t)
     (should (equal emacs-hypervisor-test-runtime-value
                    (list 'foo
                          (intern "{}")
@@ -260,7 +258,7 @@
                             (mapcar (symbol-function (intern "1+"))
                                     (list 1 2)))
                       t)))
-    (eval body)
+    (eval body t)
     (should (equal emacs-hypervisor-test-runtime-value '(2 3)))))
 
 (ert-deftest emacs-hypervisor-config-unit-export-rejects-bare-reader-hostile-symbols ()
@@ -345,6 +343,8 @@
                 :removed))))
 
 (defvar emacs-hypervisor-test-hook nil)
+(defvar emacs-hypervisor-test-hook-a nil)
+(defvar emacs-hypervisor-test-hook-b nil)
 
 (defun emacs-hypervisor-test-hook-old ()
   :old)
@@ -352,11 +352,46 @@
 (defun emacs-hypervisor-test-hook-new ()
   :new)
 
-(defun emacs-hypervisor-test--generated-symbol-from-body (body)
-  (cadr (nth 1 (nth 1 body))))
+(defun emacs-hypervisor-test--effect-function-for-unit (unit)
+  (plist-get
+   (car (emacs-hypervisor-effect-registry-effects-for-unit unit))
+   :function))
+
+(ert-deftest emacs-hypervisor-effect-registry-records-and-retracts-unit-effects ()
+  (let ((emacs-hypervisor-effect-registry-current nil)
+        (emacs-hypervisor-effect-registry--instance-counter 0)
+        (emacs-hypervisor-test-runtime-value nil))
+    (emacs-hypervisor-effect-registry-record
+     '(:unit "registry-unit"
+             :kind :hook
+             :target emacs-hypervisor-test-hook
+             :function ignore
+             :retract
+             (setq emacs-hypervisor-test-runtime-value
+                   (append emacs-hypervisor-test-runtime-value '(:first)))))
+    (emacs-hypervisor-effect-registry-record
+     '(:unit "registry-unit"
+             :kind :advice
+             :target emacs-hypervisor-test-advice-target
+             :function ignore
+             :retract
+             (setq emacs-hypervisor-test-runtime-value
+                   (append emacs-hypervisor-test-runtime-value '(:second)))))
+    (let ((cleanup
+           (emacs-hypervisor-effect-registry-retract-unit "registry-unit")))
+      (should (= (length (plist-get cleanup :effects)) 2))
+      (should (= (length (plist-get cleanup :cleaned)) 2))
+      (should-not (plist-get cleanup :failed))
+      (should (equal emacs-hypervisor-test-runtime-value
+                     '(:second :first)))
+      (should-not
+       (emacs-hypervisor-effect-registry-effects-for-unit
+        "registry-unit")))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-hook-effect ()
   (let* ((emacs-hypervisor-test-hook nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
          (previous
           (list
            (emacs-hypervisor-test--unit
@@ -389,6 +424,8 @@
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-generated-hook-lambda ()
   (let* ((emacs-hypervisor-test-hook nil)
          (emacs-hypervisor-test-runtime-value nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
          previous
          current
          old-symbol
@@ -403,10 +440,10 @@
                 (lambda ()
                   (setq emacs-hypervisor-test-runtime-value :old))))
     (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
     (setq old-symbol
-          (emacs-hypervisor-test--generated-symbol-from-body
-           (plist-get (car previous) :body)))
-    (eval (plist-get (car previous) :body))
+          (emacs-hypervisor-test--effect-function-for-unit
+           "lambda-hook-unit"))
     (should (fboundp old-symbol))
     (should (memq old-symbol emacs-hypervisor-test-hook))
     (emacs-hypervisor-reset-declarations)
@@ -416,13 +453,13 @@
                 (lambda ()
                   (setq emacs-hypervisor-test-runtime-value :new))))
     (setq current (emacs-hypervisor-export-config-units))
-    (setq new-symbol
-          (emacs-hypervisor-test--generated-symbol-from-body
-           (plist-get (car current) :body)))
     (setq reports
           (emacs-hypervisor--reload-unit-reports
            (emacs-hypervisor-selective-reload-diff-units previous current)
            nil))
+    (setq new-symbol
+          (emacs-hypervisor-test--effect-function-for-unit
+           "lambda-hook-unit"))
     (setq report (emacs-hypervisor-test--report reports "lambda-hook-unit"))
     (setq cleanup (plist-get report :cleanup))
     (run-hooks 'emacs-hypervisor-test-hook)
@@ -434,8 +471,82 @@
     (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup) 1))
     (should-not (plist-get cleanup :unsupported))))
 
+(ert-deftest emacs-hypervisor-effect-aware-reload-cleans-loop-generated-hook-lambdas ()
+  (let* ((emacs-hypervisor-test-hook-a nil)
+         (emacs-hypervisor-test-hook-b nil)
+         (emacs-hypervisor-test-runtime-value nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         previous
+         current
+         old-symbols
+         new-symbols
+         reports
+         report
+         cleanup)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! loop-hook-unit
+      :config
+      (dolist (entry '((emacs-hypervisor-test-hook-a . :old-a)
+                       (emacs-hypervisor-test-hook-b . :old-b)))
+        (let ((value (cdr entry)))
+          (add-hook (car entry)
+                    (lambda ()
+                      (push value emacs-hypervisor-test-runtime-value))))))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (setq old-symbols
+          (mapcar (lambda (effect) (plist-get effect :function))
+                  (emacs-hypervisor-effect-registry-effects-for-unit
+                   "loop-hook-unit")))
+    (should (= (length old-symbols) 2))
+    (run-hooks 'emacs-hypervisor-test-hook-a)
+    (run-hooks 'emacs-hypervisor-test-hook-b)
+    (should (equal emacs-hypervisor-test-runtime-value
+                   '(:old-b :old-a)))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! loop-hook-unit
+      :config
+      (dolist (entry '((emacs-hypervisor-test-hook-a . :new-a)
+                       (emacs-hypervisor-test-hook-b . :new-b)))
+        (let ((value (cdr entry)))
+          (add-hook (car entry)
+                    (lambda ()
+                      (push value emacs-hypervisor-test-runtime-value))))))
+    (setq current (emacs-hypervisor-export-config-units))
+    (setq reports
+          (emacs-hypervisor--reload-unit-reports
+           (emacs-hypervisor-selective-reload-diff-units previous current)
+           nil))
+    (setq report (emacs-hypervisor-test--report reports "loop-hook-unit"))
+    (setq cleanup (plist-get report :cleanup))
+    (setq new-symbols
+          (mapcar (lambda (effect) (plist-get effect :function))
+                  (emacs-hypervisor-effect-registry-effects-for-unit
+                   "loop-hook-unit")))
+    (setq emacs-hypervisor-test-runtime-value nil)
+    (run-hooks 'emacs-hypervisor-test-hook-a)
+    (run-hooks 'emacs-hypervisor-test-hook-b)
+    (should (equal emacs-hypervisor-test-runtime-value
+                   '(:new-b :new-a)))
+    (dolist (symbol old-symbols)
+      (should-not (memq symbol emacs-hypervisor-test-hook-a))
+      (should-not (memq symbol emacs-hypervisor-test-hook-b))
+      (should-not (fboundp symbol)))
+    (dolist (symbol new-symbols)
+      (should (fboundp symbol)))
+    (should (= (length new-symbols) 2))
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup) 2))
+    (should-not (plist-get cleanup :unsupported))))
+
 (defun emacs-hypervisor-test-advice-target ()
   :target)
+
+(defun emacs-hypervisor-test-advice-target-a ()
+  :target-a)
+
+(defun emacs-hypervisor-test-advice-target-b ()
+  :target-b)
 
 (defun emacs-hypervisor-test-advice-old (orig-fn &rest args)
   (apply orig-fn args))
@@ -444,7 +555,9 @@
   (apply orig-fn args))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-advice-effect ()
-  (let* ((previous
+  (let* ((emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (previous
           (list
            (emacs-hypervisor-test--unit
             "advice-unit"
@@ -491,6 +604,8 @@
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-generated-advice-lambda ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
          previous
          current
          old-symbol
@@ -509,10 +624,10 @@
                           (setq emacs-hypervisor-test-runtime-value :old)
                           (apply orig-fn args))))
           (setq previous (emacs-hypervisor-export-config-units))
+          (eval (plist-get (car previous) :body) t)
           (setq old-symbol
-                (emacs-hypervisor-test--generated-symbol-from-body
-                 (plist-get (car previous) :body)))
-          (eval (plist-get (car previous) :body))
+                (emacs-hypervisor-test--effect-function-for-unit
+                 "lambda-advice-unit"))
           (should (fboundp old-symbol))
           (should
            (advice-member-p
@@ -527,13 +642,13 @@
                           (setq emacs-hypervisor-test-runtime-value :new)
                           (apply orig-fn args))))
           (setq current (emacs-hypervisor-export-config-units))
-          (setq new-symbol
-                (emacs-hypervisor-test--generated-symbol-from-body
-                 (plist-get (car current) :body)))
           (setq reports
                 (emacs-hypervisor--reload-unit-reports
                  (emacs-hypervisor-selective-reload-diff-units previous current)
                  nil))
+          (setq new-symbol
+                (emacs-hypervisor-test--effect-function-for-unit
+                 "lambda-advice-unit"))
           (setq report
                 (emacs-hypervisor-test--report reports "lambda-advice-unit"))
           (setq cleanup (plist-get report :cleanup))
@@ -555,6 +670,92 @@
         (advice-remove 'emacs-hypervisor-test-advice-target old-symbol))
       (when (bound-and-true-p new-symbol)
         (advice-remove 'emacs-hypervisor-test-advice-target new-symbol))
+      (emacs-hypervisor-reset-declarations))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-cleans-loop-generated-advice-lambdas ()
+  (let* ((emacs-hypervisor-test-runtime-value nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         previous
+         current
+         old-symbols
+         new-symbols
+         reports
+         report
+         cleanup)
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! loop-advice-unit
+            :config
+            (dolist (entry '((emacs-hypervisor-test-advice-target-a . :old-a)
+                             (emacs-hypervisor-test-advice-target-b . :old-b)))
+              (let ((value (cdr entry)))
+                (advice-add (car entry)
+                            :before
+                            (lambda (&rest _args)
+                              (push value
+                                    emacs-hypervisor-test-runtime-value))))))
+          (setq previous (emacs-hypervisor-export-config-units))
+          (eval (plist-get (car previous) :body) t)
+          (setq old-symbols
+                (mapcar (lambda (effect) (plist-get effect :function))
+                        (emacs-hypervisor-effect-registry-effects-for-unit
+                         "loop-advice-unit")))
+          (should (= (length old-symbols) 2))
+          (emacs-hypervisor-test-advice-target-a)
+          (emacs-hypervisor-test-advice-target-b)
+          (should (equal emacs-hypervisor-test-runtime-value
+                         '(:old-b :old-a)))
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! loop-advice-unit
+            :config
+            (dolist (entry '((emacs-hypervisor-test-advice-target-a . :new-a)
+                             (emacs-hypervisor-test-advice-target-b . :new-b)))
+              (let ((value (cdr entry)))
+                (advice-add (car entry)
+                            :before
+                            (lambda (&rest _args)
+                              (push value
+                                    emacs-hypervisor-test-runtime-value))))))
+          (setq current (emacs-hypervisor-export-config-units))
+          (setq reports
+                (emacs-hypervisor--reload-unit-reports
+                 (emacs-hypervisor-selective-reload-diff-units previous current)
+                 nil))
+          (setq report
+                (emacs-hypervisor-test--report reports "loop-advice-unit"))
+          (setq cleanup (plist-get report :cleanup))
+          (setq new-symbols
+                (mapcar (lambda (effect) (plist-get effect :function))
+                        (emacs-hypervisor-effect-registry-effects-for-unit
+                         "loop-advice-unit")))
+          (setq emacs-hypervisor-test-runtime-value nil)
+          (emacs-hypervisor-test-advice-target-a)
+          (emacs-hypervisor-test-advice-target-b)
+          (should (equal emacs-hypervisor-test-runtime-value
+                         '(:new-b :new-a)))
+          (dolist (symbol old-symbols)
+            (should-not
+             (advice-member-p symbol
+                              'emacs-hypervisor-test-advice-target-a))
+            (should-not
+             (advice-member-p symbol
+                              'emacs-hypervisor-test-advice-target-b))
+            (should-not (fboundp symbol)))
+          (dolist (symbol new-symbols)
+            (should (fboundp symbol)))
+          (should (= (length new-symbols) 2))
+          (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
+                      cleanup)
+                     2))
+          (should-not (plist-get cleanup :unsupported)))
+      (dolist (symbol old-symbols)
+        (advice-remove 'emacs-hypervisor-test-advice-target-a symbol)
+        (advice-remove 'emacs-hypervisor-test-advice-target-b symbol))
+      (dolist (symbol new-symbols)
+        (advice-remove 'emacs-hypervisor-test-advice-target-a symbol)
+        (advice-remove 'emacs-hypervisor-test-advice-target-b symbol))
       (emacs-hypervisor-reset-declarations))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-reports-opaque-effects ()
@@ -631,6 +832,8 @@
 
 (ert-deftest emacs-hypervisor-reload-summary-counts-selective-and-effect-fields ()
   (let* ((emacs-hypervisor-test-hook nil)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
          (previous
           (list
            (emacs-hypervisor-test--unit
@@ -815,6 +1018,8 @@
          (emacs-hypervisor--process nil)
          (emacs-hypervisor-test-hook nil)
          (emacs-hypervisor-test-runtime-value :unset)
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
          (emacs-hypervisor-test-unchanged-counter 0))
     (unwind-protect
         (progn
@@ -827,8 +1032,14 @@
             :config
             (add-hook 'emacs-hypervisor-test-hook
                       #'emacs-hypervisor-test-hook-old))
-          (add-hook 'emacs-hypervisor-test-hook
-                    #'emacs-hypervisor-test-hook-old)
+          (eval
+           (plist-get
+            (cl-find "hook-unit"
+                     emacs-hypervisor-config-units
+                     :key (lambda (entry) (plist-get entry :name))
+                     :test #'equal)
+            :body)
+           t)
           (with-temp-file config-file
             (insert "(config-unit! stable\n"
                     "  :config\n"
@@ -1044,14 +1255,39 @@
     (should (= (length sent) 4))
     (should (equal (plist-get (cdr (nth 0 sent)) :payload)
                    '(:protocol :sexp-rpc
-                     :version 1
-                     :mode :session-scoped-subprocess
-                     :transport :s-expression)))
+                               :version 1
+                               :mode :session-scoped-subprocess
+                               :transport :s-expression)))
     (should (equal (plist-get (cdr (nth 1 sent)) :payload)
                    '(:session-name "test-session" :ui batch)))
     (should (equal (plist-get (cdr (nth 2 sent)) :payload)
                    '(:requested (:packages) :packages ((:name "core-pkg")))))
     (should (equal (plist-get (cdr (nth 3 sent)) :payload) 42))))
+
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-keeps-partial-symbol-prefixes ()
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (message (emacs-hypervisor-test--event
+                   :log
+                   '(:level :info :message file-name)))
+         (wire (concat (emacs-hypervisor--sexp-string message) "\n"))
+         (split-at (+ (string-match-p "file-name" wire) 4))
+         (first-chunk (substring wire 0 split-at))
+         (second-chunk (substring wire split-at))
+         received)
+    (unwind-protect
+        (cl-letf (((symbol-function 'emacs-hypervisor--dispatch)
+                   (lambda (value)
+                     (push value received))))
+          (emacs-hypervisor-sexp-rpc-filter nil first-chunk)
+          (should (null received))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (equal (buffer-string) first-chunk)))
+          (emacs-hypervisor-sexp-rpc-filter nil second-chunk)
+          (should (equal (nreverse received) (list message)))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer)))))
 
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-session-state ()
   (emacs-hypervisor-reset)
@@ -1096,7 +1332,7 @@
      (emacs-hypervisor-test--event
       :log
       '(:level :error
-        :message "config load failed: (error \"bad key\")\nbacktrace...")))
+               :message "config load failed: (error \"bad key\")\nbacktrace...")))
     (emacs-hypervisor--dispatch
      (emacs-hypervisor-test--event
       :shutdown

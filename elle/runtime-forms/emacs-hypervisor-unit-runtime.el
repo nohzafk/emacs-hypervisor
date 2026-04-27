@@ -39,7 +39,7 @@
   (condition-case err
       (progn
         (emacs-hypervisor-runtime--require-unit-features name requires)
-        (let ((result (eval body)))
+        (let ((result (eval body t)))
           (push (list :phase :units :event :success :name name)
                 emacs-hypervisor-execution-events)
           (emacs-hypervisor-runtime-note-unit-event :success name)

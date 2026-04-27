@@ -81,6 +81,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS"
            "elle/runtime-forms/emacs-hypervisor-declarations.el")
+          effect-registry-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-effect-registry.el")
           effect-aware-reload-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_FORMS"
@@ -140,6 +144,7 @@
        `(:form ,(runtime-forms:install-config-surface-form
                  report-core-module
                  report-module
+                 effect-registry-module
                  declarations-module
                  effect-aware-reload-module
                  selective-reload-module

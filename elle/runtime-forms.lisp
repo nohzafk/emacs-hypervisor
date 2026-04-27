@@ -13,6 +13,7 @@
   (defn install-config-surface-form
       [report-core-module
        report-module
+       effect-registry-module
        declarations-module
        effect-aware-reload-module
        selective-reload-module
@@ -24,6 +25,7 @@
       (module-loader:load-module-form report-module :emacs-hypervisor-report-ready)
       '((emacs-hypervisor-report-reset)
         (emacs-hypervisor-report-session-started))
+      (module-loader:load-module-form effect-registry-module :emacs-hypervisor-effect-registry-ready)
       (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
       (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
       (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)

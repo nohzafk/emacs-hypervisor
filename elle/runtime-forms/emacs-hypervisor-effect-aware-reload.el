@@ -2,6 +2,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'emacs-hypervisor-effect-registry)
 
 (defconst emacs-hypervisor-effect-aware-reload--generated-prefix
   "emacs-hypervisor--generated-")
@@ -146,8 +147,9 @@
                  (list 'function symbol))))
       (list form))))
 
-(defun emacs-hypervisor-effect-aware-reload-normalize-body (unit-name body)
-  "Return BODY with supported anonymous effects rewritten to generated symbols."
+(defun emacs-hypervisor-effect-aware-reload--static-normalize-body
+    (unit-name body)
+  "Return BODY with supported anonymous effects rewritten for static cleanup."
   (if (and (consp body) (eq (car body) 'progn))
       (cons
        'progn
@@ -180,6 +182,128 @@
               body)))
         (if (cdr forms) (cons 'progn forms) (car forms))))
      (t body))))
+
+(defun emacs-hypervisor-effect-aware-reload--registry-hook-form-p (form)
+  (and (consp form)
+       (eq (car form) 'add-hook)
+       (memq (length form) '(3 4 5))
+       (or (< (length form) 5)
+           (null (nth 4 form)))))
+
+(defun emacs-hypervisor-effect-aware-reload--registry-advice-form-p (form)
+  (and (consp form)
+       (eq (car form) 'advice-add)
+       (= (length form) 4)))
+
+(defun emacs-hypervisor-effect-aware-reload--source-plist (form)
+  (list :form form))
+
+(defun emacs-hypervisor-effect-aware-reload--registry-hook-form
+    (unit-name form)
+  (if (emacs-hypervisor-effect-aware-reload--registry-hook-form-p form)
+      (list
+       'emacs-hypervisor-register-hook-effect
+       :unit unit-name
+       :target (nth 1 form)
+       :function (nth 2 form)
+       :depth (if (> (length form) 3) (nth 3 form) nil)
+       :local (if (> (length form) 4) (nth 4 form) nil)
+       :source (list 'quote
+                     (emacs-hypervisor-effect-aware-reload--source-plist
+                      form)))
+    form))
+
+(defun emacs-hypervisor-effect-aware-reload--registry-advice-form
+    (unit-name form)
+  (if (emacs-hypervisor-effect-aware-reload--registry-advice-form-p form)
+      (list
+       'emacs-hypervisor-register-advice-effect
+       :unit unit-name
+       :target (nth 1 form)
+       :where (nth 2 form)
+       :function (nth 3 form)
+       :source (list 'quote
+                     (emacs-hypervisor-effect-aware-reload--source-plist
+                      form)))
+    form))
+
+(defun emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+    (unit-name forms)
+  (mapcar
+   (lambda (form)
+     (emacs-hypervisor-effect-aware-reload--rewrite-form unit-name form))
+   forms))
+
+(defun emacs-hypervisor-effect-aware-reload--rewrite-cond-clause
+    (unit-name clause)
+  (if (consp clause)
+      (cons (car clause)
+            (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+             unit-name
+             (cdr clause)))
+    clause))
+
+(defun emacs-hypervisor-effect-aware-reload--rewrite-form (unit-name form)
+  (cond
+   ((not (consp form))
+    form)
+   ((memq (car form) '(quote function lambda defun defmacro))
+    form)
+   ((eq (car form) 'add-hook)
+    (emacs-hypervisor-effect-aware-reload--registry-hook-form
+     unit-name
+     form))
+   ((eq (car form) 'advice-add)
+    (emacs-hypervisor-effect-aware-reload--registry-advice-form
+     unit-name
+     form))
+   ((eq (car form) 'progn)
+    (cons 'progn
+          (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+           unit-name
+           (cdr form))))
+   ((memq (car form) '(let let*))
+    (append
+     (list (car form) (cadr form))
+     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+      unit-name
+      (cddr form))))
+   ((memq (car form) '(when unless))
+    (append
+     (list (car form) (cadr form))
+     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+      unit-name
+      (cddr form))))
+   ((eq (car form) 'if)
+    (append
+     (list (car form)
+           (cadr form)
+           (emacs-hypervisor-effect-aware-reload--rewrite-form
+            unit-name
+            (caddr form)))
+     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+      unit-name
+      (cdddr form))))
+   ((eq (car form) 'cond)
+    (cons
+     'cond
+     (mapcar
+      (lambda (clause)
+        (emacs-hypervisor-effect-aware-reload--rewrite-cond-clause
+         unit-name
+         clause))
+      (cdr form))))
+   ((memq (car form) '(dolist dotimes))
+    (append
+     (list (car form) (cadr form))
+     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
+      unit-name
+      (cddr form))))
+   (t form)))
+
+(defun emacs-hypervisor-effect-aware-reload-normalize-body (unit-name body)
+  "Return BODY with supported effects rewritten to registry helpers."
+  (emacs-hypervisor-effect-aware-reload--rewrite-form unit-name body))
 
 (defun emacs-hypervisor-effect-aware-reload-normalize-entry (entry)
   "Return ENTRY with its body normalized for supported reload effects."
@@ -250,35 +374,44 @@
           :reason :unsupported-form))))
 
 (defun emacs-hypervisor-effect-aware-reload-unit-effects (name entry)
-  (let ((normalized
-         (emacs-hypervisor-effect-aware-reload-normalize-entry entry)))
+  (let ((normalized-body
+         (emacs-hypervisor-effect-aware-reload--static-normalize-body
+          name
+          (plist-get entry :body))))
     (mapcar (lambda (form)
               (emacs-hypervisor-effect-aware-reload-form-effect name form))
             (emacs-hypervisor-effect-aware-reload--body-effect-forms
-             (plist-get normalized :body)))))
+             normalized-body))))
 
 (defun emacs-hypervisor-effect-aware-reload-cleanup-unit (name entry)
-  (let ((effects (emacs-hypervisor-effect-aware-reload-unit-effects name entry))
-        cleaned
-        unsupported
-        failures)
-    (dolist (effect effects)
-      (if (plist-get effect :supported)
-          (let ((cleanup-form
-                 (emacs-hypervisor-effect-aware-reload-cleanup-form effect)))
-            (condition-case err
-                (progn
-                  (eval cleanup-form)
-                  (push effect cleaned))
-              (error
-               (push (append effect
-                             (list :error (format "%S" err)))
-                     failures))))
-        (push effect unsupported)))
-    (list :effects effects
-          :cleaned (nreverse cleaned)
-          :unsupported (nreverse unsupported)
-          :failed (nreverse failures))))
+  (let ((registry-cleanup
+         (and (fboundp 'emacs-hypervisor-effect-registry-retract-unit)
+              (emacs-hypervisor-effect-registry-retract-unit name))))
+    (if (plist-get registry-cleanup :effects)
+        registry-cleanup
+      (let ((effects (emacs-hypervisor-effect-aware-reload-unit-effects
+                      name
+                      entry))
+            cleaned
+            unsupported
+            failures)
+        (dolist (effect effects)
+          (if (plist-get effect :supported)
+              (let ((cleanup-form
+                     (emacs-hypervisor-effect-aware-reload-cleanup-form effect)))
+                (condition-case err
+                    (progn
+                      (eval cleanup-form)
+                      (push effect cleaned))
+                  (error
+                   (push (append effect
+                                 (list :error (format "%S" err)))
+                         failures))))
+            (push effect unsupported)))
+        (list :effects effects
+              :cleaned (nreverse cleaned)
+              :unsupported (nreverse unsupported)
+              :failed (nreverse failures))))))
 
 (defun emacs-hypervisor-effect-aware-reload-cleanup-count (cleanup)
   (cl-count-if

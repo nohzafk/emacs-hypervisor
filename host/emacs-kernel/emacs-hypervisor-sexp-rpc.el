@@ -255,18 +255,22 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
 
 (defun emacs-hypervisor--consume-input ()
   (goto-char (point-min))
-  (let (value done)
+  (let ((complete-through (point-min))
+        value
+        done)
     (while (not done)
       (condition-case err
           (progn
             (setq value (read (current-buffer)))
-            (emacs-hypervisor--dispatch value))
+            (emacs-hypervisor--dispatch value)
+            (skip-chars-forward " \t\r\n")
+            (setq complete-through (point)))
         (end-of-file
          (setq done t))
         (error
          (erase-buffer)
          (signal (car err) (cdr err)))))
-    (delete-region (point-min) (point))))
+    (delete-region (point-min) complete-through)))
 
 (defun emacs-hypervisor-sexp-rpc-filter (_proc output)
   (with-current-buffer (get-buffer-create emacs-hypervisor--buffer-name)
