@@ -1020,7 +1020,8 @@
          (emacs-hypervisor-test-runtime-value :unset)
          (emacs-hypervisor-effect-registry-current nil)
          (emacs-hypervisor-effect-registry--instance-counter 0)
-         (emacs-hypervisor-test-unchanged-counter 0))
+         (emacs-hypervisor-test-unchanged-counter 0)
+         messages)
     (unwind-protect
         (progn
           (emacs-hypervisor-reset-declarations)
@@ -1052,7 +1053,14 @@
                     "              emacs-hypervisor-test-hook))\n"
                     "  (add-hook 'emacs-hypervisor-test-hook\n"
                     "            #'emacs-hypervisor-test-hook-new))\n"))
-          (let* ((report (emacs-hypervisor-reload-config))
+          (let* ((report
+                  (cl-letf (((symbol-function 'message)
+                             (lambda (format-string &rest args)
+                               (push (apply #'format-message
+                                            format-string
+                                            args)
+                                     messages))))
+                    (emacs-hypervisor-reload-config)))
                  (reports (plist-get report :reports))
                  (summary (plist-get report :summary))
                  (stable-report
@@ -1078,7 +1086,20 @@
                        1))
             (should (= (plist-get summary :applied) 1))
             (should (= (plist-get summary :skipped-unchanged) 1))
-            (should (= (plist-get summary :cleaned) 1))))
+            (should (= (plist-get summary :cleaned) 1))
+            (setq messages (nreverse messages))
+            (should (member "[Hypervisor] Reload started" messages))
+            (should
+             (member
+              "[Hypervisor] Reload cleaned hook emacs-hypervisor-test-hook -> emacs-hypervisor-test-hook-old for hook-unit"
+              messages))
+            (should
+             (member "[Hypervisor] Reload re-applied unit: hook-unit"
+                     messages))
+            (should
+             (member
+              "[Hypervisor] Reload: 1 changed applied, 1 unchanged skipped, 1 old effects cleaned."
+              messages))))
       (remove-hook 'emacs-hypervisor-test-hook
                    #'emacs-hypervisor-test-hook-old)
       (remove-hook 'emacs-hypervisor-test-hook

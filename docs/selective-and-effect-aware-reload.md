@@ -122,11 +122,14 @@ package manager side effects. Local hooks with non-nil `LOCAL` are not tracked.
  :note NOTE)
 ```
 
-Example user message:
+Example user messages:
 
 ```text
-[Hypervisor] Reload: 3 changed applied, 44 unchanged skipped,
-2 old effects cleaned.
+[Hypervisor] Reload started
+[Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload cleaned advice save-buffer :before -> delete-trailing-whitespace for save-behavior
+[Hypervisor] Reload re-applied unit: project-hooks
+[Hypervisor] Reload: 3 changed applied, 44 unchanged skipped, 2 old effects cleaned.
 ```
 
 ## API

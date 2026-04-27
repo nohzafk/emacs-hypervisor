@@ -290,10 +290,20 @@ Changed and removed units clean up through the registry first. The older static
 cleanup path remains as a compatibility fallback for old/raw previous unit
 bodies that do not have registry records.
 
+Reload logs the user-facing cleanup story as it runs:
+
+```text
+[Hypervisor] Reload started
+[Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload re-applied unit: project-hooks
+[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 1 old effects cleaned.
+```
+
 Covered by tests:
 
 - current selective reload tests remain green
 - reload reports count registry-cleaned hook/advice effects
+- reload logs start, cleaned hook/advice effects, applied units, and summary
 - opaque unsupported forms remain reported but do not trigger unsafe cleanup
 
 ## Remaining Work

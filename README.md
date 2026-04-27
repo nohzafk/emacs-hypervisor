@@ -125,6 +125,16 @@ the new ones:
 Edit one unit without replaying every package integration, mode setup, and hook
 registration in your session.
 
+Reload emits a short transcript in `*Messages*` so effect-aware cleanup is
+visible while it happens:
+
+```text
+[Hypervisor] Reload started
+[Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload re-applied unit: project-hooks
+[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 1 old effects cleaned.
+```
+
 ### Effect-Aware Reload
 
 The hardest part of reloading Emacs config is not re-evaluating code --- it is
