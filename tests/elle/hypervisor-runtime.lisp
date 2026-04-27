@@ -326,6 +326,13 @@
     (assert (= installed (list "core-pkg" "ui-pkg")) "tracker installed names")
     (assert (= finished-reason "completed") "tracker finished reason")
     (assert (= (length stub-sent-requests) 3) "tracker sends two queue evals and one process eval")
+    (let* [queue-request (wire-protocol:from-wire (get stub-sent-requests 0))
+           queue-payload (wire-protocol:from-wire (get queue-request :payload))
+           queue-form (get queue-payload :form)
+           first-body-form (first (rest (rest queue-form)))]
+      (assert
+       (= first-body-form '(emacs-hypervisor-runtime-ensure-package-manager))
+       "package queue eval lazily ensures package manager"))
     (assert (= (get core :status) :ok) "tracker core status")
     (assert (= (get ui :status) :ok) "tracker ui status")
     (assert (= (get runtime-fail :status) :failed) "tracker missing install callback fails package")
@@ -334,6 +341,15 @@
     (assert (= (get blocked :status) :skipped) "tracker blocks dependent package")
     (assert (= (get (get blocked :details) :blockers) (list "runtime-fail-pkg")) "tracker blocked details")))
 (println "  3. tracker execution: ok")
+
+(reset-stub-state)
+(let [{:reports reports :installed installed :next-id next-id}
+      (execution:execute-package-entry-plan-tracker () 30)]
+  (assert (= next-id 30) "empty package plan preserves next id")
+  (assert (empty? reports) "empty package plan has no reports")
+  (assert (empty? installed) "empty package plan has no installed packages")
+  (assert (= (length stub-sent-requests) 0) "empty package plan sends no eval requests"))
+(println "  3b. empty package plan: ok")
 
 # ============================================================================
 # 4. Unit execution preserves runtime failure propagation.

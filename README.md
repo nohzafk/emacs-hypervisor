@@ -392,6 +392,16 @@ Set these in the Hypervisor config `early-init.el` before the generated
 | `emacs-hypervisor-binary-name` | `"emacs-hypervisor"` | Binary name for `PATH` lookup |
 | `emacs-hypervisor-open-buffer-on-abnormal-exit` | `t` | Show process buffer on abnormal exit |
 
+### Runtime variables
+
+Set these in your `config.org` or `config.el`. They take effect during the
+startup session.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `emacs-hypervisor-show-report-on-finish` | `nil` | When non-nil, display the startup report buffer after a clean startup. The report always appears when a config-unit fails, regardless of this setting. |
+| `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
+
 ## Architecture
 
 One rule: **Emacs keeps a small trusted kernel; Elle owns orchestration

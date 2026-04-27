@@ -123,13 +123,15 @@
     (append
      '(let ((emacs-hypervisor-batch-queue-results ())))
      (append
-      (map
-       (fn [{:entry entry :name name}]
-         (package-entry-queue-step-form
-          name
-          (package-entry-order entry)))
-       plan-items)
-      '((nreverse emacs-hypervisor-batch-queue-results)))))
+      '((emacs-hypervisor-runtime-ensure-package-manager))
+      (append
+       (map
+        (fn [{:entry entry :name name}]
+          (package-entry-queue-step-form
+           name
+           (package-entry-order entry)))
+        plan-items)
+       '((nreverse emacs-hypervisor-batch-queue-results))))))
 
   (defn execution-error [result]
     (protocol:response-error result))
