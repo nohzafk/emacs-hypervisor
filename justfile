@@ -9,11 +9,11 @@ default:
     @just --list
 
 [group('Build')]
-build:
+build: bootstrap-elle
     ./scripts/build-hypervisor
 
 [group('Build')]
-install bin_dir="$HOME/.local/bin":
+install bin_dir="$HOME/.local/bin": build
     just build
     mkdir -p "{{bin_dir}}"
     cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"

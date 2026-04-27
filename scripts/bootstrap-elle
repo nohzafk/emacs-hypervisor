@@ -22,8 +22,46 @@ Environment overrides:
 - ELLE_DIR  destination checkout directory (default: $repo_dir/.elle)
 - ELLE_REPO clone URL (default: $elle_repo)
 - LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script
-  auto-detects Xcode's libclang when available
+  auto-detects Xcode, Command Line Tools, and common package-manager libclang
+  installs when available
 EOF
+}
+
+libclang_file_names() {
+  case "$(uname -s)" in
+    Darwin)
+      printf '%s\n' "libclang.dylib"
+      ;;
+    *)
+      printf '%s\n' "libclang.so" "libclang.so.1"
+      ;;
+  esac
+}
+
+directory_has_libclang() {
+  local directory=$1
+  local file_name
+
+  [ -d "$directory" ] || return 1
+
+  while IFS= read -r file_name; do
+    if [ -f "$directory/$file_name" ]; then
+      return 0
+    fi
+  done < <(libclang_file_names)
+
+  return 1
+}
+
+print_libclang_directory_if_valid() {
+  local candidate=$1
+
+  if directory_has_libclang "$candidate"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  return 1
 }
 
 detect_libclang_path() {
@@ -34,10 +72,40 @@ detect_libclang_path() {
 
   case "$(uname -s)" in
     Darwin)
-      if [ -f /Applications/Xcode.app/Contents/Frameworks/libclang.dylib ]; then
-        printf '%s\n' "/Applications/Xcode.app/Contents/Frameworks"
-        return 0
+      local developer_dir=""
+
+      if command -v xcode-select >/dev/null 2>&1; then
+        developer_dir=$(xcode-select -p 2>/dev/null || true)
       fi
+
+      for candidate in \
+        "${developer_dir:+$developer_dir/usr/lib}" \
+        "${developer_dir:+$developer_dir/../Frameworks}" \
+        "${developer_dir:+$developer_dir/Toolchains/XcodeDefault.xctoolchain/usr/lib}" \
+        /Library/Developer/CommandLineTools/usr/lib \
+        /Applications/Xcode.app/Contents/Frameworks \
+        /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib \
+        /opt/homebrew/opt/llvm/lib \
+        /usr/local/opt/llvm/lib \
+        /opt/local/libexec/llvm-*/lib; do
+        [ -n "$candidate" ] || continue
+
+        if print_libclang_directory_if_valid "$candidate"; then
+          return 0
+        fi
+      done
+      ;;
+    *)
+      for candidate in \
+        /usr/lib/llvm-*/lib \
+        /usr/local/opt/llvm/lib \
+        /usr/local/lib \
+        /usr/lib \
+        /usr/lib64; do
+        if print_libclang_directory_if_valid "$candidate"; then
+          return 0
+        fi
+      done
       ;;
   esac
 
