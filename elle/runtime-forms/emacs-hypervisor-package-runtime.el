@@ -102,16 +102,26 @@
   (emacs-hypervisor-runtime-report-package-installed name))
 
 (defun emacs-hypervisor-runtime-package-work-required-p ()
-  "Return non-nil when queued Elpaca entries need visible package work."
+  "Return non-nil when queued Elpaca entries need visible package downloads."
   (and (fboundp 'elpaca--queued)
-       (fboundp 'elpaca<-builtp)
+       (fboundp 'elpaca<-source-dir)
        (cl-some
         (lambda (queued)
           (let ((entry (cdr queued)))
-            (or (not (elpaca<-builtp entry))
+            (or (let ((source-dir (elpaca<-source-dir entry)))
+                  (not (and source-dir (file-directory-p source-dir))))
                 (and (fboundp 'elpaca--status)
                      (eq (elpaca--status entry) 'failed)))))
         (elpaca--queued))))
+
+(defun emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present ()
+  "Suppress Elpaca's initial log when all queued source dirs exist."
+  (when (and (not (bound-and-true-p elpaca-after-init-time))
+             (fboundp 'elpaca--queued)
+             (fboundp 'elpaca<-source-dir)
+             (elpaca--queued)
+             (not (emacs-hypervisor-runtime-package-work-required-p)))
+    'silent))
 
 (defun emacs-hypervisor-runtime--bury-elpaca-log ()
   "Bury the Elpaca log buffer if it surfaced during a no-op queue."
@@ -146,6 +156,13 @@
     (advice-add 'elpaca-git--clone
                 :around
                 #'emacs-hypervisor-elpaca-wait-on-shared-main-before-clone)
+    (when (boundp 'elpaca-log-functions)
+      (remove-hook
+       'elpaca-log-functions
+       #'emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present)
+      (add-hook
+       'elpaca-log-functions
+       #'emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present))
     (setq emacs-hypervisor-runtime-compat-enabled t))
   (when (boundp 'elpaca--post-queues-hook)
     (remove-hook 'elpaca--post-queues-hook

@@ -10,6 +10,8 @@
 
 (defvar elpaca-recipe-functions nil)
 (defvar elpaca--post-queues-hook nil)
+(defvar elpaca-log-functions nil)
+(defvar elpaca-after-init-time nil)
 (defvar emacs-hypervisor-installed-packages nil)
 (defvar emacs-hypervisor-execution-events nil)
 (defvar emacs-hypervisor-test-runtime-value nil)
@@ -1514,6 +1516,72 @@
                     elpaca--post-queues-hook))
       (should (eq (emacs-hypervisor-runtime-ensure-package-manager) :ready))
       (should (= bootstrap-calls 1)))))
+
+(ert-deftest emacs-hypervisor-runtime-ensure-package-manager-installs-log-suppression ()
+  (let ((emacs-hypervisor-runtime-package-manager-ready t)
+        (emacs-hypervisor-runtime-compat-enabled nil)
+        (elpaca-recipe-functions nil)
+        (elpaca--post-queues-hook nil)
+        (elpaca-log-functions '(elpaca-log-initial-queues)))
+    (unwind-protect
+        (progn
+          (should (eq (emacs-hypervisor-runtime-ensure-package-manager) :ready))
+          (should
+           (eq (car elpaca-log-functions)
+               #'emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present))
+          (should
+           (memq #'emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present
+                 elpaca-log-functions)))
+      (advice-remove 'elpaca--shared-source-dir
+                     #'emacs-hypervisor-elpaca-shared-source-dir)
+      (advice-remove 'elpaca-source
+                     #'emacs-hypervisor-elpaca-wait-for-shared-git-source)
+      (advice-remove 'elpaca-git--clone
+                     #'emacs-hypervisor-elpaca-wait-on-shared-main-before-clone))))
+
+(ert-deftest emacs-hypervisor-runtime-suppresses-initial-elpaca-log-when-source-dirs-exist ()
+  (let ((source-a (make-temp-file "emacs-hypervisor-source-a" t))
+        (source-b (make-temp-file "emacs-hypervisor-source-b" t))
+        (elpaca-after-init-time nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'elpaca--queued)
+                   (lambda ()
+                     `((pkg-a . (:source ,source-a :status queued))
+                       (pkg-b . (:source ,source-b :status queued)))))
+                  ((symbol-function 'elpaca<-source-dir)
+                   (lambda (entry)
+                     (plist-get entry :source)))
+                  ((symbol-function 'elpaca--status)
+                   (lambda (entry)
+                     (plist-get entry :status))))
+          (should-not (emacs-hypervisor-runtime-package-work-required-p))
+          (should
+           (eq (emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present)
+               'silent)))
+      (delete-directory source-a t)
+      (delete-directory source-b t))))
+
+(ert-deftest emacs-hypervisor-runtime-keeps-initial-elpaca-log-when-source-dir-missing ()
+  (let* ((root (make-temp-file "emacs-hypervisor-source-root" t))
+         (source-a (expand-file-name "pkg-a" root))
+         (source-b (expand-file-name "pkg-b" root))
+         (elpaca-after-init-time nil))
+    (make-directory source-a)
+    (unwind-protect
+        (cl-letf (((symbol-function 'elpaca--queued)
+                   (lambda ()
+                     `((pkg-a . (:source ,source-a :status queued))
+                       (pkg-b . (:source ,source-b :status queued)))))
+                  ((symbol-function 'elpaca<-source-dir)
+                   (lambda (entry)
+                     (plist-get entry :source)))
+                  ((symbol-function 'elpaca--status)
+                   (lambda (entry)
+                     (plist-get entry :status))))
+          (should (emacs-hypervisor-runtime-package-work-required-p))
+          (should-not
+           (emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present)))
+      (delete-directory root t))))
 
 (ert-deftest emacs-hypervisor-runtime-process-packages-buries-noop-elpaca-log ()
   (let ((emacs-hypervisor-runtime-package-manager-ready t)
