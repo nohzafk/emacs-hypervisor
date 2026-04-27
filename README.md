@@ -1,60 +1,37 @@
 # Emacs Hypervisor
 
-A single native binary for deterministic, reloadable Emacs configuration.
+A single native binary, written in [Elle](https://github.com/elle-lisp/elle)
+(a modern Lisp over Rust), for deterministic, reloadable Emacs configuration.
 
-Emacs configuration is notoriously fragile. Traditional setups --- whether
+Hypervisor is a small foundation for building your own config, not an Emacs
+distribution. You keep ownership of `config.org` (or `config.el`); Hypervisor
+provides the package declarations, config-unit declarations, dependency
+planning, reload support, and a Lisp-native control plane around Emacs.
+
+Today, Hypervisor focuses on two sources of unpredictability in real-world
+Emacs configs:
+
+**Deterministic package and config loading.** Traditional setups --- whether
 hand-rolled `use-package` files, Doom Emacs, or Spacemacs --- are long,
-order-sensitive scripts where lazy loading hides broken config until hours into
-a session, when the original context is long gone. A missing dependency, a
-misordered `require`, a stale hook from a reload: these bugs are intermittent,
-hard to reproduce, and painful to diagnose.
+order-sensitive scripts where package installation, feature loading, and config
+execution are easy to blur together. Lazy loading can hide broken config until
+hours into a session, when the original context is gone. A missing dependency, a
+misordered `require`, or a package configured before it is installed or loaded
+becomes intermittent, hard to reproduce, and painful to diagnose.
 
 Hypervisor treats your Emacs config as a **dependency graph** instead of a
-script. It resolves the graph with topological sorting, forces everything to
-load at startup in an exact, deterministic order, and surfaces errors
-immediately rather than letting them lurk behind deferred execution. If
-something is broken, you find out in the first five seconds, not two hours
-later.
+script. It resolves package and config-unit dependencies with topological
+sorting, runs preflight checks before execution, and surfaces failures
+immediately instead of letting them lurk behind deferred execution. If something
+is broken, you find out in the first five seconds, not two hours later.
 
-It is a small foundation for building your own config, not a distribution. You
-keep ownership of `config.org` (or `config.el`); Hypervisor provides the
-package declarations, config-unit declarations, dependency planning, reload
-support, and a Lisp-native control plane around Emacs.
-
-## How It Works
-
-Hypervisor is written in [Elle](https://github.com/nohzafk/elle) (a modern
-Lisp over Rust) and compiles to a **single native binary** with all
-orchestration logic, Elle source, and runtime Elisp embedded. No external
-runtime, no framework repo to clone --- just drop the binary on your `PATH`.
-
-At startup, Emacs loads a tiny generated kernel that launches the Hypervisor
-binary over stdio. From there, Hypervisor takes over: it reads your
-declarations, builds the dependency graph, runs preflight checks, and feeds
-Emacs the exact ordered commands to install packages and execute config units.
-
-Three properties make this architecture distinctive:
-
-**Deterministic startup as a dependency graph.** Hypervisor grew out of
-[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which proved
-that topological sorting and explicit dependencies eliminate non-determinism in
-Emacs config. Hypervisor takes the idea further: startup becomes an observable
-orchestration session with preflight validation, failure propagation, execution
-plans, and reports.
-
-**Lisp-to-Lisp homoiconicity.** Because Elle is a Lisp, config-unit bodies
-travel between Hypervisor and Emacs as structured Lisp data, not opaque
-strings. Elle can inspect and rewrite Elisp forms directly. This is what
-powers effect-aware reload: Hypervisor can recognize
-`(add-hook 'my-hook (lambda () ...))`, rewrite the lambda to a named function,
-and automatically remove it before re-applying the unit --- all without string
-parsing.
-
-**Single binary, zero framework overhead.** Traditional Emacs config frameworks
-require cloning a repo into `~/.config/emacs` because Emacs must load an
-`init.el` written in Elisp. Hypervisor compiles everything into one binary.
-Your Emacs home contains only generated bootstrap files; your own config lives
-cleanly in the Hypervisor config directory.
+**Reloads that match the file you edited.** Re-evaluating Elisp is easy;
+restoring the previous state is not. A normal reload can leave duplicate hook
+entries, stale advice, and old anonymous functions in a long-lived Emacs
+session. Hypervisor combines selective reload with effect-aware cleanup:
+unchanged units are skipped, changed units are re-applied, removed units are
+cleaned up, and recognized hook/advice effects from the previous version are
+retracted before the new version runs.
 
 ## User-Facing Model
 
@@ -137,77 +114,41 @@ visible while it happens:
 
 ### Effect-Aware Reload
 
-The hardest part of reloading Emacs config is not re-evaluating code --- it is
-cleaning up the *effects* of the previous version. Without cleanup, you
-accumulate duplicate hook entries, stale advice, and ghost functions that drift
-further from your actual config with every reload.
+The killer feature is not that Hypervisor can re-evaluate config. Emacs can
+already do that. The hard problem is that Emacs config is full of mutation:
+`add-hook` appends to hook variables, `advice-add` changes function behavior,
+and anonymous functions create fresh objects every time they are evaluated. A
+normal reload is additive. Fix a hook body and the old one may still be there.
+Move advice from one target to another and both versions may keep running. After
+enough reloads, the live Emacs session no longer matches the file you are
+editing.
 
-Hypervisor solves this by inspecting the structured Lisp body of each unit
-before re-applying it, and automatically reversing recognized side effects from
-the previous version:
+Effect-aware reload makes supported config effects explicit runtime records.
+Because config-unit bodies remain structured Lisp data, Hypervisor can walk the
+executable body positions and route recognized `add-hook` and `advice-add` calls
+through an effect registry. The registry performs the real Emacs operation, then
+records what actually happened: the owning unit, effect kind, concrete target,
+installed function, apply form, retract form, and metadata.
+
+On the next reload, changed and removed units are handled in two phases:
+
+1. Retract the previous active effect records for that unit.
+2. Apply the new unit body, recording its new effects.
 
 ```elisp
-;; On reload, the old hook entry is removed before the new body is applied
 (config-unit! project-hooks
   :config
   (add-hook 'prog-mode-hook #'display-line-numbers-mode))
 
-;; On reload, the old advice is removed before the new body is applied
 (config-unit! save-behavior
   :config
   (advice-add 'save-buffer :before #'delete-trailing-whitespace))
-```
 
-The recognizer is intentionally conservative. It currently tracks only hook and
-advice effects. Other side effects are reported as **opaque** instead of being
-reset unsafely.
-
-| Recognized form | Cleanup action |
-|---|---|
-| `(add-hook 'HOOK FN)` | `(remove-hook 'HOOK FN)` |
-| `(add-hook 'HOOK FN DEPTH)` | `(remove-hook 'HOOK FN)` |
-| `(add-hook 'HOOK FN DEPTH nil)` | `(remove-hook 'HOOK FN)` |
-| `(advice-add 'TARGET WHERE FN)` | `(advice-remove 'TARGET FN)` |
-
-Hook and advice targets may be literal or computed at runtime. Hypervisor
-rewrites supported calls in executed body positions, including `progn`, `let`,
-`let*`, `when`, `unless`, `if`, `cond`, `dolist`, and `dotimes`. It does not
-rewrite quoted data, function literals, lambda bodies, function definitions, or
-unknown macro/helper-call bodies. Local hook registrations with a non-nil
-`LOCAL` argument are not tracked yet.
-
-### Anonymous Lambdas
-
-Anonymous functions are normally impossible to remove because each reload
-creates a new lambda object. Hypervisor installs hook and advice lambdas through
-a session-scoped effect registry, giving each concrete runtime effect a named
-function and a retract form:
-
-```elisp
-;; You write:
 (config-unit! text-editing
   :config
   (add-hook 'text-mode-hook
             (lambda () (setq-local fill-column 80))))
 
-;; Hypervisor emits a registry call:
-(emacs-hypervisor-register-hook-effect
- :unit "text-editing"
- :target 'text-mode-hook
- :function (lambda () (setq-local fill-column 80))
- :depth nil
- :local nil)
-```
-
-On the next reload, the old named function is removed from the hook before the
-new body is applied. This is the Lisp-to-Lisp advantage: the unit body is
-structured Lisp data, so Hypervisor can recognize the form and emit a safer
-version without string parsing.
-
-Loops over hook or advice targets are supported when the `add-hook` or
-`advice-add` call appears in a body form Hypervisor can rewrite:
-
-```elisp
 (config-unit! editing-hooks
   :config
   (dolist (hook '(text-mode-hook prog-mode-hook))
@@ -215,9 +156,21 @@ Loops over hook or advice targets are supported when the `add-hook` or
               (lambda () (setq-local fill-column 80)))))
 ```
 
-Each loop iteration records its concrete hook target and generated function, so
-changed or removed units can retract the previous runtime effects precisely. The
-registry is described in [docs/effect-registry.md](docs/effect-registry.md).
+Symbol functions and anonymous functions use the same path. If a function value
+cannot be removed by stable identity, the registry installs it through an owned
+symbol and records that symbol in the retract form. Loops work for the same
+reason: each iteration records the concrete hook or advice target that was
+actually installed, so cleanup does not have to guess from the new source.
+
+The recognizer is intentionally conservative. It currently tracks global
+`add-hook` and `advice-add` effects in executed body positions, including
+`progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and `dotimes`.
+It does not rewrite quoted data, function literals, lambda bodies, function
+definitions, or unknown macro/helper-call bodies. Local hook registrations with
+a non-nil `LOCAL` argument are not tracked yet. Other side effects are treated as
+**opaque** and are not reset unsafely.
+
+The registry is described in [docs/effect-registry.md](docs/effect-registry.md).
 
 ## Literate Config (config.org)
 
@@ -438,6 +391,42 @@ startup session.
 | `emacs-hypervisor-show-report-on-finish` | `nil` | When non-nil, display the startup report buffer after a clean startup. The report always appears when a config-unit fails, regardless of this setting. |
 | `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
 
+## How It Works
+
+Hypervisor is written in [Elle](https://github.com/elle-lisp/elle), a modern
+Lisp over Rust, and compiles to a single native binary with orchestration logic,
+Elle source, and runtime Elisp embedded. No external runtime, no framework repo
+to clone --- just drop the binary on your `PATH`.
+
+At startup, Emacs loads a tiny generated kernel that launches the Hypervisor
+binary over stdio. From there, Hypervisor takes over: it reads your
+declarations, builds the dependency graph, runs preflight checks, and feeds
+Emacs the exact ordered commands to install packages and execute config units.
+
+Three properties make this architecture distinctive:
+
+**Deterministic startup as a dependency graph.** Hypervisor grew out of
+[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which proved
+that topological sorting and explicit dependencies eliminate non-determinism in
+Emacs config. Hypervisor takes the idea further: startup becomes an observable
+orchestration session with preflight validation, failure propagation, execution
+plans, and reports.
+
+**Lisp-to-Lisp homoiconicity.** Because Elle is a Lisp, config-unit bodies
+travel between Hypervisor and Emacs as structured Lisp data, not opaque strings.
+Hypervisor can inspect those Elisp forms and route supported effect sites
+through semantically equivalent runtime operations. This is what powers
+effect-aware reload: supported `add-hook` and `advice-add` calls are rewritten
+into effect-registry operations, then the registry's concrete runtime records
+are used to retract old hook and advice effects before re-applying a unit ---
+all without string parsing.
+
+**Single binary, zero framework overhead.** Traditional Emacs config frameworks
+require cloning a repo into `~/.config/emacs` because Emacs must load an
+`init.el` written in Elisp. Hypervisor compiles everything into one binary. Your
+Emacs home contains only generated bootstrap files; your own config lives
+cleanly in the Hypervisor config directory.
+
 ## Architecture
 
 One rule: **Emacs keeps a small trusted kernel; Elle owns orchestration
@@ -519,10 +508,14 @@ The path through the system:
 
 1. `config-unit!` captures the body as `(progn ... t)`.
 2. Emacs canonicalizes reader-hostile forms while preserving semantics.
-3. Emacs sends session data through sexp-rpc.
-4. Elle decodes package, unit, and env metadata; each unit `:body` stays raw.
-5. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
-6. Emacs evaluates the structured body directly.
+3. Supported hook and advice sites are normalized into effect-registry helper
+   calls.
+4. Emacs sends session data through sexp-rpc.
+5. Elle decodes package, unit, and env metadata; each unit `:body` stays raw
+   Lisp code rather than becoming protocol data.
+6. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
+7. Emacs evaluates the structured body directly; registry helpers install and
+   record supported runtime effects.
 
 This homoiconic surface is what makes structural inspection, targeted rewrites,
 effect-aware reload, and interactive remediation practical without re-parsing
