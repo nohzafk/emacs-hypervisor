@@ -117,7 +117,7 @@ During reload:
 2. Retract the previous records for changed or removed units.
 3. Evaluate the current unit.
 4. Record the current unit's newly applied effects.
-5. Report active, retracted, failed, and opaque effects.
+5. Report active, retracted, and failed registry effects.
 
 The registry is session-scoped. It does not persist across Emacs restarts.
 
@@ -286,9 +286,9 @@ Covered by tests:
 
 ### Reload Integration
 
-Changed and removed units clean up through the registry first. The older static
-cleanup path remains as a compatibility fallback for old/raw previous unit
-bodies that do not have registry records.
+Changed and removed units clean up through registry records only. A previous
+unit body without active registry records has no cleanup to run; restarting
+Emacs clears any older live state.
 
 Reload logs the user-facing cleanup story as it runs:
 
@@ -304,12 +304,10 @@ Covered by tests:
 - current selective reload tests remain green
 - reload reports count registry-cleaned hook/advice effects
 - reload logs start, cleaned hook/advice effects, applied units, and summary
-- opaque unsupported forms remain reported but do not trigger unsafe cleanup
+- raw previous bodies without registry records do not synthesize cleanup
 
 ## Remaining Work
 
-- Remove or demote redundant static cleanup once compatibility with older
-  in-session bodies no longer matters.
 - Add source location metadata beyond the current source-form provenance.
 - Decide whether unknown macro bodies should stay opaque or expose explicit
   extension points.

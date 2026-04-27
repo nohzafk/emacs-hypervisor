@@ -239,6 +239,14 @@
      (fn [name] (not (= (graph:report-status reports name) :ok)))
      names))
 
+  (defn known-report-blockers [reports names]
+    (filter
+     (fn [name]
+       (if-let [report (graph:find-entry reports name)]
+         (not (= (get report :status) :ok))
+         false))
+     names))
+
   (defn blocked-report [name reason blockers]
     (graph:make-report
      name
@@ -499,7 +507,7 @@
   (defn execute-unit-entry-state
       [name entry package-reports executed-unit-reports current-id]
     (let [package-blockers
-          (report-blockers package-reports (graph:entry-field entry :requires))
+          (known-report-blockers package-reports (graph:entry-field entry :requires))
           unit-blockers
           (report-blockers executed-unit-reports (graph:entry-field entry :after))]
       (match [(empty? package-blockers) (empty? unit-blockers)]

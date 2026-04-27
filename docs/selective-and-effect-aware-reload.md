@@ -11,7 +11,8 @@ unit for recognized repeated operations, avoiding duplicate hooks, stale
 advice, and reload drift.
 
 The supported effect set is deliberately narrow. Hypervisor currently supports
-only `add-hook` and `advice-add` cleanup. Other side effects remain opaque.
+only `add-hook` and `advice-add` cleanup. Other side effects are left
+untracked.
 
 ## Design
 
@@ -62,43 +63,13 @@ Diff action shape:
 
 ### Cleanup Effect Records
 
-Cleanup effect records describe cleanup Hypervisor performs before a changed or
-removed unit is applied. The registry-backed path records richer runtime effect
-records; see [effect-registry.md](effect-registry.md).
+Cleanup uses runtime registry records created when a config unit is evaluated.
+Each record stores the owning unit, concrete target, concrete function symbol,
+source form, and an evaluable retract form. See [effect-registry.md](effect-registry.md).
 
-```elisp
-(:kind KIND
- :unit NAME
- :source-form FORM
- :cleanup-form FORM
- :supported SUPPORTED
- :reason REASON)
-```
-
-Supported effects:
-
-```elisp
-(:kind :hook
- :source-form (add-hook 'HOOK FUNCTION)
- :cleanup-form (remove-hook 'HOOK FUNCTION)
- :supported t)
-
-(:kind :advice
- :source-form (advice-add 'TARGET WHERE FUNCTION)
- :cleanup-form (advice-remove 'TARGET FUNCTION)
- :supported t)
-```
-
-Unsupported forms are reported as opaque:
-
-```elisp
-(:kind :opaque
- :unit NAME
- :source-form FORM
- :cleanup-form nil
- :supported nil
- :reason :unsupported-form)
-```
+There is no static cleanup fallback. If a previous unit has no active registry
+records, cleanup is a no-op for that unit and a restart clears any older live
+state.
 
 The recognizer supports hook and advice targets that are literal or computed at
 runtime. It rewrites supported calls in executed body positions, including
@@ -148,7 +119,7 @@ Example user messages:
 - Skips unchanged units.
 - Cleans up recognized old effects for changed and removed units.
 - Applies only new and changed units.
-- Reports opaque effects without treating opacity as a restart recommendation.
+- Leaves untracked forms alone.
 
 ### Internal Modules
 
@@ -165,8 +136,6 @@ Effect-aware reload in
 `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el`:
 
 ```elisp
-(emacs-hypervisor-effect-aware-reload-unit-effects name entry)
-(emacs-hypervisor-effect-aware-reload-cleanup-form effect)
 (emacs-hypervisor-effect-aware-reload-cleanup-unit name entry)
 (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
 ```
@@ -212,8 +181,8 @@ from the unit name, effect kind, concrete runtime target, and a hash of the
 function value. Cleanup uses the previous registry record, then removes the
 hook or advice by symbol.
 
-Unsupported source shapes outside the rewritten body positions are reported as
-opaque.
+Unsupported source shapes outside the rewritten body positions are left
+untracked.
 
 ## Limitations
 

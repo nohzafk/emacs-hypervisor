@@ -159,38 +159,77 @@
                    'lambda))
     (should (equal (nth 2 body) t))))
 
-(ert-deftest emacs-hypervisor-effect-aware-reload-generated-name-is-deterministic ()
+(ert-deftest emacs-hypervisor-effect-aware-reload-has-registry-effect-specs ()
+  (let* ((specs
+          emacs-hypervisor-effect-aware-reload--registry-effect-specs)
+         (kinds (mapcar (lambda (spec) (plist-get spec :kind)) specs))
+         (body
+          (emacs-hypervisor-effect-aware-reload-normalize-body
+           "effect-spec-unit"
+           '(progn
+              (add-hook 'emacs-hypervisor-test-hook
+                        #'emacs-hypervisor-test-hook-new)
+              (advice-add 'emacs-hypervisor-test-advice-target
+                          :before
+                          #'ignore)
+              t))))
+    (should (equal kinds '(:hook :advice)))
+    (should
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(add-hook 'emacs-hypervisor-test-hook
+                 #'emacs-hypervisor-test-hook-new)))
+    (should-not
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(add-hook 'emacs-hypervisor-test-hook
+                 #'emacs-hypervisor-test-hook-new
+                 nil
+                 t)))
+    (should
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(advice-add 'emacs-hypervisor-test-advice-target
+                   :before
+                   #'ignore)))
+    (should (eq (car (nth 1 body))
+                'emacs-hypervisor-register-hook-effect))
+    (should (eq (car (nth 2 body))
+                'emacs-hypervisor-register-advice-effect))))
+
+(ert-deftest emacs-hypervisor-effect-registry-generated-name-is-deterministic ()
   (let* ((lambda-form '(lambda () :hook))
          (same
-          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+          (emacs-hypervisor-effect-registry--generated-function-symbol
            "lambda-hook-unit"
-           "add-hook"
-           "emacs-hypervisor-test-hook"
+           :hook
+           'emacs-hypervisor-test-hook
+           nil
            lambda-form))
          (repeat
-          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+          (emacs-hypervisor-effect-registry--generated-function-symbol
            "lambda-hook-unit"
-           "add-hook"
-           "emacs-hypervisor-test-hook"
+           :hook
+           'emacs-hypervisor-test-hook
+           nil
            lambda-form))
          (different-target
-          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+          (emacs-hypervisor-effect-registry--generated-function-symbol
            "lambda-hook-unit"
-           "add-hook"
-           "emacs-hypervisor-other-hook"
+           :hook
+           'emacs-hypervisor-other-hook
+           nil
            lambda-form))
          (different-body
-          (emacs-hypervisor-effect-aware-reload--generated-function-symbol
+          (emacs-hypervisor-effect-registry--generated-function-symbol
            "lambda-hook-unit"
-           "add-hook"
-           "emacs-hypervisor-test-hook"
+           :hook
+           'emacs-hypervisor-test-hook
+           nil
            '(lambda () :changed))))
     (should (eq same repeat))
     (should-not (eq same different-target))
     (should-not (eq same different-body))
     (should
      (string-match-p
-      "\\`emacs-hypervisor--generated-lambda-hook-unit-add-hook-emacs-hypervisor-test-hook-[[:xdigit:]]\\{10\\}\\'"
+      "\\`emacs-hypervisor--generated-lambda-hook-unit--hook-emacs-hypervisor-test-hook-[[:xdigit:]]\\{10\\}\\'"
       (symbol-name same)))))
 
 (ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-backquote ()
@@ -390,29 +429,35 @@
        (emacs-hypervisor-effect-registry-effects-for-unit
         "registry-unit")))))
 
+(ert-deftest emacs-hypervisor-effect-aware-reload-counts-generic-cleaned-effects ()
+  (should
+   (=
+    (emacs-hypervisor-effect-aware-reload-cleanup-count
+     '(:cleaned ((:kind :hook)
+                 (:kind :keybinding))))
+    2)))
+
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-hook-effect ()
   (let* ((emacs-hypervisor-test-hook nil)
          (emacs-hypervisor-effect-registry-current nil)
          (emacs-hypervisor-effect-registry--instance-counter 0)
-         (previous
-          (list
-           (emacs-hypervisor-test--unit
-            "hook-unit"
-            '(progn
-               (add-hook 'emacs-hypervisor-test-hook
-                         #'emacs-hypervisor-test-hook-old)
-               t))))
-         (current
-          (list
-           (emacs-hypervisor-test--unit
-            "hook-unit"
-            '(progn
-               (add-hook 'emacs-hypervisor-test-hook
-                         #'emacs-hypervisor-test-hook-new)
-               t))))
+         previous
+         current
          reports
          report)
-    (add-hook 'emacs-hypervisor-test-hook #'emacs-hypervisor-test-hook-old)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                #'emacs-hypervisor-test-hook-old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                #'emacs-hypervisor-test-hook-new))
+    (setq current (emacs-hypervisor-export-config-units))
     (setq reports
           (emacs-hypervisor--reload-unit-reports
            (emacs-hypervisor-selective-reload-diff-units previous current)
@@ -559,31 +604,27 @@
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-advice-effect ()
   (let* ((emacs-hypervisor-effect-registry-current nil)
          (emacs-hypervisor-effect-registry--instance-counter 0)
-         (previous
-          (list
-           (emacs-hypervisor-test--unit
-            "advice-unit"
-            '(progn
-               (advice-add 'emacs-hypervisor-test-advice-target
-                           :around
-                           #'emacs-hypervisor-test-advice-old)
-               t))))
-         (current
-          (list
-           (emacs-hypervisor-test--unit
-            "advice-unit"
-            '(progn
-               (advice-add 'emacs-hypervisor-test-advice-target
-                           :around
-                           #'emacs-hypervisor-test-advice-new)
-               t))))
+         previous
+         current
          reports
          report)
     (unwind-protect
         (progn
-          (advice-add 'emacs-hypervisor-test-advice-target
-                      :around
-                      #'emacs-hypervisor-test-advice-old)
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! advice-unit
+            :config
+            (advice-add 'emacs-hypervisor-test-advice-target
+                        :around
+                        #'emacs-hypervisor-test-advice-old))
+          (setq previous (emacs-hypervisor-export-config-units))
+          (eval (plist-get (car previous) :body) t)
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! advice-unit
+            :config
+            (advice-add 'emacs-hypervisor-test-advice-target
+                        :around
+                        #'emacs-hypervisor-test-advice-new))
+          (setq current (emacs-hypervisor-export-config-units))
           (setq reports
                 (emacs-hypervisor--reload-unit-reports
                  (emacs-hypervisor-selective-reload-diff-units previous current)
@@ -602,7 +643,8 @@
       (advice-remove 'emacs-hypervisor-test-advice-target
                      #'emacs-hypervisor-test-advice-old)
       (advice-remove 'emacs-hypervisor-test-advice-target
-                     #'emacs-hypervisor-test-advice-new))))
+                     #'emacs-hypervisor-test-advice-new)
+      (emacs-hypervisor-reset-declarations))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-generated-advice-lambda ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
@@ -760,7 +802,7 @@
         (advice-remove 'emacs-hypervisor-test-advice-target-b symbol))
       (emacs-hypervisor-reset-declarations))))
 
-(ert-deftest emacs-hypervisor-effect-aware-reload-reports-opaque-effects ()
+(ert-deftest emacs-hypervisor-effect-aware-reload-does-not-synthesize-opaque-effects ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
          (previous
           (list
@@ -784,9 +826,10 @@
          (cleanup (plist-get report :cleanup)))
     (should (eq emacs-hypervisor-test-runtime-value :new))
     (should-not (plist-member report :restart-recommended))
-    (should (= (length (plist-get cleanup :unsupported)) 1))
-    (should (eq (plist-get (car (plist-get cleanup :unsupported)) :kind)
-                :opaque))))
+    (should-not (plist-get cleanup :effects))
+    (should-not (plist-get cleanup :unsupported))
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
+               0))))
 
 (ert-deftest emacs-hypervisor-selective-reload-preserves-package-and-after-blocking ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
@@ -836,42 +879,43 @@
   (let* ((emacs-hypervisor-test-hook nil)
          (emacs-hypervisor-effect-registry-current nil)
          (emacs-hypervisor-effect-registry--instance-counter 0)
-         (previous
-          (list
-           (emacs-hypervisor-test--unit
-            "unchanged" '(progn t))
-           (emacs-hypervisor-test--unit
-            "hook-unit"
-            '(progn
-               (add-hook 'emacs-hypervisor-test-hook
-                         #'emacs-hypervisor-test-hook-old)
-               t))
-           (emacs-hypervisor-test--unit
-            "opaque-unit"
-            '(progn
-               (setq emacs-hypervisor-test-runtime-value :old)
-               t))))
-         (current
-          (list
-           (emacs-hypervisor-test--unit
-            "unchanged" '(progn t))
-           (emacs-hypervisor-test--unit
-            "hook-unit"
-            '(progn
-               (add-hook 'emacs-hypervisor-test-hook
-                         #'emacs-hypervisor-test-hook-new)
-               t))
-           (emacs-hypervisor-test--unit
-            "opaque-unit"
-            '(progn
-               (setq emacs-hypervisor-test-runtime-value :new)
-               t))
-           (emacs-hypervisor-test--unit
-            "fails"
-            '(progn (error "boom") t))))
+         previous
+         current
          reports
          summary)
-    (add-hook 'emacs-hypervisor-test-hook #'emacs-hypervisor-test-hook-old)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! unchanged
+      :config
+      t)
+    (config-unit! hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                #'emacs-hypervisor-test-hook-old))
+    (config-unit! opaque-unit
+      :config
+      (setq emacs-hypervisor-test-runtime-value :old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get
+           (cl-find "hook-unit" previous
+                    :key (lambda (entry) (plist-get entry :name))
+                    :test #'equal)
+           :body)
+          t)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! unchanged
+      :config
+      t)
+    (config-unit! hook-unit
+      :config
+      (add-hook 'emacs-hypervisor-test-hook
+                #'emacs-hypervisor-test-hook-new))
+    (config-unit! opaque-unit
+      :config
+      (setq emacs-hypervisor-test-runtime-value :new))
+    (config-unit! fails
+      :config
+      (error "boom"))
+    (setq current (emacs-hypervisor-export-config-units))
     (setq reports
           (emacs-hypervisor--reload-unit-reports
            (emacs-hypervisor-selective-reload-diff-units previous current)

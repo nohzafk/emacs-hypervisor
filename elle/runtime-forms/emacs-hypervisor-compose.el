@@ -383,7 +383,7 @@ previous changed or removed units before applying new bodies."
                :new-packages new-packages
                :reports reports
                :summary summary
-               :note "Selective reload applies only new and changed config units. Effect-aware reload cleans recognized previous hook and advice effects before replacement; opaque effects are reported but not reset."))
+               :note "Selective reload applies only new and changed config units. Effect-aware reload cleans recognized previous effects before replacement; opaque effects are reported but not reset."))
         (emacs-hypervisor--reload-log
          "Reload: %d changed applied, %d unchanged skipped, %d old effects cleaned."
          (plist-get summary :applied)

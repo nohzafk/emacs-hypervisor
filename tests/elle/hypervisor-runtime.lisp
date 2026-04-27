@@ -248,6 +248,24 @@
   (assert (= (get preflight-bad :reason) :preflight) "boot-policy preflight reason")
   (assert (= (get (get preflight-bad :details) :env) (list "HYPERVISOR_MISSING_ENV")) "boot-policy preflight env details")
   (assert (= (get (get preflight-bad :details) :executable) (list "definitely-not-installed-command")) "boot-policy preflight executable details"))
+
+(let* [{:reports reports}
+       (policy:derive-unit-reports
+        (list
+         {:name "feature-unit"
+          :requires (list "project")
+          :after (list)
+          :env (list)
+          :executable (list)
+          :body '(progn :feature-ok)})
+        ()
+        ()
+        env
+        ())
+       feature-unit (graph:find-entry reports "feature-unit")]
+  (assert (= (get feature-unit :status) :ok)
+          "boot-policy treats :requires as runtime features, not declared package names"))
+
 (println "  1. boot policy: ok")
 
 # ============================================================================

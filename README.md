@@ -164,8 +164,8 @@ The recognizer is intentionally conservative. It currently tracks global
 `progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and `dotimes`.
 It does not rewrite quoted data, function literals, lambda bodies, function
 definitions, or unknown macro/helper-call bodies. Local hook registrations with
-a non-nil `LOCAL` argument are not tracked yet. Other side effects are treated as
-**opaque** and are not reset unsafely.
+a non-nil `LOCAL` argument are not tracked yet. Other side effects are left
+untracked and are not reset unsafely.
 
 The registry is described in [docs/effect-registry.md](docs/effect-registry.md).
 

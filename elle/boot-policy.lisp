@@ -6,6 +6,14 @@
      (fn [dep] (not (= (graph:report-status reports dep) :ok)))
      names))
 
+  (defn blocked-known-deps [reports names]
+    (filter
+     (fn [dep]
+       (if-let [report (graph:find-entry reports dep)]
+         (not (= (get report :status) :ok))
+         false))
+     names))
+
   (defn blocked-report [name reason blockers]
     (graph:make-report
      name
@@ -82,7 +90,7 @@
 
   (defn next-unit-report [entry reports package-reports env executable-reports]
     (let [package-blockers
-          (blocked-deps package-reports (graph:entry-field entry :requires))
+          (blocked-known-deps package-reports (graph:entry-field entry :requires))
           unit-blockers
           (blocked-deps reports (graph:entry-field entry :after))
           env-missing (preflight:env-missing-for-unit entry env)
@@ -111,10 +119,8 @@
         _
          (ready-unit-report entry))))
 
-  (defn derive-unit-reports [units package-names package-reports env executable-reports]
+  (defn derive-unit-reports [units _package-names package-reports env executable-reports]
     (let [unit-names (graph:known-names units)
-          unit-missing-requires
-          (graph:collect-missing-ref-entries units :requires package-names)
           unit-missing-after
           (graph:collect-missing-ref-entries units :after unit-names)
           unit-cycles (graph:cycle-names units :after unit-names)
@@ -124,12 +130,12 @@
            (fn [entry]
              (graph:invalid-unit-report
               entry
-              unit-missing-requires
+              ()
               unit-missing-after
               unit-cycles)))]
       {:cycles unit-cycles
        :missing-after unit-missing-after
-       :missing-requires unit-missing-requires
+       :missing-requires ()
        :reports
        (derive-phase-reports
         units
