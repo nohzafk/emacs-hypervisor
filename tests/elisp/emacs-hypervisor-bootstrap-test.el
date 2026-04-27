@@ -46,6 +46,9 @@
 
 (require 'emacs-hypervisor-package-runtime)
 (require 'emacs-hypervisor-effect-registry)
+(require 'emacs-hypervisor-effect-aware-reload)
+(require 'emacs-hypervisor-effect-kind-hook)
+(require 'emacs-hypervisor-effect-kind-advice)
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-unit-runtime)
 (require 'emacs-hypervisor-compose)
@@ -161,7 +164,7 @@
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-has-registry-effect-specs ()
   (let* ((specs
-          emacs-hypervisor-effect-aware-reload--registry-effect-specs)
+          emacs-hypervisor-effect-aware-reload-effect-specs)
          (kinds (mapcar (lambda (spec) (plist-get spec :kind)) specs))
          (body
           (emacs-hypervisor-effect-aware-reload-normalize-body

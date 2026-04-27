@@ -75,7 +75,9 @@ Read these files before starting:
 | File | Role |
 |---|---|
 | `elle/runtime-forms/emacs-hypervisor-effect-registry.el` | Runtime registry: record, retract, query by unit |
-| `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el` | Body rewriter + cleanup integration |
+| `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el` | Body rewriter dispatcher + cleanup integration |
+| `elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el` | `add-hook` effect recognizer, rewriter, installer |
+| `elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el` | `advice-add` effect recognizer, rewriter, installer |
 | `elle/runtime-forms/emacs-hypervisor-declarations.el` | `config-unit!` macro, calls the body rewriter at macro-expansion time |
 | `elle/runtime-forms/emacs-hypervisor-compose.el` | Reload command, wires selective reload + effect cleanup |
 | `elle/runtime-forms/emacs-hypervisor-selective-reload.el` | Unit diffing: new/changed/unchanged/removed |
@@ -140,21 +142,20 @@ inspect `:kind`. It only needs `:retract` to be an evaluable form and
 
 ## How to Add a New Effect Kind
 
-Each new effect kind needs exactly three things, all in
-`emacs-hypervisor-effect-aware-reload.el` and
-`emacs-hypervisor-effect-registry.el`:
+Each new effect kind should live in its own module, with exactly three pieces:
 
 ### 1. Recognizer predicate
 
 Identify whether a source form matches this effect kind. See existing
-examples: `--registry-hook-form-p`, `--registry-advice-form-p`.
+examples in `emacs-hypervisor-effect-kind-hook.el` and
+`emacs-hypervisor-effect-kind-advice.el`.
 
 ### 2. Rewriter spec
 
-Add an entry to
-`emacs-hypervisor-effect-aware-reload--registry-effect-specs`. Each entry
-declares the source operator, effect kind, recognizer predicate, and
-rewrite function. The shared rewriter dispatches through that table.
+Register a spec with
+`emacs-hypervisor-effect-aware-reload-register-effect-spec`. Each entry
+declares the source operator, effect kind, recognizer predicate, and rewrite
+function. The shared rewriter dispatches through that table.
 
 The rewriter already walks into `progn`, `let`, `let*`, `when`,
 `unless`, `if`, `cond`, `dolist`, `dotimes`. It does NOT walk into
@@ -163,13 +164,14 @@ calls.
 
 ### 3. Register function
 
-A `cl-defun` in `emacs-hypervisor-effect-registry.el` that:
+A `cl-defun` in the effect-kind module that:
 
 1. Captures any state needed for retraction (previous binding, previous
    value, timer object, etc.)
 2. Applies the effect
 3. Builds a retract form as a quoted s-expression
-4. Calls `emacs-hypervisor-effect-registry-record` with the standard fields
+4. Calls `emacs-hypervisor-effect-registry-install-function-effect` or
+   `emacs-hypervisor-effect-registry-record` with the standard fields
 
 The registry, retraction logic, reload integration, and test
 infrastructure require no changes. The reload command
@@ -194,8 +196,8 @@ generic dispatch table.
 ```elisp
 (:kind :hook
  :operator 'add-hook
- :predicate #'emacs-hypervisor-effect-aware-reload--registry-hook-form-p
- :rewrite #'emacs-hypervisor-effect-aware-reload--registry-hook-form)
+ :predicate #'emacs-hypervisor-effect-kind-hook-form-p
+ :rewrite #'emacs-hypervisor-effect-kind-hook-rewrite-form)
 ```
 
 **Test expectations:**

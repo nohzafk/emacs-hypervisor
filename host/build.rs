@@ -113,6 +113,14 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
         "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el",
     ),
     (
+        "EFFECT_KIND_HOOK",
+        "elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el",
+    ),
+    (
+        "EFFECT_KIND_ADVICE",
+        "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el",
+    ),
+    (
         "SELECTIVE_RELOAD",
         "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
     ),

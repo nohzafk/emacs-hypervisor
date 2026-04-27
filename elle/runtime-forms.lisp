@@ -14,8 +14,10 @@
       [report-core-module
        report-module
        effect-registry-module
-       declarations-module
        effect-aware-reload-module
+       effect-kind-hook-module
+       effect-kind-advice-module
+       declarations-module
        selective-reload-module
        compose-module]
     (append-all
@@ -27,6 +29,8 @@
         (emacs-hypervisor-report-session-started))
       (module-loader:load-module-form effect-registry-module :emacs-hypervisor-effect-registry-ready)
       (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
+      (module-loader:load-module-form effect-kind-hook-module :emacs-hypervisor-effect-kind-hook-ready)
+      (module-loader:load-module-form effect-kind-advice-module :emacs-hypervisor-effect-kind-advice-ready)
       (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
       (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)
       (module-loader:load-module-form compose-module :emacs-hypervisor-compose-ready)

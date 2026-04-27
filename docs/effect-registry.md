@@ -222,18 +222,25 @@ to reconstruct a dynamic loop effect after the fact.
 
 ### Registry Module
 
-`elle/runtime-forms/emacs-hypervisor-effect-registry.el` provides this public
-API:
+`elle/runtime-forms/emacs-hypervisor-effect-registry.el` provides the generic
+record/retract API:
 
 ```elisp
 (emacs-hypervisor-effect-registry-record EFFECT)
 (emacs-hypervisor-effect-registry-effects-for-unit UNIT)
 (emacs-hypervisor-effect-registry-retract EFFECT)
 (emacs-hypervisor-effect-registry-retract-unit UNIT)
+(emacs-hypervisor-effect-registry-install-function-effect ...)
 ```
 
-The first version is hook/advice-only. It stores active records in application
-order and retracts them in reverse order.
+Effect-kind modules provide concrete installers. The default supported modules
+are:
+
+- `emacs-hypervisor-effect-kind-hook.el`
+- `emacs-hypervisor-effect-kind-advice.el`
+
+The registry stores active records in application order and retracts them in
+reverse order.
 
 Covered by tests:
 

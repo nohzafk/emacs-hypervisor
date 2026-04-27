@@ -2,6 +2,8 @@
 
 (require 'cl-lib)
 (require 'emacs-hypervisor-effect-aware-reload)
+(require 'emacs-hypervisor-effect-kind-hook)
+(require 'emacs-hypervisor-effect-kind-advice)
 
 (defvar emacs-hypervisor-packages nil)
 (defvar emacs-hypervisor-config-units nil)

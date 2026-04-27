@@ -83,13 +83,13 @@
         (fset symbol function)
         (list symbol t body-hash)))))
 
-(defun emacs-hypervisor-effect-registry--quote-value (value)
+(defun emacs-hypervisor-effect-registry-quote-value (value)
   (list 'quote value))
 
-(defun emacs-hypervisor-effect-registry--function-ref (symbol)
+(defun emacs-hypervisor-effect-registry-function-ref (symbol)
   (list 'function symbol))
 
-(defun emacs-hypervisor-effect-registry--generated-function-cleanup-forms
+(defun emacs-hypervisor-effect-registry-generated-function-cleanup-forms
     (function-symbol generated)
   (when generated
     `((when (fboundp ',function-symbol)
@@ -180,7 +180,7 @@ Return a cleanup plist compatible with
           :unsupported (nreverse unsupported)
           :failed (nreverse failures))))
 
-(cl-defun emacs-hypervisor-effect-registry--install-function-effect
+(cl-defun emacs-hypervisor-effect-registry-install-function-effect
     (&key unit kind target where function source install apply retract
           cleanup-form metadata)
   "Install FUNCTION as a named effect and record its lifecycle forms."
@@ -210,78 +210,5 @@ Return a cleanup plist compatible with
          (fmakunbound function-symbol))
        (signal (car err) (cdr err))))
     function-symbol))
-
-;;;###autoload
-(cl-defun emacs-hypervisor-register-hook-effect
-    (&key unit target function depth local source)
-  "Install and record a global `add-hook' effect."
-  (when local
-    (error "Local hook effects are not supported by Hypervisor reload"))
-  (emacs-hypervisor-effect-registry--install-function-effect
-   :unit unit
-   :kind :hook
-   :target target
-   :where nil
-   :function function
-   :source source
-   :install (lambda (function-symbol)
-              (add-hook target function-symbol depth local))
-   :apply (lambda (function-symbol)
-            (list 'add-hook
-                  (emacs-hypervisor-effect-registry--quote-value target)
-                  (emacs-hypervisor-effect-registry--function-ref
-                   function-symbol)
-                  depth
-                  local))
-   :retract (lambda (function-symbol generated)
-              `(progn
-                 (remove-hook
-                  ',target
-                  #',function-symbol
-                  ,local)
-                 ,@(emacs-hypervisor-effect-registry--generated-function-cleanup-forms
-                    function-symbol
-                    generated)))
-   :cleanup-form (lambda (function-symbol)
-                   (list 'remove-hook
-                         (emacs-hypervisor-effect-registry--quote-value
-                          target)
-                         (emacs-hypervisor-effect-registry--function-ref
-                          function-symbol)))
-   :metadata (list :depth depth
-                   :local local)))
-
-;;;###autoload
-(cl-defun emacs-hypervisor-register-advice-effect
-    (&key unit target where function source)
-  "Install and record an `advice-add' effect."
-  (emacs-hypervisor-effect-registry--install-function-effect
-   :unit unit
-   :kind :advice
-   :target target
-   :where where
-   :function function
-   :source source
-   :install (lambda (function-symbol)
-              (advice-add target where function-symbol))
-   :apply (lambda (function-symbol)
-            (list 'advice-add
-                  (emacs-hypervisor-effect-registry--quote-value target)
-                  where
-                  (emacs-hypervisor-effect-registry--function-ref
-                   function-symbol)))
-   :retract (lambda (function-symbol generated)
-              `(progn
-                 (advice-remove ',target #',function-symbol)
-                 ,@(emacs-hypervisor-effect-registry--generated-function-cleanup-forms
-                    function-symbol
-                    generated)))
-   :cleanup-form (lambda (function-symbol)
-                   (list 'advice-remove
-                         (emacs-hypervisor-effect-registry--quote-value
-                          target)
-                         (emacs-hypervisor-effect-registry--function-ref
-                          function-symbol)))
-   :metadata (list :where where)))
 
 (provide 'emacs-hypervisor-effect-registry)

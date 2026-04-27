@@ -136,6 +136,7 @@ Effect-aware reload in
 `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el`:
 
 ```elisp
+(emacs-hypervisor-effect-aware-reload-register-effect-spec spec)
 (emacs-hypervisor-effect-aware-reload-cleanup-unit name entry)
 (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
 ```
@@ -148,6 +149,11 @@ Effect registry in
 (emacs-hypervisor-effect-registry-effects-for-unit unit)
 (emacs-hypervisor-effect-registry-retract effect)
 (emacs-hypervisor-effect-registry-retract-unit unit)
+```
+
+Bundled effect kinds in `elle/runtime-forms/emacs-hypervisor-effect-kind-*.el`:
+
+```elisp
 (emacs-hypervisor-register-hook-effect
  :unit unit :target hook :function function :depth depth :local local)
 (emacs-hypervisor-register-advice-effect

@@ -550,8 +550,10 @@ emacs-hypervisor/
 │       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
 │       ├── emacs-hypervisor-session-base.el        #   session lifecycle
 │       ├── emacs-hypervisor-selective-reload.el    #   reload diffing + scheduling
-│       ├── emacs-hypervisor-effect-registry.el     #   hook/advice effect records
-│       ├── emacs-hypervisor-effect-aware-reload.el #   effect detection + cleanup
+│       ├── emacs-hypervisor-effect-registry.el     #   generic effect records
+│       ├── emacs-hypervisor-effect-aware-reload.el #   effect rewrite dispatcher + cleanup
+│       ├── emacs-hypervisor-effect-kind-hook.el    #   add-hook effect kind
+│       ├── emacs-hypervisor-effect-kind-advice.el  #   advice-add effect kind
 │       ├── emacs-hypervisor-compose.el             #   wires reload into M-x command
 │       ├── emacs-hypervisor-report-core.el         #   report data structures
 │       └── emacs-hypervisor-report.el              #   startup report rendering

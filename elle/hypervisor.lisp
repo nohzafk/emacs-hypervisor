@@ -89,6 +89,14 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_FORMS"
            "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el")
+          effect-kind-hook-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_HOOK_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el")
+          effect-kind-advice-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el")
           selective-reload-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS"
@@ -145,8 +153,10 @@
                  report-core-module
                  report-module
                  effect-registry-module
-                 declarations-module
                  effect-aware-reload-module
+                 effect-kind-hook-module
+                 effect-kind-advice-module
+                 declarations-module
                  selective-reload-module
                  compose-module)
          :metric-name :install-config-surface

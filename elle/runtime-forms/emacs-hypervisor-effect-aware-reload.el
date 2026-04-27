@@ -3,86 +3,65 @@
 (require 'cl-lib)
 (require 'emacs-hypervisor-effect-registry)
 
-(defun emacs-hypervisor-effect-aware-reload--registry-hook-form-p (form)
-  (and (consp form)
-       (eq (car form) 'add-hook)
-       (memq (length form) '(3 4 5))
-       (or (< (length form) 5)
-           (null (nth 4 form)))))
+(defvar emacs-hypervisor-effect-aware-reload-effect-specs nil
+  "Registered effect rewrite specs in dispatch order.")
 
-(defun emacs-hypervisor-effect-aware-reload--registry-advice-form-p (form)
-  (and (consp form)
-       (eq (car form) 'advice-add)
-       (= (length form) 4)))
-
-(defun emacs-hypervisor-effect-aware-reload--source-plist (form)
+(defun emacs-hypervisor-effect-aware-reload-source-plist (form)
   (list :form form))
 
-(defun emacs-hypervisor-effect-aware-reload--registry-hook-form
-    (unit-name form)
-  (if (emacs-hypervisor-effect-aware-reload--registry-hook-form-p form)
-      (list
-       'emacs-hypervisor-register-hook-effect
-       :unit unit-name
-       :target (nth 1 form)
-       :function (nth 2 form)
-       :depth (if (> (length form) 3) (nth 3 form) nil)
-       :local (if (> (length form) 4) (nth 4 form) nil)
-       :source (list 'quote
-                     (emacs-hypervisor-effect-aware-reload--source-plist
-                      form)))
-    form))
+(defun emacs-hypervisor-effect-aware-reload-register-effect-spec (spec)
+  "Register effect rewrite SPEC.
 
-(defun emacs-hypervisor-effect-aware-reload--registry-advice-form
-    (unit-name form)
-  (if (emacs-hypervisor-effect-aware-reload--registry-advice-form-p form)
-      (list
-       'emacs-hypervisor-register-advice-effect
-       :unit unit-name
-       :target (nth 1 form)
-       :where (nth 2 form)
-       :function (nth 3 form)
-       :source (list 'quote
-                     (emacs-hypervisor-effect-aware-reload--source-plist
-                      form)))
-    form))
-
-(defconst emacs-hypervisor-effect-aware-reload--registry-effect-specs
-  (list
-   (list :kind :hook
-         :operator 'add-hook
-         :predicate
-         #'emacs-hypervisor-effect-aware-reload--registry-hook-form-p
-         :rewrite
-         #'emacs-hypervisor-effect-aware-reload--registry-hook-form)
-   (list :kind :advice
-         :operator 'advice-add
-         :predicate
-         #'emacs-hypervisor-effect-aware-reload--registry-advice-form-p
-         :rewrite
-         #'emacs-hypervisor-effect-aware-reload--registry-advice-form)))
+SPEC is a plist with :kind, :operator, :predicate, and :rewrite.
+The predicate receives a form and the rewrite function receives UNIT-NAME and
+the same form."
+  (let ((kind (plist-get spec :kind))
+        (operator (plist-get spec :operator))
+        (predicate (plist-get spec :predicate))
+        (rewrite (plist-get spec :rewrite))
+        replaced
+        updated)
+    (unless (and kind operator (functionp predicate) (functionp rewrite))
+      (error "Invalid effect spec: %S" spec))
+    (dolist (entry emacs-hypervisor-effect-aware-reload-effect-specs)
+      (if (eq (plist-get entry :kind) kind)
+          (progn
+            (push spec updated)
+            (setq replaced t))
+        (push entry updated)))
+    (setq emacs-hypervisor-effect-aware-reload-effect-specs
+          (if replaced
+              (nreverse updated)
+            (append emacs-hypervisor-effect-aware-reload-effect-specs
+                    (list spec))))
+    spec))
 
 (defun emacs-hypervisor-effect-aware-reload--registry-effect-spec
     (operator)
   (cl-find operator
-           emacs-hypervisor-effect-aware-reload--registry-effect-specs
+           emacs-hypervisor-effect-aware-reload-effect-specs
            :key (lambda (spec) (plist-get spec :operator))))
+
+(defun emacs-hypervisor-effect-aware-reload--registry-effect-spec-for-form
+    (form)
+  (and (consp form)
+       (cl-find-if
+        (lambda (spec)
+          (and (eq (plist-get spec :operator) (car form))
+               (funcall (plist-get spec :predicate) form)))
+        emacs-hypervisor-effect-aware-reload-effect-specs)))
 
 (defun emacs-hypervisor-effect-aware-reload--registry-effect-form-p
     (form)
-  (and (consp form)
-       (let ((spec
-              (emacs-hypervisor-effect-aware-reload--registry-effect-spec
-               (car form))))
-         (and spec
-              (funcall (plist-get spec :predicate) form)))))
+  (and (emacs-hypervisor-effect-aware-reload--registry-effect-spec-for-form
+        form)
+       t))
 
 (defun emacs-hypervisor-effect-aware-reload--registry-effect-form
     (unit-name form)
   (let ((spec
-         (and (consp form)
-              (emacs-hypervisor-effect-aware-reload--registry-effect-spec
-               (car form)))))
+         (emacs-hypervisor-effect-aware-reload--registry-effect-spec-for-form
+          form)))
     (if spec
         (funcall (plist-get spec :rewrite) unit-name form)
       form)))

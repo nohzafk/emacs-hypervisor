@@ -538,6 +538,8 @@ mod tests {
             "elle/runtime-forms/emacs-hypervisor-declarations.el",
             "elle/runtime-forms/emacs-hypervisor-effect-registry.el",
             "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el",
+            "elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el",
+            "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el",
             "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
             "elle/runtime-forms/emacs-hypervisor-compose.el",
             "elle/runtime-forms/emacs-hypervisor-session-base.el",
