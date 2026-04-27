@@ -23,12 +23,13 @@ every failure in the first five seconds --- not two hours later.
 
 **Dead effect cleanup.** Re-evaluating Elisp is easy; undoing what the old
 version did is not. A normal reload leaves duplicate hook entries, stale advice,
-and orphaned anonymous functions. After enough reloads, the live session no
-longer matches the file you edited.
+stale keybindings, and orphaned anonymous functions. After enough reloads, the
+live session no longer matches the file you edited.
 
-Hypervisor currently tracks `add-hook` and `advice-add` as runtime effect
-records. On reload, it retracts the previous effects before applying the new
-version. This is the killer feature for daily editing in long-lived sessions.
+Hypervisor currently tracks `add-hook`, `advice-add`, and common keybinding
+forms as runtime effect records. On reload, it retracts the previous effects
+before applying the new version. This is the killer feature for daily editing in
+long-lived sessions.
 
 ## User-Facing Model
 
@@ -61,9 +62,9 @@ not choose your packages, keybindings, UI, editing model, or workflow.
   instead of hiding them behind lazy loading for hours.
 - **Selective reload** --- edit one unit and apply only what changed, without
   replaying the entire config.
-- **Effect-aware reload** --- automatically clean old hooks and advice before
-  re-applying a changed unit, preventing the stale-state drift that plagues
-  long-lived sessions.
+- **Effect-aware reload** --- automatically clean old hooks, advice, and
+  keybindings before re-applying a changed unit, preventing the stale-state
+  drift that plagues long-lived sessions.
 - **Startup reports** --- progress events, package events, status inspection,
   and optional metrics give you full visibility into what happened and why.
 
@@ -96,8 +97,8 @@ the new ones:
 - **New** and **changed** units are applied.
 - **Removed** units are not evaluated again.
 
-Edit one unit without replaying every package integration, mode setup, and hook
-registration in your session.
+Edit one unit without replaying every package integration, mode setup, hook
+registration, and keybinding in your session.
 
 Reload emits a short transcript in `*Messages*` so effect-aware cleanup is
 visible while it happens:
@@ -105,8 +106,9 @@ visible while it happens:
 ```text
 [Hypervisor] Reload started
 [Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload cleaned keybinding global-map C-c e -> eval-expression for editing-keys
 [Hypervisor] Reload re-applied unit: project-hooks
-[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 1 old effects cleaned.
+[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 2 old effects cleaned.
 ```
 
 ### Effect-Aware Reload
@@ -114,18 +116,20 @@ visible while it happens:
 The killer feature is not that Hypervisor can re-evaluate config. Emacs can
 already do that. The hard problem is that Emacs config is full of mutation:
 `add-hook` appends to hook variables, `advice-add` changes function behavior,
-and anonymous functions create fresh objects every time they are evaluated. A
-normal reload is additive. Fix a hook body and the old one may still be there.
-Move advice from one target to another and both versions may keep running. After
-enough reloads, the live Emacs session no longer matches the file you are
+keybinding forms mutate keymaps, and anonymous functions create fresh objects
+every time they are evaluated. A normal reload is additive. Fix a hook body and
+the old one may still be there. Move advice from one target to another and both
+versions may keep running. Delete a keybinding and it may survive until restart.
+After enough reloads, the live Emacs session no longer matches the file you are
 editing.
 
 Effect-aware reload makes supported config effects explicit runtime records.
 Because config-unit bodies remain structured Lisp data, Hypervisor can walk the
-executable body positions and route recognized `add-hook` and `advice-add` calls
-through an effect registry. The registry performs the real Emacs operation, then
-records what actually happened: the owning unit, effect kind, concrete target,
-installed function, apply form, retract form, and metadata.
+executable body positions and route recognized hooks, advice, and keybinding
+calls through an effect registry. The registry performs the real Emacs
+operation, then records what actually happened: the owning unit, effect kind,
+concrete target, installed function or definition, apply form, retract form, and
+metadata.
 
 On the next reload, changed and removed units are handled in two phases:
 
@@ -146,6 +150,10 @@ On the next reload, changed and removed units are handled in two phases:
   (add-hook 'text-mode-hook
             (lambda () (setq-local fill-column 80))))
 
+(config-unit! editing-keys
+  :config
+  (keymap-set global-map "C-c e" #'eval-expression))
+
 (config-unit! editing-hooks
   :config
   (dolist (hook '(text-mode-hook prog-mode-hook))
@@ -156,16 +164,20 @@ On the next reload, changed and removed units are handled in two phases:
 Symbol functions and anonymous functions use the same path. If a function value
 cannot be removed by stable identity, the registry installs it through an owned
 symbol and records that symbol in the retract form. Loops work for the same
-reason: each iteration records the concrete hook or advice target that was
-actually installed, so cleanup does not have to guess from the new source.
+reason: each iteration records the concrete hook, advice, or keybinding target
+that was actually installed, so cleanup does not have to guess from the new
+source.
+Keybindings snapshot their previous binding and restore it on cleanup, unless
+the live binding has changed outside Hypervisor.
 
 The recognizer is intentionally conservative. It currently tracks global
-`add-hook` and `advice-add` effects in executed body positions, including
-`progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and `dotimes`.
+`add-hook`, `advice-add`, and supported keybinding effects in executed body
+positions, including `progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`,
+`dolist`, and `dotimes`.
 It does not rewrite quoted data, function literals, lambda bodies, function
 definitions, or unknown macro/helper-call bodies. Local hook registrations with
-a non-nil `LOCAL` argument are not tracked yet. Other side effects are left
-untracked and are not reset unsafely.
+a non-nil `LOCAL` argument are not tracked yet. Variables, timers, faces, and
+other side effects are left untracked and are not reset unsafely.
 
 The registry is described in [docs/effect-registry.md](docs/effect-registry.md).
 
@@ -413,10 +425,10 @@ plans, and reports.
 travel between Hypervisor and Emacs as structured Lisp data, not opaque strings.
 Hypervisor can inspect those Elisp forms and route supported effect sites
 through semantically equivalent runtime operations. This is what powers
-effect-aware reload: supported `add-hook` and `advice-add` calls are rewritten
-into effect-registry operations, then the registry's concrete runtime records
-are used to retract old hook and advice effects before re-applying a unit ---
-all without string parsing.
+effect-aware reload: supported hooks, advice, and keybinding calls are
+rewritten into effect-registry operations, then the registry's concrete runtime
+records are used to retract old effects before re-applying a unit --- all
+without string parsing.
 
 **Single binary, zero framework overhead.** Traditional Emacs config frameworks
 require cloning a repo into `~/.config/emacs` because Emacs must load an
@@ -505,8 +517,8 @@ The path through the system:
 
 1. `config-unit!` captures the body as `(progn ... t)`.
 2. Emacs canonicalizes reader-hostile forms while preserving semantics.
-3. Supported hook and advice sites are normalized into effect-registry helper
-   calls.
+3. Supported hook, advice, and keybinding sites are normalized into
+   effect-registry helper calls.
 4. Emacs sends session data through sexp-rpc.
 5. Elle decodes package, unit, and env metadata; each unit `:body` stays raw
    Lisp code rather than becoming protocol data.
@@ -554,6 +566,7 @@ emacs-hypervisor/
 │       ├── emacs-hypervisor-effect-aware-reload.el #   effect rewrite dispatcher + cleanup
 │       ├── emacs-hypervisor-effect-kind-hook.el    #   add-hook effect kind
 │       ├── emacs-hypervisor-effect-kind-advice.el  #   advice-add effect kind
+│       ├── emacs-hypervisor-effect-kind-keybinding.el #   keybinding effect kind
 │       ├── emacs-hypervisor-compose.el             #   wires reload into M-x command
 │       ├── emacs-hypervisor-report-core.el         #   report data structures
 │       └── emacs-hypervisor-report.el              #   startup report rendering

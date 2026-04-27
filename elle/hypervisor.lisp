@@ -97,6 +97,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_FORMS"
            "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el")
+          effect-kind-keybinding-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el")
           selective-reload-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS"
@@ -156,6 +160,7 @@
                  effect-aware-reload-module
                  effect-kind-hook-module
                  effect-kind-advice-module
+                 effect-kind-keybinding-module
                  declarations-module
                  selective-reload-module
                  compose-module)

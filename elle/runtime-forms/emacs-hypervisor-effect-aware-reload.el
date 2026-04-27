@@ -24,7 +24,8 @@ the same form."
     (unless (and kind operator (functionp predicate) (functionp rewrite))
       (error "Invalid effect spec: %S" spec))
     (dolist (entry emacs-hypervisor-effect-aware-reload-effect-specs)
-      (if (eq (plist-get entry :kind) kind)
+      (if (and (eq (plist-get entry :kind) kind)
+               (eq (plist-get entry :operator) operator))
           (progn
             (push spec updated)
             (setq replaced t))

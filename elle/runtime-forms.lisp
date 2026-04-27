@@ -17,6 +17,7 @@
        effect-aware-reload-module
        effect-kind-hook-module
        effect-kind-advice-module
+       effect-kind-keybinding-module
        declarations-module
        selective-reload-module
        compose-module]
@@ -31,6 +32,7 @@
       (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
       (module-loader:load-module-form effect-kind-hook-module :emacs-hypervisor-effect-kind-hook-ready)
       (module-loader:load-module-form effect-kind-advice-module :emacs-hypervisor-effect-kind-advice-ready)
+      (module-loader:load-module-form effect-kind-keybinding-module :emacs-hypervisor-effect-kind-keybinding-ready)
       (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
       (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)
       (module-loader:load-module-form compose-module :emacs-hypervisor-compose-ready)

@@ -121,6 +121,10 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
         "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el",
     ),
     (
+        "EFFECT_KIND_KEYBINDING",
+        "elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el",
+    ),
+    (
         "SELECTIVE_RELOAD",
         "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
     ),

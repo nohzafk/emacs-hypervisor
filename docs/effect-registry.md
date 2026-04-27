@@ -8,10 +8,10 @@ identity, provenance, and retract information to clean it up later.
 
 For: Contributors working on reload, effect inference, or runtime forms
 
-What: Hook and advice effect record schema and registry semantics for reload
+What: Hook, advice, and keybinding effect record schema and registry semantics for reload
 cleanup
 
-Action: Use this as the contract before changing hook/advice cleanup or adding
+Action: Use this as the contract before changing supported cleanup or adding
 new effect kinds
 
 Skip if: You only need the current user-facing reload behavior
@@ -23,12 +23,14 @@ registry-backed implementation. The implementation scope is intentionally small:
 
 - `add-hook` effects
 - `advice-add` effects
+- keybinding effects from `keymap-set`, `define-key`, `global-set-key`, and
+  `keymap-global-set`
 - anonymous lambda naming for those two effect kinds
 - runtime registration for loop/computed hook and advice targets in supported
   body forms
 
-It does not implement keybinding, variable, face, timer, process, package, or
-general rollback support.
+It does not implement variable, face, timer, process, package, or general
+rollback support.
 
 ## Effect Record
 
@@ -62,8 +64,8 @@ An effect record is an Emacs Lisp plist.
 | `:id` | Stable logical identity for the effect when one can be derived. Use strings for generated IDs to avoid unbounded symbol interning. |
 | `:instance-id` | Concrete runtime identity for this installed effect. This may change every reload. |
 | `:unit` | Owning `config-unit!` name. |
-| `:kind` | Effect kind. The registry currently supports only `:hook` and `:advice`. |
-| `:target` | Runtime target that was mutated. For hooks this is the hook symbol; for advice this is the advised symbol. |
+| `:kind` | Effect kind. The bundled effect kinds are `:hook`, `:advice`, and `:keybinding`. |
+| `:target` | Runtime target that was mutated. For hooks this is the hook symbol; for advice this is the advised symbol; for keybindings this includes the map expression and key. |
 | `:source` | Best available source location or form provenance. |
 | `:apply` | Form, thunk, or structured operation that applied the effect. |
 | `:retract` | Form, thunk, or structured operation that reverses the effect. May be nil for irreversible effects. |
@@ -123,13 +125,14 @@ The registry is session-scoped. It does not persist across Emacs restarts.
 
 ## Supported Effect Kinds
 
-The current registry supports only the two effect kinds handled by
-effect-aware reload.
+The current registry supports the bundled effect kinds handled by effect-aware
+reload.
 
 | Source form | Effect kind | Retract strategy |
 |---|---|---|
 | `add-hook` | `:hook` | `remove-hook` |
 | `advice-add` | `:advice` | `advice-remove` |
+| `keymap-set`, `define-key`, `global-set-key`, `keymap-global-set` | `:keybinding` | Restore the previous binding, or unset when none existed |
 
 Other effect kinds remain out of scope for this implementation.
 
@@ -167,6 +170,32 @@ For anonymous functions, the helper:
 Advice registration follows the same pattern, using `advice-add` and
 `advice-remove`.
 
+## Runtime Keybinding Registration
+
+Keybinding helpers snapshot the previous binding before applying the new one.
+The retract path restores that previous binding, or unsets the key when no
+binding existed before Hypervisor applied the effect.
+
+Supported source forms normalize into one helper:
+
+```elisp
+(emacs-hypervisor-register-keybinding-effect
+ :unit "editing-keys"
+ :operator 'keymap-set
+ :map global-map
+ :map-form 'global-map
+ :key "C-c e"
+ :definition #'some-command
+ :source '(:form (keymap-set global-map "C-c e" #'some-command)))
+```
+
+The register function stores the exact runtime keymap object in a session-local
+state table so retracting does not serialize large keymaps into the effect
+record. Before retraction it checks whether the current binding still matches
+the Hypervisor-installed binding. If another package or user action changed the
+binding, cleanup is skipped and a warning is displayed instead of clobbering the
+external change.
+
 ## Future Effect Vocabulary
 
 The registry schema is intended to grow, but these effect kinds are future work.
@@ -175,7 +204,6 @@ adds them.
 
 | Source form | Future effect kind | Possible retract strategy |
 |---|---|---|
-| `define-key` | `:keybinding` | Restore previous binding |
 | `setq` | `:variable` | Restore previous value |
 | `set-face-attribute` | `:face` | Restore previous attributes |
 | `add-to-list` | `:list-mutation` | Remove owned element |
@@ -238,6 +266,7 @@ are:
 
 - `emacs-hypervisor-effect-kind-hook.el`
 - `emacs-hypervisor-effect-kind-advice.el`
+- `emacs-hypervisor-effect-kind-keybinding.el`
 
 The registry stores active records in application order and retracts them in
 reverse order.
@@ -249,9 +278,9 @@ Covered by tests:
 - retract skips irreversible or opaque records
 - retract runs in reverse application order
 
-### Hook And Advice Registration Helpers
+### Hook, Advice, And Keybinding Registration Helpers
 
-The two supported effect kinds use explicit helpers:
+The bundled effect kinds use explicit helpers:
 
 ```elisp
 (emacs-hypervisor-register-hook-effect
@@ -261,6 +290,10 @@ The two supported effect kinds use explicit helpers:
 (emacs-hypervisor-register-advice-effect
  :unit UNIT :target TARGET :where WHERE :function FUNCTION
  :source SOURCE)
+
+(emacs-hypervisor-register-keybinding-effect
+ :unit UNIT :operator OPERATOR :map MAP :map-form MAP-FORM
+ :key KEY :definition DEFINITION :source SOURCE)
 ```
 
 For anonymous functions, generate an owned symbol, store the actual closure with
@@ -273,10 +306,12 @@ Covered by tests:
 - lambda hook functions preserve closures and are removed by generated symbol
 - symbol advice functions are added, recorded, and removed
 - lambda advice functions preserve closures and are removed by generated symbol
+- keybindings are added, recorded, restored, unset, and guarded against
+  external divergence
 
 ### Supported Call Rewrites
 
-The normalizer rewrites supported `add-hook` and `advice-add` calls to
+The normalizer rewrites supported hook, advice, and keybinding calls to
 registration helpers inside simple executed forms, including
 `progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and `dotimes`.
 
@@ -286,8 +321,9 @@ in the first pass.
 
 Covered by tests:
 
-- existing top-level hook/advice cleanup still passes
-- `dolist` over literal hooks records one concrete effect per iteration
+- existing top-level hook/advice/keybinding cleanup still passes
+- `dolist` over literal hooks or keybindings records one concrete effect per
+  iteration
 - loop-created lambdas preserve per-iteration lexical captures
 - changed units retract previous loop effects before applying current effects
 
@@ -302,15 +338,16 @@ Reload logs the user-facing cleanup story as it runs:
 ```text
 [Hypervisor] Reload started
 [Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload cleaned keybinding global-map C-c e -> eval-expression for editing-keys
 [Hypervisor] Reload re-applied unit: project-hooks
-[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 1 old effects cleaned.
+[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 2 old effects cleaned.
 ```
 
 Covered by tests:
 
 - current selective reload tests remain green
-- reload reports count registry-cleaned hook/advice effects
-- reload logs start, cleaned hook/advice effects, applied units, and summary
+- reload reports count registry-cleaned hook/advice/keybinding effects
+- reload logs start, cleaned effects, applied units, and summary
 - raw previous bodies without registry records do not synthesize cleanup
 
 ## Remaining Work

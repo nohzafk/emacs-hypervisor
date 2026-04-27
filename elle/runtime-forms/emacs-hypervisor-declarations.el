@@ -4,6 +4,7 @@
 (require 'emacs-hypervisor-effect-aware-reload)
 (require 'emacs-hypervisor-effect-kind-hook)
 (require 'emacs-hypervisor-effect-kind-advice)
+(require 'emacs-hypervisor-effect-kind-keybinding)
 
 (defvar emacs-hypervisor-packages nil)
 (defvar emacs-hypervisor-config-units nil)

@@ -8,10 +8,10 @@ when a user edits `config.org` or `config.el` and reloads.
 
 Effect-aware reload cleans up the previous version of a changed or removed
 unit for recognized repeated operations, avoiding duplicate hooks, stale
-advice, and reload drift.
+advice, stale keybindings, and reload drift.
 
 The supported effect set is deliberately narrow. Hypervisor currently supports
-only `add-hook` and `advice-add` cleanup. Other side effects are left
+`add-hook`, `advice-add`, and keybinding cleanup. Other side effects are left
 untracked.
 
 ## Design
@@ -23,7 +23,7 @@ behavior is pre-apply cleanup for recognized effects.
 > Hypervisor, and it will apply only the config units that changed. For
 > recognized repeated operations, Hypervisor cleans up the previous version
 > before applying or removing a unit, avoiding duplicate hooks, stale advice,
-> and reload drift.
+> stale keybindings, and reload drift.
 
 ## Data Model
 
@@ -71,8 +71,9 @@ There is no static cleanup fallback. If a previous unit has no active registry
 records, cleanup is a no-op for that unit and a restart clears any older live
 state.
 
-The recognizer supports hook and advice targets that are literal or computed at
-runtime. It rewrites supported calls in executed body positions, including
+The recognizer supports hook, advice, and keybinding targets that are literal or
+computed at runtime. It rewrites supported calls in executed body positions,
+including
 `progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`, `dolist`, and
 `dotimes`.
 
@@ -99,8 +100,9 @@ Example user messages:
 [Hypervisor] Reload started
 [Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
 [Hypervisor] Reload cleaned advice save-buffer :before -> delete-trailing-whitespace for save-behavior
+[Hypervisor] Reload cleaned keybinding global-map C-c e -> edit-command for editing-keys
 [Hypervisor] Reload re-applied unit: project-hooks
-[Hypervisor] Reload: 3 changed applied, 44 unchanged skipped, 2 old effects cleaned.
+[Hypervisor] Reload: 3 changed applied, 44 unchanged skipped, 3 old effects cleaned.
 ```
 
 ## API
@@ -158,6 +160,9 @@ Bundled effect kinds in `elle/runtime-forms/emacs-hypervisor-effect-kind-*.el`:
  :unit unit :target hook :function function :depth depth :local local)
 (emacs-hypervisor-register-advice-effect
  :unit unit :target target :where where :function function)
+(emacs-hypervisor-register-keybinding-effect
+ :unit unit :operator operator :map map :map-form map-form
+ :key key :definition definition)
 ```
 
 `elle/runtime-forms/emacs-hypervisor-compose.el` wires both into
@@ -179,6 +184,20 @@ Advice support:
 (advice-add 'TARGET WHERE FUNCTION)
 ```
 
+Keybinding support:
+
+```elisp
+(keymap-set MAP KEY DEFINITION)
+(define-key KEYMAP KEY DEFINITION)
+(global-set-key KEY COMMAND)
+(keymap-global-set KEY DEFINITION)
+```
+
+Keybinding cleanup snapshots the previous binding before applying the new one.
+On cleanup it restores that binding, or unsets the key when no binding existed.
+If the live binding no longer matches the Hypervisor-installed binding, cleanup
+skips the key and displays a warning instead of clobbering the external change.
+
 `FUNCTION` may be a symbol, function-quoted symbol, anonymous `(lambda ...)`,
 or anonymous `#'(lambda ...)`.
 
@@ -196,7 +215,5 @@ untracked.
 - No persistent effect tracking across Emacs restarts.
 - Does not reverse file, network, process, timer, buffer-local, or
   package-manager side effects.
-- Hook and advice cleanup only; keybindings, variables, themes, and faces are
-  not yet tracked.
-- The registry contains hook and advice records only. Other effect kinds are
-  future vocabulary, not supported behavior.
+- Variables, themes, faces, function cells, timers, and package-manager side
+  effects are not yet tracked.

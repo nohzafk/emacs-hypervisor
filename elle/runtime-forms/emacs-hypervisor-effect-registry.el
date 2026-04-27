@@ -9,6 +9,9 @@
 (defvar emacs-hypervisor-effect-registry--instance-counter 0
   "Counter used to assign concrete effect instance ids.")
 
+(defvar emacs-hypervisor-effect-registry-reset-hook nil
+  "Hook run after `emacs-hypervisor-effect-registry-reset'.")
+
 (defconst emacs-hypervisor-effect-registry--schema-version 1)
 
 (defconst emacs-hypervisor-effect-registry--generated-prefix
@@ -17,7 +20,8 @@
 (defun emacs-hypervisor-effect-registry-reset ()
   "Reset the session-scoped effect registry."
   (setq emacs-hypervisor-effect-registry-current nil)
-  (setq emacs-hypervisor-effect-registry--instance-counter 0))
+  (setq emacs-hypervisor-effect-registry--instance-counter 0)
+  (run-hooks 'emacs-hypervisor-effect-registry-reset-hook))
 
 (defun emacs-hypervisor-effect-registry--safe-name-component (value)
   (let* ((raw (cond

@@ -170,6 +170,10 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
         embedded_forms: embedded::EMBEDDED_EFFECT_KIND_ADVICE_FORMS,
     },
     PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_FORMS",
+        embedded_forms: embedded::EMBEDDED_EFFECT_KIND_KEYBINDING_FORMS,
+    },
+    PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS",
         embedded_forms: embedded::EMBEDDED_SELECTIVE_RELOAD_FORMS,
     },

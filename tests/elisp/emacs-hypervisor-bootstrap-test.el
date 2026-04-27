@@ -49,6 +49,7 @@
 (require 'emacs-hypervisor-effect-aware-reload)
 (require 'emacs-hypervisor-effect-kind-hook)
 (require 'emacs-hypervisor-effect-kind-advice)
+(require 'emacs-hypervisor-effect-kind-keybinding)
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-unit-runtime)
 (require 'emacs-hypervisor-compose)
@@ -175,8 +176,17 @@
               (advice-add 'emacs-hypervisor-test-advice-target
                           :before
                           #'ignore)
+              (keymap-set emacs-hypervisor-test-keymap
+                          "C-c h"
+                          #'emacs-hypervisor-test-command-old)
               t))))
-    (should (equal kinds '(:hook :advice)))
+    (should (equal kinds
+                   '(:hook
+                     :advice
+                     :keybinding
+                     :keybinding
+                     :keybinding
+                     :keybinding)))
     (should
      (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
       '(add-hook 'emacs-hypervisor-test-hook
@@ -192,10 +202,24 @@
       '(advice-add 'emacs-hypervisor-test-advice-target
                    :before
                    #'ignore)))
+    (should
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(keymap-set emacs-hypervisor-test-keymap
+                   "C-c h"
+                   #'emacs-hypervisor-test-command-old)))
+    (should
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(global-set-key (kbd "C-c h")
+                       #'emacs-hypervisor-test-command-old)))
+    (should-not
+     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
+      '(keymap-set emacs-hypervisor-test-keymap "C-c h")))
     (should (eq (car (nth 1 body))
                 'emacs-hypervisor-register-hook-effect))
     (should (eq (car (nth 2 body))
-                'emacs-hypervisor-register-advice-effect))))
+                'emacs-hypervisor-register-advice-effect))
+    (should (eq (car (nth 3 body))
+                'emacs-hypervisor-register-keybinding-effect))))
 
 (ert-deftest emacs-hypervisor-effect-registry-generated-name-is-deterministic ()
   (let* ((lambda-form '(lambda () :hook))
@@ -804,6 +828,268 @@
         (advice-remove 'emacs-hypervisor-test-advice-target-a symbol)
         (advice-remove 'emacs-hypervisor-test-advice-target-b symbol))
       (emacs-hypervisor-reset-declarations))))
+
+(defvar emacs-hypervisor-test-keymap nil)
+
+(defun emacs-hypervisor-test-command-previous ()
+  (interactive)
+  :previous)
+
+(defun emacs-hypervisor-test-command-old ()
+  (interactive)
+  :old)
+
+(defun emacs-hypervisor-test-command-new ()
+  (interactive)
+  :new)
+
+(defun emacs-hypervisor-test-command-external ()
+  (interactive)
+  :external)
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-installs-keybinding-effect ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (let* ((unit (car (emacs-hypervisor-export-config-units)))
+           (body (plist-get unit :body)))
+      (eval body t)
+      (let ((effects
+             (emacs-hypervisor-effect-registry-effects-for-unit
+              "keybinding-unit")))
+        (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                    #'emacs-hypervisor-test-command-old))
+        (should (= (length effects) 1))
+        (should (eq (plist-get (car effects) :kind) :keybinding))
+        (should (equal (plist-get (plist-get (car effects) :metadata) :key)
+                       "C-c h"))))))
+
+(ert-deftest emacs-hypervisor-effect-registry-reset-clears-keybinding-state ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
+    (emacs-hypervisor-register-keybinding-effect
+     :unit "keybinding-unit"
+     :operator 'keymap-set
+     :map emacs-hypervisor-test-keymap
+     :map-form 'emacs-hypervisor-test-keymap
+     :key "C-c h"
+     :definition #'emacs-hypervisor-test-command-old
+     :source '(:form (keymap-set emacs-hypervisor-test-keymap
+                                  "C-c h"
+                                  #'emacs-hypervisor-test-command-old)))
+    (should (= (hash-table-count
+                emacs-hypervisor-effect-kind-keybinding--states)
+               1))
+    (emacs-hypervisor-effect-registry-reset)
+    (should (= (hash-table-count
+                emacs-hypervisor-effect-kind-keybinding--states)
+               0))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-keybinding-effect ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
+         previous
+         current
+         reports
+         report)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-old))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-new))
+    (setq current (emacs-hypervisor-export-config-units))
+    (setq reports
+          (emacs-hypervisor--reload-unit-reports
+           (emacs-hypervisor-selective-reload-diff-units previous current)
+           nil))
+    (setq report
+          (emacs-hypervisor-test--report reports "keybinding-unit"))
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-new))
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
+                (plist-get report :cleanup))
+               1))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-removed-keybinding-restores-previous-binding ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
+         previous
+         reports
+         report)
+    (define-key emacs-hypervisor-test-keymap
+                (kbd "C-c h")
+                #'emacs-hypervisor-test-command-previous)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-old))
+    (setq reports
+          (emacs-hypervisor--reload-unit-reports
+           (emacs-hypervisor-selective-reload-diff-units previous nil)
+           nil))
+    (setq report
+          (emacs-hypervisor-test--report reports "keybinding-unit"))
+    (should (eq (plist-get report :action) :removed))
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-previous))
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
+                (plist-get report :cleanup))
+               1))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-removed-keybinding-unsets-new-binding ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
+         previous)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-old))
+    (emacs-hypervisor--reload-unit-reports
+     (emacs-hypervisor-selective-reload-diff-units previous nil)
+     nil)
+    (should-not
+     (emacs-hypervisor-effect-kind-keybinding--lookup
+      emacs-hypervisor-test-keymap
+      "C-c h"
+      'keymap-set))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-keybinding-divergence-guard-preserves-external-binding ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
+         previous
+         warnings)
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! keybinding-unit
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (eval (plist-get (car previous) :body) t)
+    (keymap-set emacs-hypervisor-test-keymap
+                "C-c h"
+                #'emacs-hypervisor-test-command-external)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (type message &optional level buffer-name)
+                 (push (list type message level buffer-name) warnings))))
+      (emacs-hypervisor--reload-unit-reports
+       (emacs-hypervisor-selective-reload-diff-units previous nil)
+       nil))
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-external))
+    (should (equal (caar warnings) 'emacs-hypervisor))
+    (should (string-match-p "Skipped keybinding cleanup"
+                            (cadar warnings)))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-global-set-key-records-keybinding-effect ()
+  (let* ((key "C-c H g")
+         (key-sequence (kbd key))
+         (previous-binding (lookup-key global-map key-sequence))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (config-unit! global-keybinding-unit
+            :config
+            (global-set-key (kbd "C-c H g")
+                            #'emacs-hypervisor-test-command-old))
+          (let* ((unit (car (emacs-hypervisor-export-config-units)))
+                 (body (plist-get unit :body)))
+            (eval body t)
+            (should (eq (lookup-key global-map key-sequence)
+                        #'emacs-hypervisor-test-command-old))
+            (should
+             (eq (plist-get
+                  (car
+                   (emacs-hypervisor-effect-registry-effects-for-unit
+                    "global-keybinding-unit"))
+                  :kind)
+                 :keybinding))))
+      (define-key global-map key-sequence previous-binding)
+      (emacs-hypervisor-reset-declarations))))
+
+(ert-deftest emacs-hypervisor-effect-aware-reload-loop-keybindings-record-one-effect-per-iteration ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! loop-keybinding-unit
+      :config
+      (dolist (entry '(("C-c h a" . emacs-hypervisor-test-command-old)
+                       ("C-c h b" . emacs-hypervisor-test-command-new)))
+        (keymap-set emacs-hypervisor-test-keymap
+                    (car entry)
+                    (cdr entry))))
+    (let* ((unit (car (emacs-hypervisor-export-config-units)))
+           (body (plist-get unit :body)))
+      (eval body t)
+      (should (= (length
+                  (emacs-hypervisor-effect-registry-effects-for-unit
+                   "loop-keybinding-unit"))
+                 2))
+      (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h a")
+                  #'emacs-hypervisor-test-command-old))
+      (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h b")
+                  #'emacs-hypervisor-test-command-new)))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-does-not-synthesize-opaque-effects ()
   (let* ((emacs-hypervisor-test-runtime-value nil)

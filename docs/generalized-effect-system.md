@@ -27,15 +27,13 @@ old version did is not. A normal reload leaves duplicate hook entries,
 stale advice, orphaned keybindings, and leaked timers. After enough
 reloads, the live session no longer matches the config file.
 
-Today, Hypervisor tracks `add-hook` and `advice-add` as runtime effect
-records. On reload, it retracts the previous effects before applying the
-new version. This is the killer feature for daily editing in long-lived
-sessions.
+Today, Hypervisor tracks `add-hook`, `advice-add`, and common keybinding forms
+as runtime effect records. On reload, it retracts the previous effects before
+applying the new version. This is the killer feature for daily editing in
+long-lived sessions.
 
-The limitation: only hooks and advice are tracked. Keybindings, timers,
-variables, faces, and function definitions are not. If you delete a
-`keymap-set` from your config and reload, the old keybinding survives
-until restart.
+The remaining limitation: timers, variables, faces, and function definitions
+are not tracked yet.
 
 ## Goal
 
@@ -68,6 +66,9 @@ Decision: do not add a new keybinding recognizer until Phase 0 is passing
 the existing hook/advice tests unchanged. That gives Phase 1 a clean
 mechanical path: add one spec, one register function, and focused tests.
 
+Current status: Phase 0 and Phase 1 are implemented. Phase 2, timers, is the
+next planned effect kind.
+
 ## Existing Implementation
 
 Read these files before starting:
@@ -78,6 +79,7 @@ Read these files before starting:
 | `elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el` | Body rewriter dispatcher + cleanup integration |
 | `elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el` | `add-hook` effect recognizer, rewriter, installer |
 | `elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el` | `advice-add` effect recognizer, rewriter, installer |
+| `elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el` | keybinding effect recognizers, rewriter, installer |
 | `elle/runtime-forms/emacs-hypervisor-declarations.el` | `config-unit!` macro, calls the body rewriter at macro-expansion time |
 | `elle/runtime-forms/emacs-hypervisor-compose.el` | Reload command, wires selective reload + effect cleanup |
 | `elle/runtime-forms/emacs-hypervisor-selective-reload.el` | Unit diffing: new/changed/unchanged/removed |
@@ -186,6 +188,8 @@ Implement in this order.
 
 **Source forms:** `add-hook`, `advice-add`
 
+**Status:** Implemented.
+
 **Why first:** This is the lowest-risk proof that the generalized path
 preserves current behavior. No new user-visible effect kind should be
 added until hook/advice still pass through the same lifecycle from a
@@ -212,6 +216,8 @@ generic dispatch table.
 
 **Source forms:** `keymap-set`, `define-key`, `global-set-key`,
 `keymap-global-set`
+
+**Status:** Implemented.
 
 **Why first:** Highest user impact. Deleted keybinding config survives
 until restart today.

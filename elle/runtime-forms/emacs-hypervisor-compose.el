@@ -159,6 +159,15 @@
        (emacs-hypervisor--reload-effect-where effect))
       (emacs-hypervisor--reload-format-value
        (emacs-hypervisor--reload-effect-function effect))))
+    (:keybinding
+     (format
+      "keybinding %s %s -> %s"
+      (emacs-hypervisor--reload-format-value
+       (plist-get (plist-get effect :metadata) :map))
+      (emacs-hypervisor--reload-format-value
+       (plist-get (plist-get effect :metadata) :key))
+      (emacs-hypervisor--reload-format-value
+       (emacs-hypervisor--reload-effect-function effect))))
     (:generated-function
      (format
       "generated function %s"
