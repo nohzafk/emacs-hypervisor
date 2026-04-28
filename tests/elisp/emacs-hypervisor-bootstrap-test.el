@@ -1648,6 +1648,37 @@
       (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
         (kill-buffer buffer)))))
 
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-restores-input-buffer-after-dispatch ()
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (first-message (emacs-hypervisor-test--event
+                         :log
+                         '(:level :info :message "one")))
+         (second-message (emacs-hypervisor-test--event
+                          :log
+                          '(:level :info :message "two")))
+         (wire (concat (emacs-hypervisor--sexp-string first-message) "\n"
+                       (emacs-hypervisor--sexp-string second-message) "\n"))
+         received)
+    (unwind-protect
+        (cl-letf (((symbol-function 'emacs-hypervisor--dispatch)
+                   (lambda (value)
+                     (push value received)
+                     (let ((report-buffer (emacs-hypervisor-report-buffer)))
+                       (with-current-buffer report-buffer
+                         (emacs-hypervisor-report-mode)
+                         (let ((inhibit-read-only t))
+                           (erase-buffer)
+                           (insert "not a sexp")))
+                       (set-buffer report-buffer)))))
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (should (equal (nreverse received) (list first-message second-message)))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer))
+      (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+        (kill-buffer buffer)))))
+
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-session-state ()
   (emacs-hypervisor-reset)
   (emacs-hypervisor--dispatch
@@ -1720,7 +1751,7 @@
       (kill-buffer emacs-hypervisor--report-buffer-name))))
 
 (ert-deftest emacs-hypervisor-report-session-finished-displays-initial-buffer-when-report-hidden ()
-  (let ((emacs-hypervisor-show-report-on-finish nil)
+  (let ((emacs-hypervisor-show-report-on-startup nil)
         (emacs-hypervisor-display-initial-buffer-on-finish t)
         (emacs-hypervisor--state :completed)
         (noninteractive nil)
@@ -1747,7 +1778,7 @@
           (kill-buffer buffer))))))
 
 (ert-deftest emacs-hypervisor-report-session-finished-accepts-side-effecting-initial-choice ()
-  (let ((emacs-hypervisor-show-report-on-finish nil)
+  (let ((emacs-hypervisor-show-report-on-startup nil)
         (emacs-hypervisor-display-initial-buffer-on-finish t)
         (emacs-hypervisor--state :completed)
         (noninteractive nil)
@@ -1770,10 +1801,9 @@
         (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
           (kill-buffer buffer))))))
 
-(ert-deftest emacs-hypervisor-report-session-finished-opens-report-when-enabled ()
-  (let ((emacs-hypervisor-show-report-on-finish t)
+(ert-deftest emacs-hypervisor-report-session-started-does-not-open-report-when-enabled ()
+  (let ((emacs-hypervisor-show-report-on-startup t)
         (emacs-hypervisor-display-initial-buffer-on-finish t)
-        (emacs-hypervisor--state :completed)
         (noninteractive nil)
         (initial-buffer-choice
          (lambda () (get-buffer-create "*hypervisor-test-dashboard*")))
@@ -1787,16 +1817,72 @@
                  (setq opened-buffer buffer))))
       (unwind-protect
           (progn
-            (emacs-hypervisor-report-session-finished)
-            (should report-opened)
+            (emacs-hypervisor-report-session-started)
+            (should-not report-opened)
             (should-not opened-buffer))
         (when-let ((buffer (get-buffer "*hypervisor-test-dashboard*")))
           (kill-buffer buffer))
         (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
           (kill-buffer buffer))))))
 
+(ert-deftest emacs-hypervisor-report-package-begin-does-not-open-report-on-startup ()
+  (let ((emacs-hypervisor-show-report-on-startup t)
+        (emacs-hypervisor--report-startup-opened nil)
+        (noninteractive nil)
+        report-opened)
+    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
+               (lambda ()
+                 (setq report-opened t))))
+      (emacs-hypervisor-report-note-package-event :begin)
+      (should-not report-opened))))
+
+(ert-deftest emacs-hypervisor-report-package-finished-opens-report-on-startup-once ()
+  (let ((emacs-hypervisor-show-report-on-startup t)
+        (emacs-hypervisor--report-startup-opened nil)
+        (noninteractive nil)
+        report-open-count)
+    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
+               (lambda ()
+                 (setq report-open-count (1+ (or report-open-count 0))))))
+      (emacs-hypervisor-report-note-package-event :finished nil "completed")
+      (emacs-hypervisor-report-note-unit-event :attempt "first-unit")
+      (should (= report-open-count 1)))))
+
+(ert-deftest emacs-hypervisor-report-unit-attempt-opens-report-on-startup-once ()
+  (let ((emacs-hypervisor-show-report-on-startup t)
+        (emacs-hypervisor--report-startup-opened nil)
+        (noninteractive nil)
+        report-open-count)
+    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
+               (lambda ()
+                 (setq report-open-count (1+ (or report-open-count 0))))))
+      (emacs-hypervisor-report-note-unit-event :attempt "first-unit")
+      (emacs-hypervisor-report-note-unit-event :attempt "second-unit")
+      (should (= report-open-count 1)))))
+
+(ert-deftest emacs-hypervisor-report-session-finished-does-not-open-report-when-enabled ()
+  (let ((emacs-hypervisor-show-report-on-startup t)
+        (emacs-hypervisor-display-initial-buffer-on-finish t)
+        (emacs-hypervisor--state :completed)
+        (noninteractive nil)
+        report-opened
+        opened-buffer)
+    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
+               (lambda ()
+                 (setq report-opened t)))
+              ((symbol-function 'pop-to-buffer)
+               (lambda (buffer &rest _args)
+                 (setq opened-buffer buffer))))
+      (unwind-protect
+          (progn
+            (emacs-hypervisor-report-session-finished)
+            (should-not report-opened)
+            (should-not opened-buffer))
+        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+          (kill-buffer buffer))))))
+
 (ert-deftest emacs-hypervisor-report-session-finished-skips-initial-buffer-on-failure ()
-  (let ((emacs-hypervisor-show-report-on-finish nil)
+  (let ((emacs-hypervisor-show-report-on-startup nil)
         (emacs-hypervisor-display-initial-buffer-on-finish t)
         (emacs-hypervisor--state :failed)
         (noninteractive nil)
@@ -1816,7 +1902,7 @@
           (kill-buffer buffer))))))
 
 (ert-deftest emacs-hypervisor-report-note-unit-event-opens-report-on-failure ()
-  (let ((emacs-hypervisor-show-report-on-finish nil)
+  (let ((emacs-hypervisor-show-report-on-startup nil)
         (noninteractive nil)
         report-opened)
     (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)

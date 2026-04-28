@@ -398,8 +398,8 @@ startup session.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `emacs-hypervisor-show-report-on-finish` | `nil` | When non-nil, display the startup report buffer after a clean startup. The report always appears when a config-unit fails, regardless of this setting. |
-| `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
+| `emacs-hypervisor-show-report-on-startup` | `nil` | When non-nil, display the startup report after package processing finishes, or at the first config-unit when there is no package work. The report always appears when a config-unit fails, regardless of this setting. |
+| `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
 
 ## How It Works
 

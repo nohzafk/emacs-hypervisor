@@ -12,13 +12,13 @@
 (defvar emacs-hypervisor--shutdown-reason)
 (defvar emacs-hypervisor--completed)
 
-(defvar emacs-hypervisor-show-report-on-finish nil
-  "When non-nil, display the startup report buffer after a clean startup.
+(defvar emacs-hypervisor-show-report-on-startup nil
+  "When non-nil, display the startup report buffer during startup.
 The report always appears when a config-unit fails, regardless of this setting.")
 
 (defvar emacs-hypervisor-display-initial-buffer-on-finish t
   "When non-nil, display `initial-buffer-choice' after a clean startup.
-This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
+This applies only when `emacs-hypervisor-show-report-on-startup' is nil.")
 
 (defvar emacs-hypervisor--session-started-at nil)
 (defvar emacs-hypervisor--session-finished-at nil)
@@ -29,6 +29,7 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
 (defvar emacs-hypervisor--package-installation-started-at nil)
 (defvar emacs-hypervisor--package-finished-reason nil)
 (defvar emacs-hypervisor--running-unit-name nil)
+(defvar emacs-hypervisor--report-startup-opened nil)
 
 (defun emacs-hypervisor-report-refresh ()
   (when (fboundp 'emacs-hypervisor--refresh-report-buffer)
@@ -37,6 +38,14 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
 (defun emacs-hypervisor-report-maybe-open ()
   (when (fboundp 'emacs-hypervisor-open-report-buffer)
     (emacs-hypervisor-open-report-buffer)))
+
+(defun emacs-hypervisor-report-maybe-open-on-startup ()
+  "Display the report once during startup when configured."
+  (when (and emacs-hypervisor-show-report-on-startup
+             (not emacs-hypervisor--report-startup-opened)
+             (not noninteractive))
+    (setq emacs-hypervisor--report-startup-opened t)
+    (emacs-hypervisor-report-maybe-open)))
 
 (defun emacs-hypervisor-report--buffer-from-initial-choice (choice)
   "Return the buffer requested by initial buffer CHOICE, when any."
@@ -166,6 +175,7 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
   (setq emacs-hypervisor--package-installation-started-at nil)
   (setq emacs-hypervisor--package-finished-reason nil)
   (setq emacs-hypervisor--running-unit-name nil)
+  (setq emacs-hypervisor--report-startup-opened nil)
   (emacs-hypervisor-report-refresh))
 
 (defun emacs-hypervisor-report-session-started ()
@@ -180,10 +190,9 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
   (emacs-hypervisor-report-refresh)
   (when (and (eq emacs-hypervisor--state :completed)
              (not noninteractive))
-    (if emacs-hypervisor-show-report-on-finish
-        (emacs-hypervisor-report-maybe-open)
-      (when emacs-hypervisor-display-initial-buffer-on-finish
-        (emacs-hypervisor-report-display-initial-buffer)))))
+    (when (and (not emacs-hypervisor-show-report-on-startup)
+               emacs-hypervisor-display-initial-buffer-on-finish)
+      (emacs-hypervisor-report-display-initial-buffer))))
 
 (defun emacs-hypervisor-report-note-plan ()
   "Refresh the report after a new plan message."
@@ -236,7 +245,8 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
            (- (float-time) emacs-hypervisor--package-installation-started-at))
         :metric-kind kind
         :item-name reason)
-       (setq emacs-hypervisor--package-installation-started-at nil))))
+       (setq emacs-hypervisor--package-installation-started-at nil))
+     (emacs-hypervisor-report-maybe-open-on-startup)))
   (emacs-hypervisor-report-refresh))
 
 (defun emacs-hypervisor-report-note-unit-event (kind name &optional error)
@@ -248,7 +258,8 @@ This applies only when `emacs-hypervisor-show-report-on-finish' is nil.")
         emacs-hypervisor--unit-events)
   (pcase kind
     (:attempt
-     (setq emacs-hypervisor--running-unit-name name))
+     (setq emacs-hypervisor--running-unit-name name)
+     (emacs-hypervisor-report-maybe-open-on-startup))
     ((or :success :failed)
      (when (equal emacs-hypervisor--running-unit-name name)
        (setq emacs-hypervisor--running-unit-name nil))
