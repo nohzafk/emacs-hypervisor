@@ -55,8 +55,7 @@ emacs-home-reset path=test_emacs_home config_home=test_config_home:
     rm -rf "{{path}}" "{{config_home}}"
     XDG_CONFIG_HOME="{{config_home}}" ./target/release/emacs-hypervisor init --home "{{path}}"
     mkdir -p "{{config_home}}/emacs-hypervisor"
-    cp early-init.el config.org "{{config_home}}/emacs-hypervisor"
-    cp -r config/ "{{config_home}}/emacs-hypervisor"
+    cp ~/.config/emacs-hypervisor/early-init.el ~/.config/emacs-hypervisor/config.org "{{config_home}}/emacs-hypervisor"
 
 [group('Emacs')]
 emacs-home-run path=test_emacs_home binary=hypervisor_binary config_home=test_config_home:
