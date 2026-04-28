@@ -167,8 +167,9 @@ symbol and records that symbol in the retract form. Loops work for the same
 reason: each iteration records the concrete hook, advice, or keybinding target
 that was actually installed, so cleanup does not have to guess from the new
 source.
-Keybindings snapshot their previous binding and restore it on cleanup, unless
-the live binding has changed outside Hypervisor.
+Keybindings do not stack, so cleanup focuses on stale bindings: if the live
+binding still matches the definition Hypervisor installed, cleanup unsets it.
+If the binding changed outside Hypervisor, cleanup skips it.
 
 The recognizer is intentionally conservative. It currently tracks global
 `add-hook`, `advice-add`, and supported keybinding effects in executed body

@@ -938,7 +938,7 @@
                 (plist-get report :cleanup))
                1))))
 
-(ert-deftest emacs-hypervisor-effect-aware-reload-removed-keybinding-restores-previous-binding ()
+(ert-deftest emacs-hypervisor-effect-aware-reload-removed-keybinding-unsets-owned-binding ()
   (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
          (emacs-hypervisor-effect-registry-current nil)
          (emacs-hypervisor-effect-registry--instance-counter 0)
@@ -968,8 +968,11 @@
     (setq report
           (emacs-hypervisor-test--report reports "keybinding-unit"))
     (should (eq (plist-get report :action) :removed))
-    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
-                #'emacs-hypervisor-test-command-previous))
+    (should-not
+     (emacs-hypervisor-effect-kind-keybinding--lookup
+      emacs-hypervisor-test-keymap
+      "C-c h"
+      'keymap-set))
     (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
                 (plist-get report :cleanup))
                1))))

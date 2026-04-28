@@ -193,10 +193,11 @@ Keybinding support:
 (keymap-global-set KEY DEFINITION)
 ```
 
-Keybinding cleanup snapshots the previous binding before applying the new one.
-On cleanup it restores that binding, or unsets the key when no binding existed.
-If the live binding no longer matches the Hypervisor-installed binding, cleanup
-skips the key and displays a warning instead of clobbering the external change.
+Keybinding cleanup unsets the binding Hypervisor installed when it is still the
+live binding. This prevents deleted or moved config from leaving stale
+keybindings behind. If the live binding no longer matches the
+Hypervisor-installed binding, cleanup skips the key and displays a warning
+instead of clobbering the external change.
 
 `FUNCTION` may be a symbol, function-quoted symbol, anonymous `(lambda ...)`,
 or anonymous `#'(lambda ...)`.

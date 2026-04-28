@@ -70,7 +70,7 @@ An effect record is an Emacs Lisp plist.
 | `:apply` | Form, thunk, or structured operation that applied the effect. |
 | `:retract` | Form, thunk, or structured operation that reverses the effect. May be nil for irreversible effects. |
 | `:body-hash` | Hash of the user body or normalized operation body. |
-| `:reversible` | Non-nil when `:retract` is expected to restore the previous state. |
+| `:reversible` | Non-nil when `:retract` is expected to perform supported cleanup. |
 | `:persistent` | Non-nil when the effect intentionally survives reload cleanup. |
 | `:status` | Runtime state, usually `:active`, `:retracted`, `:failed`, or `:opaque`. |
 | `:metadata` | Extra kind-specific fields. |
@@ -132,7 +132,7 @@ reload.
 |---|---|---|
 | `add-hook` | `:hook` | `remove-hook` |
 | `advice-add` | `:advice` | `advice-remove` |
-| `keymap-set`, `define-key`, `global-set-key`, `keymap-global-set` | `:keybinding` | Restore the previous binding, or unset when none existed |
+| `keymap-set`, `define-key`, `global-set-key`, `keymap-global-set` | `:keybinding` | Unset the Hypervisor-owned binding when it is still current |
 
 Other effect kinds remain out of scope for this implementation.
 
@@ -172,9 +172,9 @@ Advice registration follows the same pattern, using `advice-add` and
 
 ## Runtime Keybinding Registration
 
-Keybinding helpers snapshot the previous binding before applying the new one.
-The retract path restores that previous binding, or unsets the key when no
-binding existed before Hypervisor applied the effect.
+Keybinding helpers record the binding Hypervisor installed. The retract path
+unsets that binding when it is still current, which prevents deleted or moved
+config from leaving stale keybindings behind.
 
 Supported source forms normalize into one helper:
 
@@ -191,8 +191,8 @@ Supported source forms normalize into one helper:
 
 The register function stores the exact runtime keymap object in a session-local
 state table so retracting does not serialize large keymaps into the effect
-record. Before retraction it checks whether the current binding still matches
-the Hypervisor-installed binding. If another package or user action changed the
+record. Before cleanup it checks whether the current binding still matches the
+Hypervisor-installed binding. If another package or user action changed the
 binding, cleanup is skipped and a warning is displayed instead of clobbering the
 external change.
 
@@ -306,7 +306,7 @@ Covered by tests:
 - lambda hook functions preserve closures and are removed by generated symbol
 - symbol advice functions are added, recorded, and removed
 - lambda advice functions preserve closures and are removed by generated symbol
-- keybindings are added, recorded, restored, unset, and guarded against
+- keybindings are added, recorded, unset when stale, and guarded against
   external divergence
 
 ### Supported Call Rewrites

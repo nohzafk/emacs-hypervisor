@@ -168,7 +168,7 @@ calls.
 
 A `cl-defun` in the effect-kind module that:
 
-1. Captures any state needed for retraction (previous binding, previous
+1. Captures any state needed for retraction (installed definition, previous
    value, timer object, etc.)
 2. Applies the effect
 3. Builds a retract form as a quoted s-expression
@@ -249,24 +249,22 @@ actual keymap object).
 
 **Retract strategy:**
 
-1. At apply time, snapshot the previous binding:
-   `(keymap-lookup MAP KEY)` (Emacs 29+) or `(lookup-key MAP KEY)`
-2. Apply the new binding
-3. Retract form: if previous binding was nil, use `(keymap-unset MAP KEY)`
-   (Emacs 29+) or `(define-key MAP KEY nil)`. If previous binding existed,
-   restore it with `keymap-set`/`define-key`.
+1. Apply the new binding.
+2. Record the installed definition and exact runtime keymap object.
+3. Retract form: unset the key if the current binding still equals the
+   Hypervisor-installed definition.
 4. **Divergence guard:** before retract, check if the current binding
    still equals what Hypervisor installed. If something external changed
    it, skip retraction and log a warning instead of clobbering the
    external change.
 
-**`:metadata`:** `(:key KEY :previous-binding PREV)`
+**`:metadata`:** `(:key KEY :state-id STATE-ID)`
 
 **Test expectations:**
 
 - Keybinding is installed and recorded in registry
 - Reload retracts old binding and installs new one
-- Removed unit restores previous binding (or unsets if none)
+- Removed unit unsets the stale Hypervisor-owned binding
 - Externally changed binding is not clobbered on retract
 - `global-set-key` and `keymap-set` both work
 - Keybinding inside `dolist` records one effect per iteration

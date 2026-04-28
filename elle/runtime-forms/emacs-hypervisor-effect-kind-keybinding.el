@@ -115,19 +115,9 @@
    (emacs-hypervisor-effect-registry--safe-name-component key)
    emacs-hypervisor-effect-kind-keybinding--state-counter))
 
-(defun emacs-hypervisor-effect-kind-keybinding--restore
-    (map key operator previous-binding had-previous-binding)
-  (if had-previous-binding
-      (emacs-hypervisor-effect-kind-keybinding--set
-       map
-       key
-       previous-binding
-       operator)
-    (emacs-hypervisor-effect-kind-keybinding--unset map key operator)))
-
 (defun emacs-hypervisor-effect-kind-keybinding--retract
     (state-id)
-  "Retract keybinding effect STATE-ID if the binding has not diverged."
+  "Remove keybinding effect STATE-ID if the binding has not diverged."
   (let ((state
          (gethash state-id
                   emacs-hypervisor-effect-kind-keybinding--states)))
@@ -137,9 +127,6 @@
            (key (plist-get state :key))
            (operator (plist-get state :operator))
            (definition (plist-get state :definition))
-           (previous-binding (plist-get state :previous-binding))
-           (had-previous-binding
-            (plist-get state :had-previous-binding))
            (current
             (emacs-hypervisor-effect-kind-keybinding--lookup
              map
@@ -148,12 +135,10 @@
       (unwind-protect
           (if (equal current definition)
               (progn
-                (emacs-hypervisor-effect-kind-keybinding--restore
+                (emacs-hypervisor-effect-kind-keybinding--unset
                  map
                  key
-                 operator
-                 previous-binding
-                 had-previous-binding)
+                 operator)
                 t)
             (display-warning
              'emacs-hypervisor
@@ -171,13 +156,7 @@
 (cl-defun emacs-hypervisor-register-keybinding-effect
     (&key unit operator map map-form key definition source)
   "Install and record a keybinding effect."
-  (let* ((previous-binding
-          (emacs-hypervisor-effect-kind-keybinding--lookup
-           map
-           key
-           operator))
-         (had-previous-binding (not (null previous-binding)))
-         (state-id
+  (let* ((state-id
           (emacs-hypervisor-effect-kind-keybinding--next-state-id
            unit
            key))
@@ -203,9 +182,7 @@
                  :map map
                  :map-form map-form
                  :key key
-                 :definition definition
-                 :previous-binding previous-binding
-                 :had-previous-binding had-previous-binding)
+                 :definition definition)
            emacs-hypervisor-effect-kind-keybinding--states)
           (emacs-hypervisor-effect-registry-record
            (list
@@ -225,8 +202,6 @@
             (list :operator operator
                   :map map-form
                   :key key
-                  :previous-binding previous-binding
-                  :had-previous-binding had-previous-binding
                   :state-id state-id))))
       (error
        (remhash state-id
