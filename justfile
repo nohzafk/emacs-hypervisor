@@ -16,7 +16,11 @@ build: bootstrap-elle
 install bin_dir="$HOME/.local/bin": build
     just build
     mkdir -p "{{bin_dir}}"
+    rm -f "{{bin_dir}}/emacs-hypervisor"
     cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"
+    if [ "$(uname)" = "Darwin" ]; then \
+      codesign --force --sign - "{{bin_dir}}/emacs-hypervisor"; \
+    fi
 
 [group('Build')]
 build-debug:
