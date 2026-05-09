@@ -167,4 +167,25 @@ that should not prevent local config reloads."
    :reports (length emacs-hypervisor--report-messages)
    :messages (length emacs-hypervisor--message-log)))
 
+(defun emacs-hypervisor-readiness ()
+  "Return the public readiness state for external launchers.
+
+The return value is one of:
+
+- `ready' when the Hypervisor startup session completed successfully.
+- `failed' when the Hypervisor startup session completed with a failure.
+- `loading' while startup has not finished yet.
+
+External clients such as Hammerspoon should use this function instead of
+reading private Hypervisor session variables."
+  (cond
+   ((and emacs-hypervisor--completed
+         (eq emacs-hypervisor--state :completed))
+    'ready)
+   ((and emacs-hypervisor--completed
+         (eq emacs-hypervisor--state :failed))
+    'failed)
+   (t
+    'loading)))
+
 (provide 'emacs-hypervisor-session-state)

@@ -376,6 +376,17 @@
       (should (emacs-hypervisor-live-p))
       (should (emacs-hypervisor-session-active-p)))))
 
+(ert-deftest emacs-hypervisor-readiness-reports-public-session-state ()
+  (let ((emacs-hypervisor--state :running)
+        (emacs-hypervisor--completed nil))
+    (should (eq (emacs-hypervisor-readiness) 'loading)))
+  (let ((emacs-hypervisor--state :completed)
+        (emacs-hypervisor--completed t))
+    (should (eq (emacs-hypervisor-readiness) 'ready)))
+  (let ((emacs-hypervisor--state :failed)
+        (emacs-hypervisor--completed t))
+    (should (eq (emacs-hypervisor-readiness) 'failed))))
+
 (ert-deftest emacs-hypervisor-selective-reload-diffs-and-runs-only-needed-units ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
          (previous
