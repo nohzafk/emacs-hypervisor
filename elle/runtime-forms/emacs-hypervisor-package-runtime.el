@@ -33,11 +33,12 @@
     (when reason (list :reason reason)))))
 
 (defun emacs-hypervisor-runtime-package-installed (name)
-  (push name emacs-hypervisor-installed-packages)
-  (push (list :phase :packages :event :installed :name name)
-        emacs-hypervisor-execution-events)
-  (emacs-hypervisor-runtime-note-package-event :installed name)
-  (emacs-hypervisor-runtime-send-package-installed name))
+  (unless (member name emacs-hypervisor-installed-packages)
+    (push name emacs-hypervisor-installed-packages)
+    (push (list :phase :packages :event :installed :name name)
+          emacs-hypervisor-execution-events)
+    (emacs-hypervisor-runtime-note-package-event :installed name)
+    (emacs-hypervisor-runtime-send-package-installed name)))
 
 (defun emacs-hypervisor-runtime-packages-finished (&optional reason)
   (push (list :phase :packages :event :finished :reason reason)
@@ -101,17 +102,64 @@
 (defun emacs-hypervisor-runtime-package-callback (name)
   (emacs-hypervisor-runtime-report-package-installed name))
 
+(defun emacs-hypervisor-runtime-package-error-reason (err)
+  "Return a compact package processing failure reason for ERR."
+  (format "%S" err))
+
+(defun emacs-hypervisor-runtime--package-name-string (name)
+  "Return NAME as the string form used in Hypervisor package reports."
+  (if (symbolp name)
+      (symbol-name name)
+    (format "%s" name)))
+
+(defun emacs-hypervisor-runtime-queued-package-names ()
+  "Return names for packages currently known to Elpaca's queue."
+  (when (fboundp 'elpaca--queued)
+    (mapcar (lambda (queued)
+              (emacs-hypervisor-runtime--package-name-string (car queued)))
+            (elpaca--queued))))
+
+(defun emacs-hypervisor-runtime-package-entry-failed-p (entry)
+  "Return non-nil when Elpaca ENTRY is already marked failed."
+  (and (fboundp 'elpaca--status)
+       (eq (elpaca--status entry) 'failed)))
+
+(defun emacs-hypervisor-runtime-package-entry-source-ready-p (entry)
+  "Return non-nil when Elpaca ENTRY has an existing source directory."
+  (and (fboundp 'elpaca<-source-dir)
+       (let ((source-dir (elpaca<-source-dir entry)))
+         (and source-dir (file-directory-p source-dir)))))
+
+(defun emacs-hypervisor-runtime-package-entry-build-ready-p (entry)
+  "Return non-nil when Elpaca ENTRY's build output is already present."
+  (or (and (fboundp 'elpaca<-builtp)
+           (elpaca<-builtp entry))
+      (and (fboundp 'elpaca<-build-dir)
+           (let ((build-dir (elpaca<-build-dir entry)))
+             (and build-dir (file-directory-p build-dir))))
+      (not (fboundp 'elpaca<-build-dir))))
+
+(defun emacs-hypervisor-runtime-package-entry-ready-p (entry)
+  "Return non-nil when queued Elpaca ENTRY does not need install work."
+  (and (emacs-hypervisor-runtime-package-entry-source-ready-p entry)
+       (emacs-hypervisor-runtime-package-entry-build-ready-p entry)
+       (not (emacs-hypervisor-runtime-package-entry-failed-p entry))))
+
+(defun emacs-hypervisor-runtime-report-ready-packages-installed ()
+  "Emit installed events for queued packages that are already present."
+  (when (fboundp 'elpaca--queued)
+    (dolist (queued (elpaca--queued))
+      (let ((name (emacs-hypervisor-runtime--package-name-string (car queued)))
+            (entry (cdr queued)))
+        (when (emacs-hypervisor-runtime-package-entry-ready-p entry)
+          (emacs-hypervisor-runtime-package-installed name))))))
+
 (defun emacs-hypervisor-runtime-package-work-required-p ()
   "Return non-nil when queued Elpaca entries need visible package downloads."
   (and (fboundp 'elpaca--queued)
-       (fboundp 'elpaca<-source-dir)
        (cl-some
         (lambda (queued)
-          (let ((entry (cdr queued)))
-            (or (let ((source-dir (elpaca<-source-dir entry)))
-                  (not (and source-dir (file-directory-p source-dir))))
-                (and (fboundp 'elpaca--status)
-                     (eq (elpaca--status entry) 'failed)))))
+          (not (emacs-hypervisor-runtime-package-entry-ready-p (cdr queued))))
         (elpaca--queued))))
 
 (defun emacs-hypervisor-runtime-suppress-initial-elpaca-log-when-sources-present ()
@@ -138,6 +186,22 @@
   "Restore INITIAL-CHOICE after a package queue with no package work."
   (setq initial-buffer-choice initial-choice)
   (emacs-hypervisor-runtime--bury-elpaca-log))
+
+(defun emacs-hypervisor-runtime-run-package-queue
+    (package-work-required initial-choice)
+  "Process Elpaca queues and report a terminal package event on errors."
+  (condition-case err
+      (progn
+        (elpaca-process-queues)
+        (unless package-work-required
+          (emacs-hypervisor-runtime-finish-noop-package-queue initial-choice))
+        :processed)
+    (error
+     (emacs-hypervisor-runtime-notify-packages-finished
+      (emacs-hypervisor-runtime-package-error-reason err))
+     (unless package-work-required
+       (emacs-hypervisor-runtime-finish-noop-package-queue initial-choice))
+     :failed)))
 
 (defun emacs-hypervisor-runtime-ensure-package-manager ()
   "Ensure Elpaca is ready before queueing or processing package work."
@@ -179,9 +243,10 @@
         (package-work-required
          (emacs-hypervisor-runtime-package-work-required-p)))
     (emacs-hypervisor-runtime-begin-package-installation)
-    (elpaca-process-queues)
-    (unless package-work-required
-      (emacs-hypervisor-runtime-finish-noop-package-queue initial-choice)))
+    (emacs-hypervisor-runtime-report-ready-packages-installed)
+    (emacs-hypervisor-runtime-run-package-queue
+     package-work-required
+     initial-choice))
   :processing)
 
 (emacs-hypervisor-runtime-cancel-package-timeout)

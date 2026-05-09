@@ -484,8 +484,8 @@
         {:result process-result
          :installed installed
          :reason reason}
-        {:installed ()
-         :reason queue-start-error})))
+        {:installed installed
+         :reason (or reason queue-start-error)})))
 
   (defn unit-execution-details [entry]
     {:requires (graph:entry-field entry :requires)

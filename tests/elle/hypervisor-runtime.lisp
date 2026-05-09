@@ -360,6 +360,44 @@
     (assert (= (get (get blocked :details) :blockers) (list "runtime-fail-pkg")) "tracker blocked details")))
 (println "  3. tracker execution: ok")
 
+(let* [{:reports planned-package-reports}
+       (policy:derive-package-reports packages)
+       package-plan (planning:derive-package-plan packages planned-package-reports)]
+  (reset-stub-state)
+  (push stub-await-responses
+        (stub-response 40 true (list {:name "core-pkg" :status :queued}
+                                     {:name "runtime-fail-pkg" :status :queued})))
+  (push stub-await-responses
+        (stub-response 41 true (list {:name "ui-pkg" :status :queued}
+                                     {:name "runtime-fail-dependent" :status :queued})))
+  (push stub-read-messages
+        (stub-event :package
+                    {:phase :packages :kind :installed :name "core-pkg"}))
+  (push stub-read-messages
+        (stub-response 42 false nil :error "elpaca process failed"))
+  (let* [{:reports package-reports
+          :installed installed
+          :finished-reason finished-reason
+          :next-id next-id}
+         (execution:execute-package-entry-plan-tracker
+          (planning:plan-items package-plan)
+          40)
+         core (graph:find-entry package-reports "core-pkg")
+         ui (graph:find-entry package-reports "ui-pkg")
+         runtime-fail (graph:find-entry package-reports "runtime-fail-pkg")
+         blocked (graph:find-entry package-reports "runtime-fail-dependent")]
+    (assert (= next-id 43) "tracker failed process next id")
+    (assert (= installed (list "core-pkg")) "tracker preserves installed before process failure")
+    (assert (= finished-reason (list :queue-start-error "elpaca process failed"))
+            "tracker exposes failed process reason")
+    (assert (= (get core :status) :ok) "tracker keeps installed package ok after process failure")
+    (assert (= (get ui :status) :failed) "tracker fails non-installed package after process failure")
+    (assert (= (get (get ui :details) :source) :queue) "tracker failure source is queue")
+    (assert (= (get (get ui :details) :error) "elpaca process failed") "tracker failure error detail")
+    (assert (= (get runtime-fail :status) :failed) "tracker fails missing root after process failure")
+    (assert (= (get blocked :status) :skipped) "tracker blocks dependents after process failure")))
+(println "  3b. tracker process failure preserves installed events: ok")
+
 (reset-stub-state)
 (let [{:reports reports :installed installed :next-id next-id}
       (execution:execute-package-entry-plan-tracker () 30)]
@@ -367,7 +405,7 @@
   (assert (empty? reports) "empty package plan has no reports")
   (assert (empty? installed) "empty package plan has no installed packages")
   (assert (= (length stub-sent-requests) 0) "empty package plan sends no eval requests"))
-(println "  3b. empty package plan: ok")
+(println "  3c. empty package plan: ok")
 
 # ============================================================================
 # 4. Unit execution preserves runtime failure propagation.
