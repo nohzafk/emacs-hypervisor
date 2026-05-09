@@ -84,6 +84,7 @@ Failure:
 | `:plan` | Elle | Execution plans for packages and units |
 | `:progress` | Elle | Step-by-step progress updates during startup |
 | `:log` | Elle | Informational log messages |
+| `:warning` | Elle | User-visible startup warning to record and display in Emacs |
 | `:report` | Elle | Planned and executed report items |
 | `:metric` | Elle | Benchmark timing data (when enabled) |
 | `:package` | Emacs | Elpaca package install/finish/timeout events |
@@ -155,6 +156,10 @@ runtime crashes:
 | `:ui` | `batch` or `interactive` |
 | `:transport` | `s-expression` |
 | `:benchmark-enabled` | Whether to emit `:metric` events |
+| `:binary` | Resolved `emacs-hypervisor` binary path |
+| `:init-file` | Generated home `init.el` path |
+| `:init-generated` | Whether the home `init.el` has the Hypervisor generated marker |
+| `:init-content-hash` | Content hash recorded in the generated `init.el`, when present |
 
 ## Mailbox
 

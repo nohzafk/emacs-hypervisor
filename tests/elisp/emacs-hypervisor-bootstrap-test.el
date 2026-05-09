@@ -16,6 +16,7 @@
 (defvar emacs-hypervisor-execution-events nil)
 (defvar emacs-hypervisor-test-runtime-value nil)
 (defvar emacs-hypervisor-test-unchanged-counter nil)
+(defvar emacs-hypervisor-home-directory nil)
 
 (defun emacs-hypervisor-elpaca-bootstrap ()
   t)
@@ -91,6 +92,64 @@
   (cl-find name reports
            :key (lambda (entry) (plist-get entry :name))
            :test #'equal))
+
+(defun emacs-hypervisor-test--eval-home-startup-functions ()
+  (let ((source
+         (expand-file-name
+          "../../host/emacs-kernel/home-startup.el"
+          emacs-hypervisor-test--source-directory)))
+    (with-temp-buffer
+      (insert-file-contents source)
+      (goto-char (point-min))
+      (let (form done)
+        (while (not done)
+          (setq form (read (current-buffer)))
+          (cond
+           ((and (consp form) (eq (car form) 'cond))
+            (setq done t))
+           ((and (consp form) (eq (car form) 'defun))
+            (eval form t))))))))
+
+(ert-deftest emacs-hypervisor-home-startup-init-metadata-reads-generated-header ()
+  (emacs-hypervisor-test--eval-home-startup-functions)
+  (let* ((home (file-name-as-directory
+                (make-temp-file "emacs-hypervisor-home" t)))
+         (init-file (expand-file-name "init.el" home))
+         (emacs-hypervisor-home-directory home))
+    (unwind-protect
+        (progn
+          (with-temp-file init-file
+            (insert ";;; init.el --- Generated test init\n")
+            (insert ";; emacs-hypervisor-generated: t\n")
+            (insert ";; emacs-hypervisor-content-hash: fnv1a64:test\n"))
+          (let ((metadata (emacs-hypervisor--init-metadata)))
+            (should (equal (plist-get metadata :init-file) init-file))
+            (should (eq (plist-get metadata :init-generated) t))
+            (should (equal (plist-get metadata :init-content-hash)
+                           "fnv1a64:test"))))
+      (delete-directory home t))))
+
+(ert-deftest emacs-hypervisor-dispatch-rpc-event-records-warning ()
+  (let (warnings)
+    (emacs-hypervisor-reset)
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (type message &optional level buffer-name)
+                 (push (list type message level buffer-name) warnings))))
+      (let ((noninteractive nil))
+        (emacs-hypervisor--dispatch
+         (emacs-hypervisor-test--event
+          :warning
+          '(:kind :bootstrap-hash
+                  :level :warning
+                  :message "generated init.el is stale"
+                  :current-hash "old"
+                  :expected-hash "new")))))
+    (let ((status (emacs-hypervisor-status)))
+      (should (equal (plist-get (car (plist-get status :warnings)) :message)
+                     "generated init.el is stale")))
+    (should (equal (caar warnings) 'emacs-hypervisor))
+    (should (equal (cadar warnings) "generated init.el is stale"))
+    (should (eq (caddar warnings) :warning))))
 
 (ert-deftest emacs-hypervisor-generated-early-init-loads-fixed-xdg-file ()
   (let* ((xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))

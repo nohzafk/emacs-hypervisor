@@ -169,7 +169,53 @@
   (defn emit-report-message [stage phase reports]
     (protocol:send-report stage phase (protocol:to-wire reports)))
 
+  (defn init-upgrade-command [binary home]
+    (string
+     (or binary "emacs-hypervisor")
+     " init --home "
+     (or home "~/.config/emacs")
+     " --upgrade"))
+
+  (defn bootstrap-warning [boot-context expected-hash]
+    (let [current-hash (get boot-context :init-content-hash)
+          generated? (get boot-context :init-generated)
+          binary (get boot-context :binary)
+          home (get boot-context :repo-dir)
+          init-file (get boot-context :init-file)
+          upgrade-command (init-upgrade-command binary home)]
+      (cond
+       (not generated?)
+        nil
+       (nil? expected-hash)
+        nil
+       (nil? current-hash)
+        {:kind :bootstrap-hash
+         :level :warning
+         :message (string "generated init.el has no content hash; run `" upgrade-command "`")
+         :expected-hash expected-hash
+         :binary binary
+         :home home
+         :init-file init-file}
+       (not (= current-hash expected-hash))
+        {:kind :bootstrap-hash
+         :level :warning
+         :message (string "generated init.el is stale; run `" upgrade-command "`")
+         :current-hash current-hash
+         :expected-hash expected-hash
+         :binary binary
+         :home home
+         :init-file init-file}
+       true
+        nil)))
+
+  (defn emit-bootstrap-warning [boot-context expected-hash]
+    (if-let [warning (bootstrap-warning boot-context expected-hash)]
+      (protocol:send-event :warning (protocol:to-wire warning))
+      nil))
+
   {:derive-package-reports derive-package-reports
    :derive-unit-reports derive-unit-reports
+   :bootstrap-warning bootstrap-warning
+   :emit-bootstrap-warning emit-bootstrap-warning
    :emit-report-message emit-report-message
    :emit-report-logs emit-report-logs})

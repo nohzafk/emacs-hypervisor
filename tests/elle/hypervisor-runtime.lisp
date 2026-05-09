@@ -220,6 +220,63 @@
 (println "  0. protocol arrays and session decoding: ok")
 
 # ============================================================================
+# 0b. Boot policy derives stale init warnings from boot context.
+# ============================================================================
+
+(let* [warning
+       (policy:bootstrap-warning
+        {:init-generated true
+         :init-content-hash "fnv1a64:old"
+         :init-file "/tmp/home/init.el"
+         :binary "/tmp/bin/emacs-hypervisor"
+         :repo-dir "/tmp/home"}
+        "fnv1a64:new")]
+  (assert warning "boot-policy reports stale generated init")
+  (assert (= (get warning :kind) :bootstrap-hash) "bootstrap warning kind")
+  (assert (= (get warning :current-hash) "fnv1a64:old") "bootstrap warning current hash")
+  (assert (= (get warning :expected-hash) "fnv1a64:new") "bootstrap warning expected hash")
+  (assert
+   (string/contains? (get warning :message) "init --home /tmp/home --upgrade")
+   "bootstrap warning includes upgrade command"))
+
+(assert
+ (nil?
+  (policy:bootstrap-warning
+   {:init-generated true
+    :init-content-hash "fnv1a64:new"
+    :binary "/tmp/bin/emacs-hypervisor"
+    :repo-dir "/tmp/home"}
+   "fnv1a64:new"))
+ "boot-policy suppresses warning for matching init hash")
+
+(assert
+ (nil?
+  (policy:bootstrap-warning
+   {:init-generated false
+    :init-content-hash "fnv1a64:old"
+    :binary "/tmp/bin/emacs-hypervisor"
+    :repo-dir "/tmp/home"}
+   "fnv1a64:new"))
+ "boot-policy suppresses warning for unmanaged init")
+
+(reset-stub-state)
+(policy:emit-bootstrap-warning
+ {:init-generated true
+  :init-content-hash nil
+  :init-file "/tmp/home/init.el"
+  :binary "/tmp/bin/emacs-hypervisor"
+  :repo-dir "/tmp/home"}
+ "fnv1a64:new")
+(assert (= (length stub-sent-events) 1) "boot-policy emits one warning event")
+(assert (= (get (get stub-sent-events 0) :topic) :warning) "boot-policy emits :warning topic")
+(assert
+ (string/contains?
+  (get (get (get stub-sent-events 0) :payload) :message)
+  "has no content hash")
+ "boot-policy missing-hash warning message")
+(println "  0b. bootstrap warning policy: ok")
+
+# ============================================================================
 # 1. Boot policy preserves invalid, blocked, and preflight detail shapes.
 # ============================================================================
 

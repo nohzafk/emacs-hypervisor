@@ -200,6 +200,10 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
 ];
 
 fn install_elisp_modules() -> Result<(), String> {
+    env::set_var(
+        "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH",
+        generated_init_hash(),
+    );
     for module in PACKED_ELISP_MODULES {
         env::set_var(module.env_name, module.embedded_forms);
     }

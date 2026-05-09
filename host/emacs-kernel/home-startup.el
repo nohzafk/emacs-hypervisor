@@ -63,12 +63,6 @@
                  (concat "Could not find `emacs-hypervisor' via "
                          "EMACS_HYPERVISOR_BIN or PATH"))))))
 
-(defun emacs-hypervisor--trim-string (value)
-  "Return VALUE without leading or trailing ASCII whitespace."
-  (replace-regexp-in-string
-   "\\`[ \t\r\n]+\\|[ \t\r\n]+\\'" ""
-   value))
-
 (defun emacs-hypervisor--generated-init-file ()
   "Return the generated init.el path for the current Hypervisor home."
   (expand-file-name "init.el" emacs-hypervisor-home-directory))
@@ -86,51 +80,21 @@
                t)
           (match-string 1))))))
 
-(defun emacs-hypervisor--binary-bootstrap-hash (binary)
-  "Ask BINARY for the init.el bootstrap hash it would generate."
-  (with-temp-buffer
-    (when (= (call-process binary nil t nil "bootstrap-hash") 0)
-      (emacs-hypervisor--trim-string (buffer-string)))))
+(defun emacs-hypervisor--generated-init-file-p ()
+  "Return non-nil when the current init.el is Hypervisor-generated."
+  (let ((init-file (emacs-hypervisor--generated-init-file)))
+    (when (file-exists-p init-file)
+      (with-temp-buffer
+        (insert-file-contents init-file nil 0 4096)
+        (goto-char (point-min))
+        (re-search-forward "^;; emacs-hypervisor-generated: t$" nil t)))))
 
-(defun emacs-hypervisor--record-bootstrap-warning (message &rest details)
-  "Record and display a bootstrap warning MESSAGE with DETAILS."
-  (apply #'emacs-hypervisor-record-startup-warning
-         :bootstrap-hash
-         message
-         details)
-  (unless noninteractive
-    (message "[Hypervisor] warning: %s" message)))
-
-(defun emacs-hypervisor-check-bootstrap-hash ()
-  "Warn when generated init.el does not match the current binary."
-  (let* ((binary (emacs-hypervisor-resolve-binary))
-         (current-hash (emacs-hypervisor--current-init-content-hash))
-         (expected-hash (emacs-hypervisor--binary-bootstrap-hash binary))
-         (upgrade-command
-          (format "%s init --home %s --upgrade"
-                  binary
-                  (directory-file-name emacs-hypervisor-home-directory))))
-    (cond
-     ((and current-hash expected-hash (not (equal current-hash expected-hash)))
-      (emacs-hypervisor--record-bootstrap-warning
-       (format "generated init.el is stale; run `%s`" upgrade-command)
-       :current-hash current-hash
-       :expected-hash expected-hash
-       :binary binary
-       :home emacs-hypervisor-home-directory))
-     ((and (null current-hash) expected-hash)
-      (emacs-hypervisor--record-bootstrap-warning
-       (format "generated init.el has no content hash; run `%s`" upgrade-command)
-       :expected-hash expected-hash
-       :binary binary
-       :home emacs-hypervisor-home-directory))
-     ((and current-hash (null expected-hash))
-      (emacs-hypervisor--record-bootstrap-warning
-       (format "could not read bootstrap hash from `%s`; reinstall the current binary"
-               binary)
-       :current-hash current-hash
-       :binary binary
-       :home emacs-hypervisor-home-directory)))))
+(defun emacs-hypervisor--init-metadata ()
+  "Return metadata about the generated init.el used for boot policy."
+  (list
+   :init-file (emacs-hypervisor--generated-init-file)
+   :init-generated (not (null (emacs-hypervisor--generated-init-file-p)))
+   :init-content-hash (emacs-hypervisor--current-init-content-hash)))
 
 (defun emacs-hypervisor-empty-session-data (&optional fields)
   "Return an explicit empty session-data payload."
@@ -154,19 +118,21 @@
   (emacs-hypervisor-reset)
   (emacs-hypervisor-load-envvars-file emacs-hypervisor-env-file t)
   (emacs-hypervisor-resolve-binary)
-  (emacs-hypervisor-check-bootstrap-hash)
   (setq emacs-hypervisor-context-function
         (lambda ()
-          (append
-           (list
-            :session-name "user-home-init"
-            :config-file emacs-hypervisor-config-file
-            :ui (if noninteractive 'batch 'interactive)
-            :transport 's-expression
-            :benchmark-enabled nil
-            :repo-dir emacs-hypervisor-home-directory)
-           (when (file-exists-p emacs-hypervisor-config-org-file)
-             (list :config-org-file emacs-hypervisor-config-org-file)))))
+          (let ((init-metadata (emacs-hypervisor--init-metadata)))
+            (append
+             (list
+              :session-name "user-home-init"
+              :config-file emacs-hypervisor-config-file
+              :ui (if noninteractive 'batch 'interactive)
+              :transport 's-expression
+              :benchmark-enabled nil
+              :repo-dir emacs-hypervisor-home-directory
+              :binary emacs-hypervisor-binary)
+             init-metadata
+             (when (file-exists-p emacs-hypervisor-config-org-file)
+               (list :config-org-file emacs-hypervisor-config-org-file))))))
   (setq emacs-hypervisor-session-data-function
         (lambda (&optional fields)
           (or (and (fboundp 'emacs-hypervisor-export-session-data)

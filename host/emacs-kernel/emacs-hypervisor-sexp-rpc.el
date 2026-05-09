@@ -195,6 +195,26 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
   (let* ((topic (emacs-hypervisor--rpc-topic message))
          (payload (emacs-hypervisor--rpc-payload message)))
     (pcase topic
+      (:warning
+       (let ((message (or (plist-get payload :message)
+                          "startup warning"))
+             (kind (or (plist-get payload :kind)
+                       :startup))
+             (level (or (plist-get payload :level)
+                        :warning))
+             details)
+         (while payload
+           (let ((key (pop payload))
+                 (value (pop payload)))
+             (unless (memq key '(:kind :message))
+               (setq details (append details (list key value))))))
+         (apply #'emacs-hypervisor-record-startup-warning
+                kind
+                message
+                details)
+         (unless noninteractive
+           (display-warning 'emacs-hypervisor message level)))
+       t)
       (:plan
        (push (append '(:plan) payload) emacs-hypervisor--plan-messages)
        (emacs-hypervisor--report-call 'emacs-hypervisor-report-note-plan)

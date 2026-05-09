@@ -69,6 +69,7 @@
           boot-config-file (get boot-context :config-file)
           boot-config-org-file (get boot-context :config-org-file)
           boot-repo-dir (get boot-context :repo-dir)
+          boot-expected-init-hash (sys/env "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH")
           report-core-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_FORMS"
@@ -145,6 +146,7 @@
           execution
           (emacs-hypervisor-execution-module protocol graph mailbox benchmark)
           session-name (or boot-session-name "hypervisor-session")]
+     (policy:emit-bootstrap-warning boot-context boot-expected-init-hash)
      (protocol:send-event
       :log
       `(:level :info
