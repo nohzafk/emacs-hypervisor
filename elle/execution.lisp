@@ -2,9 +2,6 @@
 
 (defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]
 
-  (defn member? [xs value]
-    (any? (fn [item] (= item value)) xs))
-
   (defn append-plist-field [fields key value]
     (if value
       (append fields (list key value))
@@ -180,12 +177,12 @@
     (let [removed-names (map (fn [{:name name}] name) removed-plan-items)]
       (filter
        (fn [{:name name}]
-         (not (member? removed-names name)))
+         (not (graph:member? removed-names name)))
        plan-items)))
 
   (defn blocked-package-entry-report
       [{:entry entry :name name} queued-package-reports]
-    (blocked-report
+    (graph:blocked-report
      name
      :blocked-by-package
      (package-plan-item-blockers
@@ -247,13 +244,6 @@
          false))
      names))
 
-  (defn blocked-report [name reason blockers]
-    (graph:make-report
-     name
-     :skipped
-     reason
-     (graph:blocker-details blockers)))
-
   (defn report-state [next-id report]
     {:next-id next-id
      :report report})
@@ -261,7 +251,7 @@
   (defn blocked-report-state [name current-id reason blockers]
     (report-state
      current-id
-     (blocked-report name reason blockers)))
+     (graph:blocked-report name reason blockers)))
 
   (defn failed-eval-report [name error]
     (graph:make-report
@@ -352,7 +342,7 @@
          (= (protocol:message-id message) process-id)))
 
   (defn tracker-installed [installed name]
-    (if (member? installed name)
+    (if (graph:member? installed name)
       installed
       (cons name installed)))
 
@@ -441,7 +431,7 @@
        finished-reason]
     (let [queued-report (graph:find-entry queued-package-reports name)]
       (match [(queued-package-report? queued-report)
-              (member? installed-names name)]
+              (graph:member? installed-names name)]
         [false _]
          queued-report
         [true true]
@@ -455,7 +445,7 @@
              true
               (failed-package-report name finished-reason)
              _
-              (blocked-report name :blocked-by-package package-blockers))))))
+              (graph:blocked-report name :blocked-by-package package-blockers))))))
 
   (defn derive-tracker-package-reports
       [plan-items queued-package-reports installed-names finished-reason]

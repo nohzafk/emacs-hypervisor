@@ -102,6 +102,9 @@
   (defn blocker-details [blockers]
     {:blockers blockers})
 
+  (defn blocked-report [name reason blockers]
+    (make-report name :skipped reason (blocker-details blockers)))
+
   (defn preflight-details [env executable]
     {:env env :executable executable})
 
@@ -172,10 +175,11 @@
     (map (fn [entry] (find-entry reports (entry-name entry))) entries))
 
   {:all-known? all-known?
+   :blocked-report blocked-report
+   :blocker-details blocker-details
    :collect-missing-ref-entries collect-missing-ref-entries
    :cycle-names cycle-names
    :cycle-details cycle-details
-   :blocker-details blocker-details
    :entry-field entry-field
    :entry-name entry-name
    :find-entry find-entry
@@ -183,10 +187,12 @@
    :invalid-unit-report invalid-unit-report
    :known-names known-names
    :make-report make-report
+   :member? member?
    :missing-details missing-details
    :non-invalid-entries non-invalid-entries
    :non-nil-values non-nil-values
    :ordered-reports ordered-reports
    :preflight-details preflight-details
+   :remove-entry-by-name remove-entry-by-name
    :report-status report-status
    :resolve-reports-loop resolve-reports-loop})

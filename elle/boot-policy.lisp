@@ -14,13 +14,6 @@
          false))
      names))
 
-  (defn blocked-report [name reason blockers]
-    (graph:make-report
-     name
-     :skipped
-     reason
-     (graph:blocker-details blockers)))
-
   (defn ready-package-report [entry]
     (graph:make-report
      (graph:entry-name entry)
@@ -63,7 +56,7 @@
         true
          (ready-package-report entry)
         _
-         (blocked-report
+         (graph:blocked-report
           (graph:entry-name entry)
           :blocked-by-package
           blockers))))
@@ -103,12 +96,12 @@
               (empty? env-missing)
               (empty? executable-missing)]
         [false _ _ _]
-         (blocked-report
+         (graph:blocked-report
           (graph:entry-name entry)
           :blocked-by-package
           package-blockers)
         [true false _ _]
-         (blocked-report
+         (graph:blocked-report
           (graph:entry-name entry)
           :blocked-by-unit
           unit-blockers)

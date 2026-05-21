@@ -142,39 +142,28 @@
       (nth 2 (emacs-hypervisor--reload-effect-source-form effect))))
 
 (defun emacs-hypervisor--reload-format-effect (effect)
-  (pcase (plist-get effect :kind)
-    (:hook
-     (format
-      "hook %s -> %s"
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-target effect))
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-function effect))))
-    (:advice
-     (format
-      "advice %s %s -> %s"
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-target effect))
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-where effect))
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-function effect))))
-    (:keybinding
-     (format
-      "keybinding %s %s -> %s"
-      (emacs-hypervisor--reload-format-value
-       (plist-get (plist-get effect :metadata) :map))
-      (emacs-hypervisor--reload-format-value
-       (plist-get (plist-get effect :metadata) :key))
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-function effect))))
-    (:generated-function
-     (format
-      "generated function %s"
-      (emacs-hypervisor--reload-format-value
-       (emacs-hypervisor--reload-effect-function effect))))
-    (kind
-     (format "%s effect" (emacs-hypervisor--reload-format-value kind)))))
+  (cl-flet ((fmt (value) (emacs-hypervisor--reload-format-value value)))
+    (let ((metadata (plist-get effect :metadata)))
+      (pcase (plist-get effect :kind)
+        (:hook
+         (format "hook %s -> %s"
+                 (fmt (emacs-hypervisor--reload-effect-target effect))
+                 (fmt (emacs-hypervisor--reload-effect-function effect))))
+        (:advice
+         (format "advice %s %s -> %s"
+                 (fmt (emacs-hypervisor--reload-effect-target effect))
+                 (fmt (emacs-hypervisor--reload-effect-where effect))
+                 (fmt (emacs-hypervisor--reload-effect-function effect))))
+        (:keybinding
+         (format "keybinding %s %s -> %s"
+                 (fmt (plist-get metadata :map))
+                 (fmt (plist-get metadata :key))
+                 (fmt (emacs-hypervisor--reload-effect-function effect))))
+        (:generated-function
+         (format "generated function %s"
+                 (fmt (emacs-hypervisor--reload-effect-function effect))))
+        (kind
+         (format "%s effect" (fmt kind)))))))
 
 (defun emacs-hypervisor--reload-log-cleanup (name cleanup)
   (when cleanup
@@ -207,52 +196,48 @@
          (missing-env (emacs-hypervisor--missing-env entry))
          (missing-executables (emacs-hypervisor--missing-executables entry))
          (missing-features (emacs-hypervisor--missing-features entry)))
-    (cond
-     (pending-package-deps
-      (emacs-hypervisor--make-reload-report
-       name :skipped :pending-package-sync pending-package-deps action nil))
-     (missing-env
-      (emacs-hypervisor--make-reload-report
-       name :skipped :preflight
-       (list :env missing-env :executable nil) action nil))
-     (missing-executables
-      (emacs-hypervisor--make-reload-report
-       name :skipped :preflight
-       (list :env nil :executable missing-executables) action nil))
-     (missing-features
-      (emacs-hypervisor--make-reload-report
-       name :skipped :missing-required-features
-       missing-features action nil))
-     (t
-      (let ((cleanup (and previous-entry
-                          (emacs-hypervisor-effect-aware-reload-cleanup-unit
-                           name
-                           previous-entry))))
-        (emacs-hypervisor--reload-log-cleanup name cleanup)
-        (if (plist-get cleanup :failed)
-            (emacs-hypervisor--make-reload-report
-             name :failed :cleanup
-             (plist-get cleanup :failed)
-             action
-             cleanup)
-          (condition-case err
-              (progn
-                (eval (emacs-hypervisor--unit-body entry) t)
-                (emacs-hypervisor--reload-log
-                 "Reload %s unit: %s"
-                 (emacs-hypervisor--reload-action-verb action)
-                 name)
+    (cl-flet ((skipped (reason details)
                 (emacs-hypervisor--make-reload-report
-                 name :ok :applied
-                 (list :requires (emacs-hypervisor--unit-requires entry)
-                       :after (emacs-hypervisor--unit-after entry))
-                 action
-                 cleanup))
-            (error
-             (emacs-hypervisor--make-reload-report
-              name :failed :execution (format "%S" err)
-              action
-              cleanup)))))))))
+                 name :skipped reason details action nil)))
+      (cond
+       (pending-package-deps
+        (skipped :pending-package-sync pending-package-deps))
+       (missing-env
+        (skipped :preflight (list :env missing-env :executable nil)))
+       (missing-executables
+        (skipped :preflight (list :env nil :executable missing-executables)))
+       (missing-features
+        (skipped :missing-required-features missing-features))
+       (t
+        (let ((cleanup (and previous-entry
+                            (emacs-hypervisor-effect-aware-reload-cleanup-unit
+                             name
+                             previous-entry))))
+          (emacs-hypervisor--reload-log-cleanup name cleanup)
+          (if (plist-get cleanup :failed)
+              (emacs-hypervisor--make-reload-report
+               name :failed :cleanup
+               (plist-get cleanup :failed)
+               action
+               cleanup)
+            (condition-case err
+                (progn
+                  (eval (emacs-hypervisor--unit-body entry) t)
+                  (emacs-hypervisor--reload-log
+                   "Reload %s unit: %s"
+                   (emacs-hypervisor--reload-action-verb action)
+                   name)
+                  (emacs-hypervisor--make-reload-report
+                   name :ok :applied
+                   (list :requires (emacs-hypervisor--unit-requires entry)
+                         :after (emacs-hypervisor--unit-after entry))
+                   action
+                   cleanup))
+              (error
+               (emacs-hypervisor--make-reload-report
+                name :failed :execution (format "%S" err)
+                action
+                cleanup))))))))))
 
 (defun emacs-hypervisor--removed-unit-report (diff)
   (let* ((name (plist-get diff :name))
