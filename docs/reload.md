@@ -1,18 +1,18 @@
-# Selective Reload And Effect-Aware Reload
+# Reload
 
 Two related reload features wired together by
 `emacs-hypervisor-reload-config`.
 
-Selective reload applies only the `config-unit!` declarations that changed
+**Selective reload** applies only the `config-unit!` declarations that changed
 when a user edits `config.org` or `config.el` and reloads.
 
-Effect-aware reload cleans up the previous version of a changed or removed
-unit for recognized repeated operations, avoiding duplicate hooks, stale
-advice, stale keybindings, and reload drift.
+**Effect-aware reload** cleans up the previous version of a changed or removed
+unit for recognized effects, avoiding duplicate hooks, stale advice, stale
+keybindings, and reload drift.
 
-The supported effect set is deliberately narrow. Hypervisor currently supports
-`add-hook`, `advice-add`, and keybinding cleanup. Other side effects are left
-untracked.
+**Attention Conservation Notice.** For contributors working on reload, effect
+recognition, or runtime forms. Skip if you only need the user-facing reload
+behavior — see the [README](../README.md#reload).
 
 ## Design
 
@@ -21,9 +21,14 @@ behavior is pre-apply cleanup for recognized effects.
 
 > I can edit my Emacs config while Emacs is running, reload through
 > Hypervisor, and it will apply only the config units that changed. For
-> recognized repeated operations, Hypervisor cleans up the previous version
+> recognized effects, Hypervisor cleans up the previous version
 > before applying or removing a unit, avoiding duplicate hooks, stale advice,
 > stale keybindings, and reload drift.
+
+The supported effect set is deliberately narrow. Hypervisor currently supports
+`add-hook`, `advice-add`, and keybinding cleanup. Other side effects are left
+untracked. See [docs/effect-system.md](effect-system.md) for the full effect
+registry contract and extension guide.
 
 ## Data Model
 
@@ -65,7 +70,8 @@ Diff action shape:
 
 Cleanup uses runtime registry records created when a config unit is evaluated.
 Each record stores the owning unit, concrete target, concrete function symbol,
-source form, and an evaluable retract form. See [effect-registry.md](effect-registry.md).
+source form, and an evaluable retract form. See
+[docs/effect-system.md](effect-system.md) for the full record schema.
 
 There is no static cleanup fallback. If a previous unit has no active registry
 records, cleanup is a no-op for that unit and a restart clears any older live
@@ -94,7 +100,21 @@ package manager side effects. Local hooks with non-nil `LOCAL` are not tracked.
  :note NOTE)
 ```
 
-Example user messages:
+## Reload Integration
+
+Changed and removed units clean up through registry records only. A previous
+unit body without active registry records has no cleanup to run; restarting
+Emacs clears any older live state.
+
+During reload:
+
+1. Save the previous unit's effect records.
+2. Retract the previous records for changed or removed units.
+3. Evaluate the current unit.
+4. Record the current unit's newly applied effects.
+5. Report active, retracted, and failed registry effects.
+
+Reload logs the user-facing cleanup story as it runs:
 
 ```text
 [Hypervisor] Reload started
@@ -104,6 +124,13 @@ Example user messages:
 [Hypervisor] Reload re-applied unit: project-hooks
 [Hypervisor] Reload: 3 changed applied, 44 unchanged skipped, 3 old effects cleaned.
 ```
+
+Covered by tests:
+
+- current selective reload tests remain green
+- reload reports count registry-cleaned hook/advice/keybinding effects
+- reload logs start, cleaned effects, applied units, and summary
+- raw previous bodies without registry records do not synthesize cleanup
 
 ## API
 
@@ -193,12 +220,6 @@ Keybinding support:
 (keymap-global-set KEY DEFINITION)
 ```
 
-Keybinding cleanup unsets the binding Hypervisor installed when it is still the
-live binding. This prevents deleted or moved config from leaving stale
-keybindings behind. If the live binding no longer matches the
-Hypervisor-installed binding, cleanup skips the key and displays a warning
-instead of clobbering the external change.
-
 `FUNCTION` may be a symbol, function-quoted symbol, anonymous `(lambda ...)`,
 or anonymous `#'(lambda ...)`.
 
@@ -206,6 +227,12 @@ Anonymous lambdas are rewritten to a generated internal function name derived
 from the unit name, effect kind, concrete runtime target, and a hash of the
 function value. Cleanup uses the previous registry record, then removes the
 hook or advice by symbol.
+
+Keybinding cleanup unsets the binding Hypervisor installed when it is still the
+live binding. This prevents deleted or moved config from leaving stale
+keybindings behind. If the live binding no longer matches the
+Hypervisor-installed binding, cleanup skips the key and displays a warning
+instead of clobbering the external change.
 
 Unsupported source shapes outside the rewritten body positions are left
 untracked.

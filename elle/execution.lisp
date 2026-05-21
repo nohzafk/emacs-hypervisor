@@ -87,7 +87,7 @@
              `(:repo ,(expand-home-path repo)))
             (list
              no-compilation
-             '(:build (:not elpaca--byte-compile))))
+             '(:build (:not elpaca-build-compile))))
            recipe
            (reduce append-recipe-spec () recipe-specs)]
         (if (empty? recipe)

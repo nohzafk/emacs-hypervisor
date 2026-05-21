@@ -3,33 +3,40 @@
 A single native binary, written in [Elle](https://github.com/elle-lisp/elle)
 (a modern Lisp over Rust), for deterministic, reloadable Emacs configuration.
 
-Hypervisor is a small foundation for building your own config, not an Emacs
+Drop it on your `PATH`, point it at an Emacs home, and it generates a small
+trusted kernel that launches a Lisp-native control plane over stdio. No
+framework repo to clone, no external runtime.
+
+Hypervisor is a foundation for building your own config, not an Emacs
 distribution. You keep ownership of `config.org` (or `config.el`); Hypervisor
-provides the package declarations, config-unit declarations, dependency
-planning, reload support, and a Lisp-native control plane around Emacs.
+provides package declarations, config-unit declarations, dependency planning,
+reload support, and the orchestration runtime around Emacs.
 
-Today, Hypervisor tackles two sources of unpredictability in real-world Emacs
-configs:
+## Why Emacs Hypervisor
 
-**Deterministic startup.** Most Emacs configs are order-sensitive scripts where
-package installation, feature loading, and configuration blur together. A
-missing dependency or misordered `require` becomes an intermittent bug that
-surfaces hours later, hidden behind lazy loading, with no context about what
-went wrong.
+**Know your config is correct in five seconds, not two hours.** Most Emacs
+configs are order-sensitive scripts where a missing dependency or misordered
+`require` becomes an intermittent bug that surfaces hours later, hidden behind
+lazy loading, with no context. Hypervisor treats your config as a dependency
+graph --- topologically sorted, preflight-validated, and eagerly executed in
+deterministic order. If something is broken, you know at startup.
 
-Hypervisor treats your config as a **dependency graph**. It resolves packages
-and config units with topological sorting, runs preflight checks, and surfaces
-every failure in the first five seconds --- not two hours later.
+**Fail forward, not fail hard.** A single broken package or config unit does
+not take down the rest of your session. Failed packages skip their dependents;
+failed units skip their `:after` chain --- but everything else continues
+normally. The startup report shows exactly what failed, what was skipped, and
+why, so you can fix the one broken piece without restarting.
 
-**Dead effect cleanup.** Re-evaluating Elisp is easy; undoing what the old
-version did is not. A normal reload leaves duplicate hook entries, stale advice,
-stale keybindings, and orphaned anonymous functions. After enough reloads, the
-live session no longer matches the file you edited.
+**Reload without stale state.** Re-evaluating Elisp is easy; undoing what the
+old version did is not. A normal reload leaves duplicate hooks, stale advice,
+and orphaned keybindings. Hypervisor tracks `add-hook`, `advice-add`, and
+common keybinding forms as runtime effect records. On reload, it retracts the
+previous effects before applying the new version --- the live session matches
+the file you just edited.
 
-Hypervisor currently tracks `add-hook`, `advice-add`, and common keybinding
-forms as runtime effect records. On reload, it retracts the previous effects
-before applying the new version. This is the killer feature for daily editing in
-long-lived sessions.
+**Single binary, zero framework overhead.** One executable, no Rust toolchain,
+no framework repo to clone into your Emacs home. Your config lives in its own
+directory and is never overwritten by upgrades.
 
 ## User-Facing Model
 
@@ -45,144 +52,48 @@ not choose your packages, keybindings, UI, editing model, or workflow.
 
 ## Features
 
-- **Single binary** --- drop one executable on your `PATH`; no Rust toolchain,
-  no framework repo to clone, no external runtime.
-- **Generated bootstrap** --- a small trusted kernel in the Emacs home; your
-  config lives separately and is never overwritten.
 - **Literate config** --- write `config.org` and Hypervisor auto-tangles it at
   startup and reload; no manual tangle step needed.
 - **Elpaca-backed packages** --- `package!` declarations feed into Elpaca for
   async, reproducible installation.
-- **Topological sorting** --- packages and config units resolve in deterministic
-  order, eliminating the class of bugs caused by load-order sensitivity.
-- **Preflight checks** --- missing packages, circular dependencies, unset env
-  vars, missing executables, and absent features are caught *before* execution
-  begins.
-- **Eager, fail-fast startup** --- surface errors in the first five seconds
-  instead of hiding them behind lazy loading for hours.
+- **Preflight checks** --- circular dependencies, unset env vars, missing
+  executables, and absent features are caught *before* execution begins.
+- **Fault-tolerant execution** --- a failed package or unit skips its
+  dependents; independent units continue normally.
 - **Selective reload** --- edit one unit and apply only what changed, without
   replaying the entire config.
 - **Effect-aware reload** --- automatically clean old hooks, advice, and
-  keybindings before re-applying a changed unit, preventing the stale-state
-  drift that plagues long-lived sessions.
-- **Startup reports** --- progress events, package events, status inspection,
-  and optional metrics give you full visibility into what happened and why.
+  keybindings before re-applying a changed unit.
+- **Startup reports** --- progress events, package status, unit results, and
+  optional metrics give you full visibility into what happened and why.
 
-## Why Eager Startup
-
-Lazy loading is the default tradeoff in most Emacs configs: defer everything
-to make startup fast, and hope nothing is broken. The cost is that errors
-surface hours into a session --- in the middle of real work, with no context
-about what went wrong.
-
-Hypervisor takes the opposite tradeoff: resolve the entire dependency graph,
-run config units in deterministic order, and prove the config is internally
-consistent at startup. If something is broken, you know immediately.
-
-Eager does not mean force-loading every package. `:requires` should be used
-only when the body truly needs a feature loaded first (package-local variables,
-keymaps, macros, non-autoloaded functions). Hook registration, global
-keybindings, autoloaded commands, and pre-load-safe variable setup can all run
-eagerly without `:requires`.
-
-## Reload
-
-### Selective Reload
-
-`M-x emacs-hypervisor-reload-config` reloads `config.org`, when present, or
-`config.el` in a running session. It diffs the previous declarations against
-the new ones:
-
-- **Unchanged** units are skipped.
-- **New** and **changed** units are applied.
-- **Removed** units are not evaluated again.
-
-Edit one unit without replaying every package integration, mode setup, hook
-registration, and keybinding in your session.
-
-Reload emits a short transcript in `*Messages*` so effect-aware cleanup is
-visible while it happens:
-
-```text
-[Hypervisor] Reload started
-[Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
-[Hypervisor] Reload cleaned keybinding global-map C-c e -> eval-expression for editing-keys
-[Hypervisor] Reload re-applied unit: project-hooks
-[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 2 old effects cleaned.
-```
-
-### Effect-Aware Reload
-
-The killer feature is not that Hypervisor can re-evaluate config. Emacs can
-already do that. The hard problem is that Emacs config is full of mutation:
-`add-hook` appends to hook variables, `advice-add` changes function behavior,
-keybinding forms mutate keymaps, and anonymous functions create fresh objects
-every time they are evaluated. A normal reload is additive. Fix a hook body and
-the old one may still be there. Move advice from one target to another and both
-versions may keep running. Delete a keybinding and it may survive until restart.
-After enough reloads, the live Emacs session no longer matches the file you are
-editing.
-
-Effect-aware reload makes supported config effects explicit runtime records.
-Because config-unit bodies remain structured Lisp data, Hypervisor can walk the
-executable body positions and route recognized hooks, advice, and keybinding
-calls through an effect registry. The registry performs the real Emacs
-operation, then records what actually happened: the owning unit, effect kind,
-concrete target, installed function or definition, apply form, retract form, and
-metadata.
-
-On the next reload, changed and removed units are handled in two phases:
-
-1. Retract the previous active effect records for that unit.
-2. Apply the new unit body, recording its new effects.
+## Config Example
 
 ```elisp
+(package! magit)
+(package! transient
+  :repo "magit/transient"
+  :branch "main")
+
+(config-unit! magit-ui
+  :requires (magit)
+  :executable (git)
+  :config
+  (keymap-set global-map "C-x g" #'magit-status))
+
 (config-unit! project-hooks
+  :after (magit-ui)
   :config
-  (add-hook 'prog-mode-hook #'display-line-numbers-mode))
-
-(config-unit! save-behavior
-  :config
-  (advice-add 'save-buffer :before #'delete-trailing-whitespace))
-
-(config-unit! text-editing
-  :config
-  (add-hook 'text-mode-hook
-            (lambda () (setq-local fill-column 80))))
-
-(config-unit! editing-keys
-  :config
-  (keymap-set global-map "C-c e" #'eval-expression))
-
-(config-unit! editing-hooks
-  :config
-  (dolist (hook '(text-mode-hook prog-mode-hook))
-    (add-hook hook
-              (lambda () (setq-local fill-column 80)))))
+  (add-hook 'magit-mode-hook
+            (lambda ()
+              (setq-local truncate-lines t))))
 ```
 
-Symbol functions and anonymous functions use the same path. If a function value
-cannot be removed by stable identity, the registry installs it through an owned
-symbol and records that symbol in the retract form. Loops work for the same
-reason: each iteration records the concrete hook, advice, or keybinding target
-that was actually installed, so cleanup does not have to guess from the new
-source.
-Keybindings do not stack, so cleanup focuses on stale bindings: if the live
-binding still matches the definition Hypervisor installed, cleanup unsets it.
-If the binding changed outside Hypervisor, cleanup skips it.
+`magit-ui` requires the `magit` feature before it runs. `project-hooks` only
+needs `magit-ui` to have completed first; its hook registration can run eagerly
+without loading another package feature.
 
-The recognizer is intentionally conservative. It currently tracks global
-`add-hook`, `advice-add`, and supported keybinding effects in executed body
-positions, including `progn`, `let`, `let*`, `when`, `unless`, `if`, `cond`,
-`dolist`, and `dotimes`.
-It does not rewrite quoted data, function literals, lambda bodies, function
-definitions, or unknown macro/helper-call bodies. Local hook registrations with
-a non-nil `LOCAL` argument are not tracked yet. Variables, timers, faces, and
-other side effects are left untracked and are not reset unsafely.
-
-The registry is described in [docs/effect-registry.md](docs/effect-registry.md).
-
-## Literate Config (config.org)
+## Literate Config
 
 Hypervisor supports literate configuration via Org-mode. Place a `config.org`
 in the Hypervisor config directory instead of `config.el`, and Hypervisor will
@@ -212,38 +123,75 @@ blocks. Blocks with `:tangle no` are still respected and skipped.
 If both `config.org` and `config.el` exist, Hypervisor uses `config.org` and
 warns that `config.el` is ignored.
 
-`M-x emacs-hypervisor-reload-config` also tangles `config.org` before reloading,
-so edits to the Org file take effect immediately.
-
 Tangling uses Emacs's built-in `org-babel-tangle-file` with a language filter
 for `elisp` and `emacs-lisp`. The typical overhead is under 200ms for a
 2000-line config.
 
-## Config Example
+## Why Eager Loading
 
-```elisp
-(package! magit)
-(package! transient
-  :repo "magit/transient"
-  :branch "main")
+Lazy loading is the default tradeoff in most Emacs configs: defer everything to
+make startup fast, and hope nothing is broken.
 
-(config-unit! magit-ui
-  :requires (magit)
-  :executable (git)
-  :config
-  (keymap-set global-map "C-x g" #'magit-status))
+If you are building a simple config, that is fine. But if you are developing a
+complex one --- adding packages, wiring integrations, iterating on hook
+behavior --- lazy loading works against you. You add a keybinding for a command
+that does not exist yet, and nothing tells you. You misspell a hook variable,
+and nothing fails. You `require` a feature that a package has not installed yet,
+and you will not find out until you open that file type two hours later, in the
+middle of real work, with no context about what went wrong. The feedback loop
+is: edit, restart, wait, use Emacs for a while, and *maybe* discover the
+problem. That is not a development workflow; it is a lottery.
 
-(config-unit! project-hooks
-  :after (magit-ui)
-  :config
-  (add-hook 'magit-mode-hook
-            (lambda ()
-              (setq-local truncate-lines t))))
+Hypervisor takes the opposite tradeoff: resolve the entire dependency graph, run
+config units in deterministic order, and prove the config is internally
+consistent at startup. If something is broken, you know in five seconds.
+
+Eager does not mean force-loading every package. `:requires` should be used
+only when the body truly needs a feature loaded first (package-local variables,
+keymaps, macros, non-autoloaded functions). Hook registration, global
+keybindings, autoloaded commands, and pre-load-safe variable setup can all run
+eagerly without `:requires`.
+
+## Reload
+
+Eager loading gives you a tight feedback loop at startup. Reload extends that
+loop into your running session.
+
+When you are actively working on your config --- tweaking a hook, moving a
+keybinding, adjusting advice --- you do not want to restart Emacs every time.
+`M-x emacs-hypervisor-reload-config` reloads `config.org` (or `config.el`),
+diffs the previous declarations against the new ones, and applies only what
+changed:
+
+- **Unchanged** units are skipped.
+- **New** and **changed** units are re-applied.
+- **Removed** units are not evaluated again.
+
+The hard part is not re-evaluation --- Emacs can already do that. The hard part
+is that `add-hook` appends, `advice-add` mutates, and keybinding forms
+overwrite. A normal reload is additive: fix a hook body and the old one is
+still there; delete a keybinding and it survives until restart. After enough
+reloads, the live session drifts from the file you are editing.
+
+Hypervisor solves this with an **effect registry**. Each `add-hook`,
+`advice-add`, and keybinding call is recorded as a runtime effect record. On
+reload, changed units retract their previous effects before applying the new
+version --- so the live session matches the file you just saved.
+
+```text
+[Hypervisor] Reload started
+[Hypervisor] Reload cleaned hook prog-mode-hook -> display-line-numbers-mode for project-hooks
+[Hypervisor] Reload cleaned keybinding global-map C-c e -> eval-expression for editing-keys
+[Hypervisor] Reload re-applied unit: project-hooks
+[Hypervisor] Reload: 1 changed applied, 12 unchanged skipped, 2 old effects cleaned.
 ```
 
-`magit-ui` requires the `magit` feature before it runs. `project-hooks` only
-needs `magit-ui` to have completed first; its hook registration can run eagerly
-without loading another package feature.
+The recognizer is intentionally conservative: it tracks hooks, advice, and
+keybindings in executed body positions. Unrecognized forms re-evaluate on
+reload as they always have --- the worst case is the status quo, not breakage.
+
+See [docs/reload.md](docs/reload.md) for the full data model and API, and
+[docs/effect-system.md](docs/effect-system.md) for the registry contract.
 
 ## Usage
 
@@ -402,190 +350,6 @@ startup session.
 | `emacs-hypervisor-show-report-on-startup` | `nil` | When non-nil, display the startup report after package processing finishes, or at the first config-unit when there is no package work. The report always appears when a config-unit fails, regardless of this setting. |
 | `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
 
-## How It Works
-
-Hypervisor is written in [Elle](https://github.com/elle-lisp/elle), a modern
-Lisp over Rust, and compiles to a single native binary with orchestration logic,
-Elle source, and runtime Elisp embedded. No external runtime, no framework repo
-to clone --- just drop the binary on your `PATH`.
-
-At startup, Emacs loads a tiny generated kernel that launches the Hypervisor
-binary over stdio. From there, Hypervisor takes over: it reads your
-declarations, builds the dependency graph, runs preflight checks, and feeds
-Emacs the exact ordered commands to install packages and execute config units.
-
-Three properties make this architecture distinctive:
-
-**Deterministic startup as a dependency graph.** Hypervisor grew out of
-[`emacs-backbone`](https://github.com/nohzafk/emacs-backbone), which proved
-that topological sorting and explicit dependencies eliminate non-determinism in
-Emacs config. Hypervisor takes the idea further: startup becomes an observable
-orchestration session with preflight validation, failure propagation, execution
-plans, and reports.
-
-**Lisp-to-Lisp homoiconicity.** Because Elle is a Lisp, config-unit bodies
-travel between Hypervisor and Emacs as structured Lisp data, not opaque strings.
-Hypervisor can inspect those Elisp forms and route supported effect sites
-through semantically equivalent runtime operations. This is what powers
-effect-aware reload: supported hooks, advice, and keybinding calls are
-rewritten into effect-registry operations, then the registry's concrete runtime
-records are used to retract old effects before re-applying a unit --- all
-without string parsing.
-
-**Single binary, zero framework overhead.** Traditional Emacs config frameworks
-require cloning a repo into `~/.config/emacs` because Emacs must load an
-`init.el` written in Elisp. Hypervisor compiles everything into one binary. Your
-Emacs home contains only generated bootstrap files; your own config lives
-cleanly in the Hypervisor config directory.
-
-## Architecture
-
-One rule: **Emacs keeps a small trusted kernel; Elle owns orchestration
-policy.**
-
-```mermaid
-flowchart TD
-    subgraph Emacs
-        Kernel["trusted kernel<br/>sexp-rpc · session state · eval surface"]
-        Decls["package! / config-unit! declarations"]
-        Runtime["emitted runtime helpers<br/>Elpaca bridge · unit execution · reload · reports"]
-    end
-
-    subgraph Binary["emacs-hypervisor binary"]
-        Elle["Elle backend"]
-        Embedded["embedded Elle source + runtime Elisp"]
-    end
-
-    Kernel <-- "sexp-rpc over stdio" --> Elle
-    Decls -- "export session data" --> Elle
-    Elle -- "emit forms via :eval" --> Runtime
-    Embedded -. "bundled at compile time" .-> Elle
-```
-
-| Layer | Lifetime | Owns |
-|---|---|---|
-| **Emacs kernel** | Resident, small | Process startup, session state, sexp-rpc dispatch, `package!` / `config-unit!` macros, trusted `:eval` surface |
-| **Elle backend** | Runs in binary | Dependency graphs, preflight checks, boot policy, execution ordering, failure propagation, reports |
-| **Runtime forms** | Transient, per session | Elpaca bridge, unit execution, reload, report rendering --- execution substrate, not a second policy engine |
-
-### Three-Stage Bootstrap
-
-```mermaid
-flowchart LR
-    subgraph S1["Stage 1 — Stable Kernel"]
-        direction TB
-        A["Emacs home"] --> B["load generated init.el"]
-        B --> C["kernel boots"]
-    end
-
-    subgraph S2["Stage 2 — Control Plane"]
-        direction TB
-        D["launch emacs-hypervisor serve"]
-        D --> E["sexp-rpc session established"]
-    end
-
-    subgraph S3["Stage 3 — Session Runtime"]
-        direction TB
-        F["emit runtime forms"]
-        F --> G["package planning"]
-        G --> H["config-unit execution"]
-        H --> I["reload + reports ready"]
-    end
-
-    S1 --> S2 --> S3
-```
-
-**Stage 1 --- Stable kernel.** The generated `init.el` contains the trusted
-Emacs kernel: process startup, session state, sexp-rpc parsing, request
-dispatch, and the small eval surface used by the host.
-
-**Stage 2 --- Control plane.** Emacs launches `emacs-hypervisor serve`, then
-Emacs and Elle exchange request, response, and event messages over stdio using
-S-expressions.
-
-**Stage 3 --- Session runtime.** The binary embeds Elle source and runtime
-Elisp forms; Elle sends them into Emacs for the current session, then runs
-package planning, config-unit execution, reload support, reports, and shutdown.
-
-### Lisp-to-Lisp Data Flow
-
-The key invariant: **protocol metadata and code data are decoded with different
-rules.** Protocol fields become normal Elle data for graph and planning code.
-Config-unit `:body` fields remain raw Lisp code --- Elle never recursively
-converts plist-like lists inside a body, because `(foo (:a 1 :b 2))` is
-code/data, not a protocol plist.
-
-The path through the system:
-
-1. `config-unit!` captures the body as `(progn ... t)`.
-2. Emacs canonicalizes reader-hostile forms while preserving semantics.
-3. Supported hook, advice, and keybinding sites are normalized into
-   effect-registry helper calls.
-4. Emacs sends session data through sexp-rpc.
-5. Elle decodes package, unit, and env metadata; each unit `:body` stays raw
-   Lisp code rather than becoming protocol data.
-6. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
-7. Emacs evaluates the structured body directly; registry helpers install and
-   record supported runtime effects.
-
-This homoiconic surface is what makes structural inspection, targeted rewrites,
-effect-aware reload, and interactive remediation practical without re-parsing
-opaque strings.
-
-## File Guide
-
-```text
-emacs-hypervisor/
-├── host/                              # Rust native host
-│   ├── src/main.rs                    # CLI entrypoint (init, env, serve)
-│   ├── build.rs                       # embeds Elle source + Elisp at compile time
-│   ├── emacs-kernel/                  # trusted Emacs kernel (bundled into init.el)
-│   │   ├── home-startup.el            #   home bootstrap wrapper
-│   │   ├── emacs-hypervisor-bootstrap.el    #   process startup, sexp-rpc, eval surface
-│   │   ├── emacs-hypervisor-session-state.el#   session state management
-│   │   └── emacs-hypervisor-sexp-rpc.el     #   S-expression wire protocol
-│   └── elisp_pack/                    # build-time Elisp packer (Rust crate)
-│       └── src/lib.rs
-│
-├── elle/                              # Elle backend (embedded in binary)
-│   ├── hypervisor.lisp                # backend entrypoint
-│   ├── protocol.lisp                  # sexp-rpc helpers, wire decoding
-│   ├── graph.lisp                     # dependency graph construction
-│   ├── preflight.lisp                 # preflight validation checks
-│   ├── boot-policy.lisp               # boot policy decisions
-│   ├── planning.lisp                  # execution plan generation
-│   ├── execution.lisp                 # config-unit execution
-│   ├── runtime-forms.lisp             # coordinates emitted runtime modules
-│   └── runtime-forms/                 # transient Elisp emitted per session
-│       ├── module-loader.lisp         #   module loading coordinator
-│       ├── emacs-hypervisor-declarations.el       #   package!/config-unit! macros
-│       ├── emacs-hypervisor-elpaca-bridge.el       #   Elpaca integration
-│       ├── emacs-hypervisor-package-runtime.el     #   package event handling
-│       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
-│       ├── emacs-hypervisor-session-base.el        #   session lifecycle
-│       ├── emacs-hypervisor-selective-reload.el    #   reload diffing + scheduling
-│       ├── emacs-hypervisor-effect-registry.el     #   generic effect records
-│       ├── emacs-hypervisor-effect-aware-reload.el #   effect rewrite dispatcher + cleanup
-│       ├── emacs-hypervisor-effect-kind-hook.el    #   add-hook effect kind
-│       ├── emacs-hypervisor-effect-kind-advice.el  #   advice-add effect kind
-│       ├── emacs-hypervisor-effect-kind-keybinding.el #   keybinding effect kind
-│       ├── emacs-hypervisor-compose.el             #   wires reload into M-x command
-│       ├── emacs-hypervisor-report-core.el         #   report data structures
-│       └── emacs-hypervisor-report.el              #   startup report rendering
-│
-├── tests/
-│   ├── elle/hypervisor-runtime.lisp               # Elle runtime semantics tests
-│   └── elisp/emacs-hypervisor-bootstrap-test.el   # kernel + runtime helper tests
-│
-├── scripts/
-│   └── analyze-runtime.lisp           # compile-aware analysis script
-│
-├── config.org                         # repo test configuration
-├── config/                            # repo-local support files for config.org
-├── early-init.el                      # repo test early-init
-└── justfile                           # build, test, and dev commands
-```
-
 ## Development
 
 For working on Hypervisor itself, not normal user configuration.
@@ -605,8 +369,9 @@ Step-by-step live testing: `just build && just emacs-home-reset && just emacs-ho
 | Document | Topic |
 |---|---|
 | [`PROTOCOL.md`](PROTOCOL.md) | sexp-rpc message shape and failure payloads |
-| [`LISP-TO-LISP-FUTURES.md`](LISP-TO-LISP-FUTURES.md) | Future capabilities from homoiconic config bodies |
+| [`docs/architecture.md`](docs/architecture.md) | Three-stage bootstrap, Lisp-to-Lisp data flow, source map |
+| [`docs/reload.md`](docs/reload.md) | Selective reload design, effect-aware reload API |
+| [`docs/effect-system.md`](docs/effect-system.md) | Effect registry contract, adding new effect kinds |
 | [`host/README.md`](host/README.md) | Generated-home bootstrap rules |
 | [`host/ELISP-PACK.md`](host/ELISP-PACK.md) | Static Elisp packing boundary |
 | [`PROJECT-LOG.md`](PROJECT-LOG.md) | Historical implementation context |
-| `docs/` | Historical design notes and captured ideas |

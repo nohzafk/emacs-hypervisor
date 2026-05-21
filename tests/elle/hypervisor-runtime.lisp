@@ -417,6 +417,47 @@
     (assert (= (get (get blocked :details) :blockers) (list "runtime-fail-pkg")) "tracker blocked details")))
 (println "  3. tracker execution: ok")
 
+(let* [local-entry
+       {:name "elle-lsp-bridge"
+        :deps (list)
+        :repo nil
+        :host nil
+        :branch nil
+        :tag nil
+        :ref nil
+        :files (list "*.el" "multiserver")
+        :local "/tmp/elle-lsp-bridge"
+        :no-compilation true}
+       local-plan-items
+       (list {:name "elle-lsp-bridge" :entry local-entry})]
+  (reset-stub-state)
+  (push stub-await-responses
+        (stub-response 50 true (list {:name "elle-lsp-bridge" :status :queued})))
+  (push stub-read-messages
+        (stub-event :package
+                    {:phase :packages :kind :installed :name "elle-lsp-bridge"}))
+  (push stub-read-messages
+        (stub-event :package
+                    {:phase :packages :kind :finished :reason "completed"}))
+  (push stub-read-messages
+        (stub-response 51 true :processing))
+  (execution:execute-package-entry-plan-tracker local-plan-items 50)
+  (let* [queue-request (get stub-sent-requests 0)
+         queue-payload (wire-protocol:plist-get (get queue-request :payload) :form)
+         queue-form queue-payload
+         queue-step (first (rest (rest (rest queue-form))))
+         queue-body (first (rest (rest queue-step)))
+         elpaca-form (first (rest (rest queue-body)))
+         elpaca-order (first (rest elpaca-form))]
+    (assert
+     (= elpaca-order
+        '(elle-lsp-bridge
+          :files ("*.el" "multiserver")
+          :repo "/tmp/elle-lsp-bridge"
+          :build (:not elpaca-build-compile)))
+     "package queue preserves local :files and disables byte compilation")))
+(println "  3a. local package recipe options: ok")
+
 (let* [{:reports planned-package-reports}
        (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]

@@ -222,6 +222,20 @@
                    'lambda))
     (should (equal (nth 2 body) t))))
 
+(ert-deftest emacs-hypervisor-package-export-preserves-local-files-and-no-compilation ()
+  (emacs-hypervisor-reset-declarations)
+  (package! elle-lsp-bridge
+    :local "~/projects/lsp-bridge/elle-lsp-bridge"
+    :files ("emacs/*.el" "langserver" "multiserver")
+    :no-compilation t)
+  (let ((package (car (emacs-hypervisor-export-packages))))
+    (should (equal (plist-get package :name) "elle-lsp-bridge"))
+    (should (equal (plist-get package :local)
+                   "~/projects/lsp-bridge/elle-lsp-bridge"))
+    (should (equal (plist-get package :files)
+                   '("emacs/*.el" "langserver" "multiserver")))
+    (should (eq (plist-get package :no-compilation) t))))
+
 (ert-deftest emacs-hypervisor-effect-aware-reload-has-registry-effect-specs ()
   (let* ((specs
           emacs-hypervisor-effect-aware-reload-effect-specs)
