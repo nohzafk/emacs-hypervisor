@@ -174,6 +174,19 @@
   (defn ordered-reports [entries reports]
     (map (fn [entry] (find-entry reports (entry-name entry))) entries))
 
+  (defn report-blockers [reports names]
+    (filter
+     (fn [name] (not (= (report-status reports name) :ok)))
+     names))
+
+  (defn known-report-blockers [reports names]
+    (filter
+     (fn [name]
+       (if-let [report (find-entry reports name)]
+         (not (= (get report :status) :ok))
+         false))
+     names))
+
   {:all-known? all-known?
    :blocked-report blocked-report
    :blocker-details blocker-details
@@ -186,6 +199,7 @@
    :invalid-package-report invalid-package-report
    :invalid-unit-report invalid-unit-report
    :known-names known-names
+   :known-report-blockers known-report-blockers
    :make-report make-report
    :member? member?
    :missing-details missing-details
@@ -194,5 +208,6 @@
    :ordered-reports ordered-reports
    :preflight-details preflight-details
    :remove-entry-by-name remove-entry-by-name
+   :report-blockers report-blockers
    :report-status report-status
    :resolve-reports-loop resolve-reports-loop})

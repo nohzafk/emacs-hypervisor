@@ -4,27 +4,6 @@
 (require 'emacs-hypervisor-effect-aware-reload)
 (require 'emacs-hypervisor-effect-registry)
 
-(defun emacs-hypervisor-effect-kind-hook-form-p (form)
-  (and (consp form)
-       (eq (car form) 'add-hook)
-       (memq (length form) '(3 4 5))
-       (or (< (length form) 5)
-           (null (nth 4 form)))))
-
-(defun emacs-hypervisor-effect-kind-hook-rewrite-form (unit-name form)
-  (if (emacs-hypervisor-effect-kind-hook-form-p form)
-      (list
-       'emacs-hypervisor-register-hook-effect
-       :unit unit-name
-       :target (nth 1 form)
-       :function (nth 2 form)
-       :depth (if (> (length form) 3) (nth 3 form) nil)
-       :local (if (> (length form) 4) (nth 4 form) nil)
-       :source (list 'quote
-                     (emacs-hypervisor-effect-aware-reload-source-plist
-                      form)))
-    form))
-
 ;;;###autoload
 (cl-defun emacs-hypervisor-register-hook-effect
     (&key unit target function depth local source)
@@ -65,10 +44,17 @@
    :metadata (list :depth depth
                    :local local)))
 
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :hook
-       :operator 'add-hook
-       :predicate #'emacs-hypervisor-effect-kind-hook-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-hook-rewrite-form))
+(emacs-hypervisor-effect-aware-reload-define-function-effect-kind
+ :kind :hook
+ :operator 'add-hook
+ :arities '(3 4 5)
+ :extra-predicate (lambda (form)
+                    (or (< (length form) 5)
+                        (null (nth 4 form))))
+ :slots '((:target 1)
+          (:function 2)
+          (:depth 3 :optional t)
+          (:local 4 :optional t))
+ :register-fn 'emacs-hypervisor-register-hook-effect)
 
 (provide 'emacs-hypervisor-effect-kind-hook)

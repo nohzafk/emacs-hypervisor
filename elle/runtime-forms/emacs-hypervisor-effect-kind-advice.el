@@ -4,24 +4,6 @@
 (require 'emacs-hypervisor-effect-aware-reload)
 (require 'emacs-hypervisor-effect-registry)
 
-(defun emacs-hypervisor-effect-kind-advice-form-p (form)
-  (and (consp form)
-       (eq (car form) 'advice-add)
-       (= (length form) 4)))
-
-(defun emacs-hypervisor-effect-kind-advice-rewrite-form (unit-name form)
-  (if (emacs-hypervisor-effect-kind-advice-form-p form)
-      (list
-       'emacs-hypervisor-register-advice-effect
-       :unit unit-name
-       :target (nth 1 form)
-       :where (nth 2 form)
-       :function (nth 3 form)
-       :source (list 'quote
-                     (emacs-hypervisor-effect-aware-reload-source-plist
-                      form)))
-    form))
-
 ;;;###autoload
 (cl-defun emacs-hypervisor-register-advice-effect
     (&key unit target where function source)
@@ -55,10 +37,13 @@
                           function-symbol)))
    :metadata (list :where where)))
 
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :advice
-       :operator 'advice-add
-       :predicate #'emacs-hypervisor-effect-kind-advice-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-advice-rewrite-form))
+(emacs-hypervisor-effect-aware-reload-define-function-effect-kind
+ :kind :advice
+ :operator 'advice-add
+ :arities '(4)
+ :slots '((:target 1)
+          (:where 2)
+          (:function 3))
+ :register-fn 'emacs-hypervisor-register-advice-effect)
 
 (provide 'emacs-hypervisor-effect-kind-advice)

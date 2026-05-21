@@ -101,6 +101,10 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
     ),
     ("REPORT", "elle/runtime-forms/emacs-hypervisor-report.el"),
     (
+        "ELLE_CANONICALIZE",
+        "elle/runtime-forms/emacs-hypervisor-elle-canonicalize.el",
+    ),
+    (
         "DECLARATIONS",
         "elle/runtime-forms/emacs-hypervisor-declarations.el",
     ),
@@ -127,6 +131,10 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
     (
         "SELECTIVE_RELOAD",
         "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
+    ),
+    (
+        "CONFIG_PATHS",
+        "elle/runtime-forms/emacs-hypervisor-config-paths.el",
     ),
     ("COMPOSE", "elle/runtime-forms/emacs-hypervisor-compose.el"),
     (

@@ -51,7 +51,8 @@
       payload
       (strip-metric-fields payload)))
 
-  {:elapsed-ms elapsed-ms
+  {:append-plist-field append-plist-field
+   :elapsed-ms elapsed-ms
    :emit-metric emit-metric
    :eval-payload eval-payload
    :measure measure})

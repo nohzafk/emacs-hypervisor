@@ -13,6 +13,7 @@
   (defn install-config-surface-form
       [report-core-module
        report-module
+       elle-canonicalize-module
        effect-registry-module
        effect-aware-reload-module
        effect-kind-hook-module
@@ -20,6 +21,7 @@
        effect-kind-keybinding-module
        declarations-module
        selective-reload-module
+       config-paths-module
        compose-module]
     (append-all
      (list
@@ -28,6 +30,7 @@
       (module-loader:load-module-form report-module :emacs-hypervisor-report-ready)
       '((emacs-hypervisor-report-reset)
         (emacs-hypervisor-report-session-started))
+      (module-loader:load-module-form elle-canonicalize-module :emacs-hypervisor-elle-canonicalize-ready)
       (module-loader:load-module-form effect-registry-module :emacs-hypervisor-effect-registry-ready)
       (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
       (module-loader:load-module-form effect-kind-hook-module :emacs-hypervisor-effect-kind-hook-ready)
@@ -35,6 +38,7 @@
       (module-loader:load-module-form effect-kind-keybinding-module :emacs-hypervisor-effect-kind-keybinding-ready)
       (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
       (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)
+      (module-loader:load-module-form config-paths-module :emacs-hypervisor-config-paths-ready)
       (module-loader:load-module-form compose-module :emacs-hypervisor-compose-ready)
       '(:emacs-hypervisor-config-surface-ready))))
 

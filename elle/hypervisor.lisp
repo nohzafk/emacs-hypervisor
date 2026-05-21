@@ -12,6 +12,7 @@
 (include-file "benchmark.lisp")
 (include-file "preflight.lisp")
 (include-file "boot-policy.lisp")
+(include-file "reporting.lisp")
 (include-file "planning.lisp")
 (include-file "execution.lisp")
 (include-file "runtime-forms.lisp")
@@ -38,6 +39,33 @@
 (defn emacs-hypervisor-send-shutdown [payload]
   (protocol:send-event :shutdown payload)
   (sys/exit 0))
+
+(defn emacs-hypervisor-handle-config-load-failure
+    [config-load-result config-file config-org-file]
+  (let* [config-error
+         (or (protocol:response-error config-load-result) :unknown-error)
+         config-source (or config-org-file config-file "<unknown config>")
+         config-message
+         (emacs-hypervisor-config-load-failure-message
+          config-file
+          config-org-file
+          config-error)]
+    (protocol:send-event
+     :log
+     `(:level :error
+       :phase :startup
+       :step :load-config
+       :source ,config-source
+       :message ,config-message
+       :details ,config-error))
+    (emacs-hypervisor-send-shutdown
+     `(:reason :config-load-failed
+       :status :failed
+       :phase :startup
+       :step :load-config
+       :source ,config-source
+       :message ,config-message
+       :details ,config-error))))
 
 (protocol:with-mailbox-reader
  mailbox
@@ -78,6 +106,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_REPORT_FORMS"
            "elle/runtime-forms/emacs-hypervisor-report.el")
+          elle-canonicalize-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-elle-canonicalize.el")
           declarations-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS"
@@ -106,6 +138,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS"
            "elle/runtime-forms/emacs-hypervisor-selective-reload.el")
+          config-paths-module
+          (emacs-hypervisor-embedded-module-spec
+           "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-config-paths.el")
           compose-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_FORMS"
@@ -140,13 +176,15 @@
           preflight
           (emacs-hypervisor-preflight-module protocol graph mailbox benchmark)
           policy
-          (emacs-hypervisor-boot-policy-module protocol graph preflight)
+          (emacs-hypervisor-boot-policy-module graph preflight)
+          reporting
+          (emacs-hypervisor-reporting-module protocol policy)
           planning
           (emacs-hypervisor-planning-module protocol graph)
           execution
           (emacs-hypervisor-execution-module protocol graph mailbox benchmark)
           session-name (or boot-session-name "hypervisor-session")]
-     (policy:emit-bootstrap-warning boot-context boot-expected-init-hash)
+     (reporting:emit-bootstrap-warning boot-context boot-expected-init-hash)
      (protocol:send-event
       :log
       `(:level :info
@@ -158,6 +196,7 @@
        `(:form ,(runtime-forms:install-config-surface-form
                  report-core-module
                  report-module
+                 elle-canonicalize-module
                  effect-registry-module
                  effect-aware-reload-module
                  effect-kind-hook-module
@@ -165,6 +204,7 @@
                  effect-kind-keybinding-module
                  declarations-module
                  selective-reload-module
+                 config-paths-module
                  compose-module)
          :metric-name :install-config-surface
          :metric-kind :runtime-setup
@@ -299,10 +339,10 @@
              (protocol:send-event
               :progress
               '(:phase :planning :step :policy-derived :done 4 :total 10))
-             (policy:emit-report-message :planned :packages planned-package-reports)
-             (policy:emit-report-message :planned :units planned-unit-reports)
-             (policy:emit-report-logs "planned-package" planned-package-reports)
-             (policy:emit-report-logs "planned-unit" planned-unit-reports)
+             (reporting:emit-report-message :planned :packages planned-package-reports)
+             (reporting:emit-report-message :planned :units planned-unit-reports)
+             (reporting:emit-report-logs "planned-package" planned-package-reports)
+             (reporting:emit-report-logs "planned-unit" planned-unit-reports)
              (planning:emit-plan-message package-plan)
              (planning:emit-plan-message unit-plan)
              (protocol:send-event
@@ -327,13 +367,13 @@
                     (planning:merge-executed-reports
                      planned-unit-reports
                      (get executed-unit-plan :reports))]
-               (policy:emit-report-logs "package" package-reports)
-               (policy:emit-report-message :executed :packages package-reports)
+               (reporting:emit-report-logs "package" package-reports)
+               (reporting:emit-report-message :executed :packages package-reports)
                (protocol:send-event
                 :progress
                 '(:phase :packages :step :executed :done 6 :total 10))
-               (policy:emit-report-logs "unit" unit-reports)
-               (policy:emit-report-message :executed :units unit-reports)
+               (reporting:emit-report-logs "unit" unit-reports)
+               (reporting:emit-report-message :executed :units unit-reports)
                (protocol:send-event
                 :progress
                 '(:phase :units :step :executed :done 7 :total 10))
@@ -348,27 +388,7 @@
                 '(:phase :shutdown :step :ready :done 10 :total 10))
                (emacs-hypervisor-send-shutdown
                 '(:reason :hypervisor-session-complete)))))
-         (let* [config-error
-                (or (protocol:response-error config-load-result) :unknown-error)
-                config-source (or config-org-file config-file "<unknown config>")
-                config-message
-                (emacs-hypervisor-config-load-failure-message
-                 config-file
-                 config-org-file
-                 config-error)]
-           (protocol:send-event
-            :log
-            `(:level :error
-              :phase :startup
-              :step :load-config
-              :source ,config-source
-              :message ,config-message
-              :details ,config-error))
-           (emacs-hypervisor-send-shutdown
-            `(:reason :config-load-failed
-              :status :failed
-              :phase :startup
-              :step :load-config
-              :source ,config-source
-              :message ,config-message
-              :details ,config-error))))))))
+         (emacs-hypervisor-handle-config-load-failure
+          config-load-result
+          config-file
+          config-org-file))))))

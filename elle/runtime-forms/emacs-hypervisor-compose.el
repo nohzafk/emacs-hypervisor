@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'emacs-hypervisor-bootstrap)
+(require 'emacs-hypervisor-config-paths)
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-effect-aware-reload)
 (require 'emacs-hypervisor-selective-reload)
@@ -18,45 +19,6 @@
 (defconst emacs-hypervisor--config-org-elisp-lang-regexp
   (rx string-start (or "elisp" "emacs-lisp") string-end)
   "Org Babel language tags accepted for Emacs Lisp config blocks.")
-
-(defun emacs-hypervisor--repo-file (name)
-  (expand-file-name name user-emacs-directory))
-
-(defun emacs-hypervisor--xdg-config-home ()
-  "Return the XDG config home directory with HOME/.config fallback."
-  (let ((xdg-config-home (getenv "XDG_CONFIG_HOME")))
-    (if (and xdg-config-home (not (equal xdg-config-home "")))
-        xdg-config-home
-      "~/.config")))
-
-(defun emacs-hypervisor--config-directory ()
-  "Return the fixed user-owned Hypervisor config directory."
-  (file-name-as-directory
-   (expand-file-name
-    "emacs-hypervisor"
-    (emacs-hypervisor--xdg-config-home))))
-
-(defun emacs-hypervisor--config-file ()
-  (if (boundp 'emacs-hypervisor-config-file)
-      emacs-hypervisor-config-file
-    (expand-file-name "config.el" (emacs-hypervisor--config-directory))))
-
-(defun emacs-hypervisor--config-org-file ()
-  (if (boundp 'emacs-hypervisor-config-org-file)
-      emacs-hypervisor-config-org-file
-    (expand-file-name "config.org" (emacs-hypervisor--config-directory))))
-
-(defun emacs-hypervisor--config-tangled-file ()
-  "Return the shadow file path for tangled config.org output."
-  (let ((org-file (emacs-hypervisor--config-org-file)))
-    (when org-file
-      (expand-file-name ".config.tangled.el"
-                        (file-name-directory org-file)))))
-
-(defun emacs-hypervisor--env-file ()
-  (if (boundp 'emacs-hypervisor-env-file)
-      emacs-hypervisor-env-file
-    (emacs-hypervisor--repo-file "env")))
 
 (defun emacs-hypervisor--declared-package-names ()
   (mapcar (lambda (entry) (plist-get entry :name))
