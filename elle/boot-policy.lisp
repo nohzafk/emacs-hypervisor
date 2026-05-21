@@ -1,19 +1,6 @@
 ## Shared boot-policy helpers built on graph + preflight modules.
 
-(defn emacs-hypervisor-boot-policy-module [protocol graph preflight]
-  (defn blocked-deps [reports names]
-    (filter
-     (fn [dep] (not (= (graph:report-status reports dep) :ok)))
-     names))
-
-  (defn blocked-known-deps [reports names]
-    (filter
-     (fn [dep]
-       (if-let [report (graph:find-entry reports dep)]
-         (not (= (get report :status) :ok))
-         false))
-     names))
-
+(defn emacs-hypervisor-boot-policy-module [graph preflight]
   (defn ready-package-report [entry]
     (graph:make-report
      (graph:entry-name entry)
@@ -51,7 +38,7 @@
       (graph:ordered-reports entries unordered-reports)))
 
   (defn next-package-report [entry reports]
-    (let [blockers (blocked-deps reports (graph:entry-field entry :deps))]
+    (let [blockers (graph:report-blockers reports (graph:entry-field entry :deps))]
       (match (empty? blockers)
         true
          (ready-package-report entry)
@@ -83,9 +70,9 @@
 
   (defn next-unit-report [entry reports package-reports env executable-reports]
     (let [package-blockers
-          (blocked-known-deps package-reports (graph:entry-field entry :requires))
+          (graph:known-report-blockers package-reports (graph:entry-field entry :requires))
           unit-blockers
-          (blocked-deps reports (graph:entry-field entry :after))
+          (graph:report-blockers reports (graph:entry-field entry :after))
           env-missing (preflight:env-missing-for-unit entry env)
           executable-missing
           (preflight:executable-missing-for-unit
@@ -143,25 +130,6 @@
            env
            executable-reports)))}))
 
-  (defn emit-report-logs [label reports]
-    (each {:status status :name name :reason reason :details details} in reports
-      (when (not (= status :ok))
-        (protocol:send-event
-         :log
-         `(:level :warn
-           :message
-           ,(string
-             label
-             " "
-             name
-             " -> "
-             (string reason)
-             " "
-             (protocol:sexp-string (protocol:to-wire details))))))))
-
-  (defn emit-report-message [stage phase reports]
-    (protocol:send-report stage phase (protocol:to-wire reports)))
-
   (defn init-upgrade-command [binary home]
     (string
      (or binary "emacs-hypervisor")
@@ -201,14 +169,6 @@
        true
         nil)))
 
-  (defn emit-bootstrap-warning [boot-context expected-hash]
-    (if-let [warning (bootstrap-warning boot-context expected-hash)]
-      (protocol:send-event :warning (protocol:to-wire warning))
-      nil))
-
-  {:derive-package-reports derive-package-reports
-   :derive-unit-reports derive-unit-reports
-   :bootstrap-warning bootstrap-warning
-   :emit-bootstrap-warning emit-bootstrap-warning
-   :emit-report-message emit-report-message
-   :emit-report-logs emit-report-logs})
+  {:bootstrap-warning bootstrap-warning
+   :derive-package-reports derive-package-reports
+   :derive-unit-reports derive-unit-reports})

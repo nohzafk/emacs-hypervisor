@@ -2,17 +2,12 @@
 
 (defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]
 
-  (defn append-plist-field [fields key value]
-    (if value
-      (append fields (list key value))
-      fields))
-
   (defn eval-payload [form metric-name metric-kind phase item-name]
     (let [fields `(:form ,form)
-          fields (append-plist-field fields :metric-name metric-name)
-          fields (append-plist-field fields :metric-kind metric-kind)
-          fields (append-plist-field fields :phase phase)
-          fields (append-plist-field fields :item-name item-name)]
+          fields (benchmark:append-plist-field fields :metric-name metric-name)
+          fields (benchmark:append-plist-field fields :metric-kind metric-kind)
+          fields (benchmark:append-plist-field fields :phase phase)
+          fields (benchmark:append-plist-field fields :item-name item-name)]
       (benchmark:eval-payload fields)))
 
   (defn eval-form [id form metric-name metric-kind phase item-name]
@@ -160,7 +155,7 @@
      plan-items))
 
   (defn package-plan-item-blockers [{:entry entry} queued-package-reports]
-    (report-blockers
+    (graph:report-blockers
      queued-package-reports
      (graph:entry-field entry :deps)))
 
@@ -230,19 +225,6 @@
           (fn [{:name name}]
             (failed-eval-report name (execution-error queue-result)))
           ready-plan-items)})))
-
-  (defn report-blockers [reports names]
-    (filter
-     (fn [name] (not (= (graph:report-status reports name) :ok)))
-     names))
-
-  (defn known-report-blockers [reports names]
-    (filter
-     (fn [name]
-       (if-let [report (graph:find-entry reports name)]
-         (not (= (get report :status) :ok))
-         false))
-     names))
 
   (defn report-state [next-id report]
     {:next-id next-id
@@ -438,7 +420,7 @@
          (executed-package-report name entry)
         _
          (let [package-blockers
-               (report-blockers
+               (graph:report-blockers
                 final-package-reports
                 (graph:entry-field entry :deps))]
            (match (empty? package-blockers)
@@ -497,9 +479,9 @@
   (defn execute-unit-entry-state
       [name entry package-reports executed-unit-reports current-id]
     (let [package-blockers
-          (known-report-blockers package-reports (graph:entry-field entry :requires))
+          (graph:known-report-blockers package-reports (graph:entry-field entry :requires))
           unit-blockers
-          (report-blockers executed-unit-reports (graph:entry-field entry :after))]
+          (graph:report-blockers executed-unit-reports (graph:entry-field entry :after))]
       (match [(empty? package-blockers) (empty? unit-blockers)]
         [false _]
          (blocked-report-state

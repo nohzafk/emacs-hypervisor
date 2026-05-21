@@ -37,6 +37,55 @@ the same form."
                     (list spec))))
     spec))
 
+(defun emacs-hypervisor-effect-aware-reload--rewrite-slot-args
+    (slots form)
+  (let (args)
+    (dolist (slot slots)
+      (let* ((key (car slot))
+             (index (cadr slot))
+             (optional (plist-get (cddr slot) :optional))
+             (value (cond
+                     ((not optional) (nth index form))
+                     ((> (length form) index) (nth index form))
+                     (t nil))))
+        (setq args (append args (list key value)))))
+    args))
+
+(cl-defun emacs-hypervisor-effect-aware-reload-define-function-effect-kind
+    (&key kind operator arities extra-predicate slots register-fn)
+  "Register a function-effect dispatch spec.
+
+ARITIES lists allowed form lengths.  EXTRA-PREDICATE, when given, takes the
+form and must return non-nil for the form to qualify after the operator and
+arity check.  SLOTS is a list of (KEYWORD INDEX) or (KEYWORD INDEX :optional t)
+entries describing how to extract keyword arguments for REGISTER-FN from the
+matched form; optional slots whose index is past the form length are passed as
+nil.  REGISTER-FN is the helper function symbol installed for this kind."
+  (let* ((predicate
+          (lambda (form)
+            (and (consp form)
+                 (eq (car form) operator)
+                 (memq (length form) arities)
+                 (or (null extra-predicate)
+                     (funcall extra-predicate form)))))
+         (rewrite
+          (lambda (unit-name form)
+            (if (funcall predicate form)
+                (append
+                 (list register-fn :unit unit-name)
+                 (emacs-hypervisor-effect-aware-reload--rewrite-slot-args
+                  slots form)
+                 (list :source
+                       (list 'quote
+                             (emacs-hypervisor-effect-aware-reload-source-plist
+                              form))))
+              form))))
+    (emacs-hypervisor-effect-aware-reload-register-effect-spec
+     (list :kind kind
+           :operator operator
+           :predicate predicate
+           :rewrite rewrite))))
+
 (defun emacs-hypervisor-effect-aware-reload--registry-effect-spec
     (operator)
   (cl-find operator
