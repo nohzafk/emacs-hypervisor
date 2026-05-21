@@ -208,29 +208,12 @@
                 emacs-hypervisor-effect-kind-keybinding--states)
        (signal (car err) (cdr err))))))
 
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :keybinding
-       :operator 'keymap-set
-       :predicate #'emacs-hypervisor-effect-kind-keybinding-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-keybinding-rewrite-form))
-
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :keybinding
-       :operator 'define-key
-       :predicate #'emacs-hypervisor-effect-kind-keybinding-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-keybinding-rewrite-form))
-
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :keybinding
-       :operator 'global-set-key
-       :predicate #'emacs-hypervisor-effect-kind-keybinding-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-keybinding-rewrite-form))
-
-(emacs-hypervisor-effect-aware-reload-register-effect-spec
- (list :kind :keybinding
-       :operator 'keymap-global-set
-       :predicate #'emacs-hypervisor-effect-kind-keybinding-form-p
-       :rewrite #'emacs-hypervisor-effect-kind-keybinding-rewrite-form))
+(dolist (operator '(keymap-set define-key global-set-key keymap-global-set))
+  (emacs-hypervisor-effect-aware-reload-register-effect-spec
+   (list :kind :keybinding
+         :operator operator
+         :predicate #'emacs-hypervisor-effect-kind-keybinding-form-p
+         :rewrite #'emacs-hypervisor-effect-kind-keybinding-rewrite-form)))
 
 (add-hook 'emacs-hypervisor-effect-registry-reset-hook
           #'emacs-hypervisor-effect-kind-keybinding--reset-states)

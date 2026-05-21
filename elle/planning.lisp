@@ -1,15 +1,9 @@
 ## Shared execution planning helpers.
 
 (defn emacs-hypervisor-planning-module [protocol graph]
-  (defn member? [xs value]
-    (any? (fn [item] (= item value)) xs))
-
-  (defn remove-entry-by-name [entries name]
-    (filter (fn [entry] (not (= (graph:entry-name entry) name))) entries))
-
   (defn ready-for-plan? [entry dep-key ordered-names]
     (all?
-     (fn [dep] (member? ordered-names dep))
+     (fn [dep] (graph:member? ordered-names dep))
      (graph:entry-field entry dep-key)))
 
   (defn planned-ok-entries [entries planned-reports]
@@ -47,7 +41,7 @@
              (let* [next (next-ready-plan-entry remaining dep-key ordered-names)
                     name (graph:entry-name next)]
                (loop
-                (remove-entry-by-name remaining name)
+                (graph:remove-entry-by-name remaining name)
                 (cons name ordered-names)
                 (cons
                  (make-plan-item phase next (graph:find-entry planned-reports name))

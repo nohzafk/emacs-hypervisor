@@ -98,13 +98,7 @@ the same form."
           (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
            unit-name
            (cdr form))))
-   ((memq (car form) '(let let*))
-    (append
-     (list (car form) (cadr form))
-     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
-      unit-name
-      (cddr form))))
-   ((memq (car form) '(when unless))
+   ((memq (car form) '(let let* when unless dolist dotimes))
     (append
      (list (car form) (cadr form))
      (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
@@ -129,12 +123,6 @@ the same form."
          unit-name
          clause))
       (cdr form))))
-   ((memq (car form) '(dolist dotimes))
-    (append
-     (list (car form) (cadr form))
-     (emacs-hypervisor-effect-aware-reload--rewrite-body-forms
-      unit-name
-      (cddr form))))
    (t form)))
 
 (defun emacs-hypervisor-effect-aware-reload-normalize-body (unit-name body)
