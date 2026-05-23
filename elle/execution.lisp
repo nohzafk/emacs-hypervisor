@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared execution helpers for package and unit runtime phases.
 
 (defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]
@@ -37,10 +38,11 @@
       fields))
 
   (defn package-install-batch-form [plan-items]
-    `(emacs-hypervisor-runtime-install-package-batch
-      ',(map
-         (fn [{:entry entry}] (package-entry-install-spec entry))
-         plan-items)))
+    (let [entries (map
+                   (fn [{:entry entry}] (package-entry-install-spec entry))
+                   plan-items)]
+      (list 'emacs-hypervisor-runtime-install-package-batch
+            (list 'quote entries))))
 
   (defn execution-error [result]
     (protocol:response-error result))
@@ -88,7 +90,7 @@
                (loop
                 (rest remaining)
                 next-id
-                (cons report collected)))))]
+                (pair report collected)))))]
       (loop items next-id ())))
 
   (defn collect-reports [items next-report]
@@ -99,7 +101,7 @@
              (reverse collected)
              (loop
               (rest remaining)
-              (cons (next-report (first remaining) collected) collected))))]
+              (pair (next-report (first remaining) collected) collected))))]
       (loop items ())))
 
   (defn executed-package-report [name entry]

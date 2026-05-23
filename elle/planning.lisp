@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared execution planning helpers.
 
 (defn emacs-hypervisor-planning-module [protocol graph]
@@ -42,8 +43,8 @@
                     name (graph:entry-name next)]
                (loop
                 (graph:remove-entry-by-name remaining name)
-                (cons name ordered-names)
-                (cons
+                (pair name ordered-names)
+                (pair
                  (make-plan-item phase next (graph:find-entry planned-reports name))
                  ordered-items)))))]
       (phase-plan

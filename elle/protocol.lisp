@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared `sexp-rpc` protocol helpers.
 
 (defn emacs-hypervisor-protocol-module []
@@ -264,7 +265,7 @@
       (route & rest)
        (if (= route expected)
          rest
-         (cons route (remove-first-route rest expected)))
+         (pair route (remove-first-route rest expected)))
       _ ()))
 
   (defn pop-route-message [mailbox route]

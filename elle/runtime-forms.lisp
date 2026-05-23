@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared helper forms emitted into Emacs at session startup.
 
 (include-file "runtime-forms/module-loader.lisp")

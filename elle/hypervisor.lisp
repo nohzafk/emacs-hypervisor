@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## hypervisor.lisp
 ##
 ## Shared Hypervisor backend:
@@ -227,10 +228,10 @@
       :eval
       (benchmark:eval-payload
        (if config-org-file
-         `(:form (let ((tangled-file
+         `(:form (let [(tangled-file
                         (expand-file-name
                          ".config.tangled.el"
-                         (file-name-directory ,config-org-file))))
+                         (file-name-directory ,config-org-file)))]
                    (emacs-hypervisor-reset-declarations)
                    (require (quote ob-tangle))
                    (org-babel-tangle-file

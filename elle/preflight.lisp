@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared env and executable preflight helpers.
 
 (defn emacs-hypervisor-preflight-module [protocol graph mailbox benchmark]
@@ -43,7 +44,7 @@
           check (probe-executable binary current-id)]
       {:next-id (+ current-id 1)
        :reports
-       (cons
+       (pair
         (executable-probe-report unit check)
         reports)}))
 

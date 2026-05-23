@@ -1,4 +1,4 @@
-(elle/epoch 8)
+(elle/epoch 10)
 ## tests/elle/hypervisor-runtime.lisp
 ##
 ## Regression checks extracted from the removed numbered spikes. These cover
@@ -401,9 +401,8 @@
     (assert (= next-id 11) "tracker next id")
     (assert (= (length stub-sent-requests) 1) "tracker sends one batch eval")
     (let* [batch-request (get stub-sent-requests 0)
-           batch-payload (get batch-request :payload)
-           batch-form (get batch-payload :form)
-           call-head (first batch-form)]
+           batch-form (wire-protocol:plist-get (get batch-request :payload) :form)
+           call-head (syntax->datum (first batch-form))]
       (assert
        (= call-head 'emacs-hypervisor-runtime-install-package-batch)
        "tracker calls install-package-batch"))
@@ -443,13 +442,13 @@
   (execution:execute-package-entry-plan-tracker local-plan-items 50)
   (let* [batch-request (get stub-sent-requests 0)
          batch-form (wire-protocol:plist-get (get batch-request :payload) :form)
-         entries-quoted (first (rest (rest batch-form)))
-         entries (first (rest entries-quoted))
+         quote-form (first (rest batch-form))
+         entries (first (rest quote-form))
          entry (first entries)]
     (assert (= (length entries) 1) "batch contains one entry")
-    (assert (= (get entry :name) "elle-lsp-bridge") "entry preserves name")
-    (assert (= (get entry :local) "/tmp/elle-lsp-bridge") "entry preserves local path")
-    (assert (= (get entry :lisp-dir) "lisp") "entry preserves lisp-dir")))
+    (assert (= (wire-protocol:plist-get entry :name) "elle-lsp-bridge") "entry preserves name")
+    (assert (= (wire-protocol:plist-get entry :local) "/tmp/elle-lsp-bridge") "entry preserves local path")
+    (assert (= (wire-protocol:plist-get entry :lisp-dir) "lisp") "entry preserves lisp-dir")))
 (println "  3a. local package install spec: ok")
 
 (let* [{:reports planned-package-reports}
