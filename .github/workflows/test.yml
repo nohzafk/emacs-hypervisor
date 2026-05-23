@@ -16,7 +16,6 @@ env:
   # bumps, primitive renames) cannot break CI on an unrelated push.
   # Update this when you intentionally adopt newer Elle.
   ELLE_REF: 2db56eaf6934b89f3b940fd69c7b45c27a159aa0
-  ELLE_SKIP_PLUGINS: "1"
 
 jobs:
   test:
@@ -37,8 +36,8 @@ jobs:
       - name: Setup just
         uses: extractions/setup-just@v2
 
-      # Cache the Elle checkout itself (clone + submodules) so re-runs skip
-      # the network fetch. Keyed on the pinned ELLE_REF.
+      # Cache the Elle checkout so re-runs skip the network fetch.
+      # Keyed on the pinned ELLE_REF.
       - name: Cache Elle checkout
         id: cache-elle-src
         uses: actions/cache@v4

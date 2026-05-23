@@ -37,7 +37,7 @@ verify:
 
 [group('Elle')]
 bootstrap-elle:
-    ./scripts/bootstrap-elle
+    ./scripts/bootstrap-elle --plugins
 
 [group('Elle')]
 start-elle-mcp:
