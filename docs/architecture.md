@@ -201,7 +201,7 @@ emacs-hypervisor/
 │   └── runtime-forms/                 # transient Elisp emitted per session
 │       ├── module-loader.lisp         #   module loading coordinator
 │       ├── emacs-hypervisor-declarations.el       #   package!/config-unit! macros
-│       ├── emacs-hypervisor-elpaca-bridge.el       #   Elpaca integration
+│       ├── emacs-hypervisor-package-bridge.el      #   package.el/package-vc bridge
 │       ├── emacs-hypervisor-package-runtime.el     #   package event handling
 │       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
 │       ├── emacs-hypervisor-session-base.el        #   session lifecycle

@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared graph, validation, and reporting helpers.
 
 (defn emacs-hypervisor-graph-module []
@@ -167,7 +168,7 @@
         (let [next (first ready)]
           (resolve-reports-loop
            (remove-entry-by-name remaining (entry-name next))
-           (cons (make-next-report next reports) reports)
+           (pair (make-next-report next reports) reports)
            ready?
            make-next-report)))))
 

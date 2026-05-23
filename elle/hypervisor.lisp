@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## hypervisor.lisp
 ##
 ## Shared Hypervisor backend:
@@ -150,10 +151,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS"
            "elle/runtime-forms/emacs-hypervisor-session-base.el")
-          elpaca-bridge-module
+          package-bridge-module
           (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_FORMS"
-           "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el")
+           "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-package-bridge.el")
           package-runtime-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_FORMS"
@@ -227,10 +228,10 @@
       :eval
       (benchmark:eval-payload
        (if config-org-file
-         `(:form (let ((tangled-file
+         `(:form (let [(tangled-file
                         (expand-file-name
                          ".config.tangled.el"
-                         (file-name-directory ,config-org-file))))
+                         (file-name-directory ,config-org-file)))]
                    (emacs-hypervisor-reset-declarations)
                    (require (quote ob-tangle))
                    (org-babel-tangle-file
@@ -325,7 +326,7 @@
               (benchmark:eval-payload
                `(:form ,(runtime-forms:install-session-helpers-form
                          session-base-module
-                         elpaca-bridge-module
+                         package-bridge-module
                          package-runtime-module
                          unit-runtime-module)
                  :metric-name :install-session-helpers

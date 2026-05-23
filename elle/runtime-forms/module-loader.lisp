@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Generic emitted loader for static Elisp modules.
 
 (defn emacs-hypervisor-runtime-forms-module-loader-module []
@@ -17,8 +18,8 @@
       (cond
        forms
         (let [module-forms-literal (list 'quote forms)]
-          `((let ((emacs-hypervisor-source-path ,path)
-                  (emacs-hypervisor-module-forms ,module-forms-literal))
+          `((let [(emacs-hypervisor-source-path ,path)
+                  (emacs-hypervisor-module-forms ,module-forms-literal)]
               (with-temp-buffer
                 (setq-local lexical-binding t)
                 (setq-local load-file-name emacs-hypervisor-source-path)
@@ -36,8 +37,8 @@
                 ,ready-marker))))
 
        source
-        `((let ((emacs-hypervisor-source-path ,path)
-                (emacs-hypervisor-source-text ,source))
+        `((let [(emacs-hypervisor-source-path ,path)
+                (emacs-hypervisor-source-text ,source)]
             (with-temp-buffer
               (setq-local lexical-binding t)
               (setq-local load-file-name emacs-hypervisor-source-path)

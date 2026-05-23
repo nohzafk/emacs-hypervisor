@@ -150,6 +150,10 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
         embedded_forms: embedded::EMBEDDED_REPORT_FORMS,
     },
     PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_FORMS",
+        embedded_forms: embedded::EMBEDDED_ELLE_CANONICALIZE_FORMS,
+    },
+    PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS",
         embedded_forms: embedded::EMBEDDED_DECLARATIONS_FORMS,
     },
@@ -178,6 +182,10 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
         embedded_forms: embedded::EMBEDDED_SELECTIVE_RELOAD_FORMS,
     },
     PackedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_FORMS",
+        embedded_forms: embedded::EMBEDDED_CONFIG_PATHS_FORMS,
+    },
+    PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_FORMS",
         embedded_forms: embedded::EMBEDDED_COMPOSE_FORMS,
     },
@@ -186,8 +194,8 @@ const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
         embedded_forms: embedded::EMBEDDED_SESSION_BASE_FORMS,
     },
     PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_FORMS",
-        embedded_forms: embedded::EMBEDDED_ELPACA_BRIDGE_FORMS,
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_FORMS",
+        embedded_forms: embedded::EMBEDDED_PACKAGE_BRIDGE_FORMS,
     },
     PackedElispModule {
         env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_FORMS",

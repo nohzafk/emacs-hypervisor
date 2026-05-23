@@ -142,8 +142,8 @@ const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
         "elle/runtime-forms/emacs-hypervisor-session-base.el",
     ),
     (
-        "ELPACA_BRIDGE",
-        "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el",
+        "PACKAGE_BRIDGE",
+        "elle/runtime-forms/emacs-hypervisor-package-bridge.el",
     ),
     (
         "PACKAGE_RUNTIME",

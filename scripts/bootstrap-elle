@@ -6,6 +6,8 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 elle_repo=${ELLE_REPO:-https://github.com/elle-lisp/elle.git}
+elle_ref=${ELLE_REF:-}
+elle_skip_plugins=${ELLE_SKIP_PLUGINS:-}
 elle_bin="$elle_dir/target/release/elle"
 
 usage() {
@@ -21,6 +23,10 @@ submodules, build the release binary, and build the MCP plugins:
 Environment overrides:
 - ELLE_DIR  destination checkout directory (default: $repo_dir/.elle)
 - ELLE_REPO clone URL (default: $elle_repo)
+- ELLE_REF  pin to a specific commit/branch/tag (default: upstream HEAD)
+- ELLE_SKIP_PLUGINS  when set to a non-empty value, skip building the MCP
+  plugins (oxigraph, syn); only the elle binary is built. Useful for CI
+  test jobs that do not need the MCP server.
 - LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script
   auto-detects Xcode, Command Line Tools, and common package-manager libclang
   installs when available
@@ -150,6 +156,12 @@ else
   echo "Using existing Elle checkout at $elle_dir"
 fi
 
+if [ -n "$elle_ref" ]; then
+  echo "Checking out Elle ref: $elle_ref"
+  git -C "$elle_dir" fetch --tags origin "$elle_ref" || git -C "$elle_dir" fetch --tags origin
+  git -C "$elle_dir" checkout --quiet "$elle_ref"
+fi
+
 echo "Initializing Elle submodules"
 git -C "$elle_dir" submodule update --init --recursive
 
@@ -159,27 +171,29 @@ echo "Building Elle release binary"
   cargo build --release
 )
 
-echo "Building Elle MCP plugins"
-if libclang_path=$(detect_libclang_path); then
-  echo "Using LIBCLANG_PATH=$libclang_path"
-  (
-    cd "$elle_dir"
-    env LIBCLANG_PATH="$libclang_path" make -C plugins mcp
-  )
+if [ -n "$elle_skip_plugins" ]; then
+  echo "Skipping Elle MCP plugins (ELLE_SKIP_PLUGINS set)"
 else
-  (
-    cd "$elle_dir"
-    make -C plugins mcp
-  )
+  echo "Building Elle MCP plugins"
+  if libclang_path=$(detect_libclang_path); then
+    echo "Using LIBCLANG_PATH=$libclang_path"
+    (
+      cd "$elle_dir"
+      env LIBCLANG_PATH="$libclang_path" make -C plugins mcp
+    )
+  else
+    (
+      cd "$elle_dir"
+      make -C plugins mcp
+    )
+  fi
 fi
 
 cat <<EOF
 Elle bootstrap complete.
 
 Artifacts:
-- $elle_bin
-- $elle_dir/target/release/libelle_oxigraph
-- $elle_dir/target/release/libelle_syn
+- $elle_bin$(if [ -z "$elle_skip_plugins" ]; then printf '\n- %s/target/release/libelle_oxigraph\n- %s/target/release/libelle_syn' "$elle_dir" "$elle_dir"; fi)
 
 Start the MCP server with:
 

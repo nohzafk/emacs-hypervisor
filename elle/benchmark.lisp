@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared benchmark and instrumentation helpers.
 
 (defn emacs-hypervisor-benchmark-module [protocol enabled?]
@@ -22,8 +23,8 @@
                 remaining (rest rest)]
             (if (metric-payload-key? key)
               (strip-metric-fields remaining)
-              (cons key
-                    (cons value (strip-metric-fields remaining)))))))))
+              (pair key
+                    (pair value (strip-metric-fields remaining)))))))))
 
   (defn elapsed-ms [started-at]
     (* 1000.0 (- (clock/monotonic) started-at)))

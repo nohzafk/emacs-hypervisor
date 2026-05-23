@@ -87,17 +87,17 @@ Failure:
 | `:warning` | Elle | User-visible startup warning to record and display in Emacs |
 | `:report` | Elle | Planned and executed report items |
 | `:metric` | Elle | Benchmark timing data (when enabled) |
-| `:package` | Emacs | Elpaca package install/finish/timeout events |
+| `:package` | Emacs | Package install/failure/finish events |
 | `:shutdown` | Elle | Session finished, with reason and optional failure status |
 
 ### Package event payloads
 
-Emitted by the Elpaca bridge on the Emacs side, consumed by Elle:
+Emitted by the package bridge on the Emacs side, consumed by Elle:
 
 ```lisp
 (:phase :packages :kind :installed :name "magit")
+(:phase :packages :kind :failed    :name "magit" :reason "clone exited 128: ...")
 (:phase :packages :kind :finished)              ;; :reason is optional
-(:phase :packages :kind :timeout)               ;; :reason is optional
 ```
 
 ## Handshake
@@ -192,7 +192,6 @@ Reports are the source of truth for execution outcomes. Each report item has
 | Reason | Used for |
 |---|---|
 | `:executed` | Successfully executed |
-| `:queued` | Package queued to Elpaca |
 | `:blocked-by-package` | Upstream package failed |
 | `:blocked-by-unit` | Upstream unit failed |
 | `:missing-deps` | Package has unresolved `:deps` |

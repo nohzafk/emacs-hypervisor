@@ -1,0 +1,85 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Pin Elle to a known-good commit so upstream breaking changes (epoch
+  # bumps, primitive renames) cannot break CI on an unrelated push.
+  # Update this when you intentionally adopt newer Elle.
+  ELLE_REF: 2db56eaf6934b89f3b940fd69c7b45c27a159aa0
+  ELLE_SKIP_PLUGINS: "1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Emacs
+        uses: purcell/setup-emacs@master
+        with:
+          version: '30.1'
+
+      - name: Setup just
+        uses: extractions/setup-just@v2
+
+      # Cache the Elle checkout itself (clone + submodules) so re-runs skip
+      # the network fetch. Keyed on the pinned ELLE_REF.
+      - name: Cache Elle checkout
+        id: cache-elle-src
+        uses: actions/cache@v4
+        with:
+          path: |
+            .elle
+            !.elle/target
+          key: elle-src-${{ env.ELLE_REF }}
+
+      # Cache cargo registry + workspace target dirs. Keyed on lockfiles
+      # so the cache invalidates when dependencies change.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            host -> target
+            host/elisp_pack -> target
+            .elle -> target
+          shared-key: hypervisor-test
+          # rust-cache auto-keys on Cargo.lock; this just adds a bit more
+          # invalidation safety when the elisp pack manifest changes.
+          key: ${{ hashFiles('host/Cargo.lock', 'host/elisp_pack/Cargo.toml', '.github/workflows/test.yml') }}
+
+      - name: Bootstrap Elle
+        run: just bootstrap-elle
+
+      # scripts/build-hypervisor uses `cargo build --offline --locked`, so the
+      # crate registry must be populated before it runs. Network-fetch the
+      # host workspace deps; rust-cache stores them for subsequent runs.
+      - name: Pre-fetch host dependencies
+        run: |
+          # Seed host/Cargo.lock from .elle/Cargo.lock if missing (matches
+          # the fallback in scripts/build-hypervisor).
+          if [ ! -f host/Cargo.lock ] && [ -f .elle/Cargo.lock ]; then
+            cp .elle/Cargo.lock host/Cargo.lock
+          fi
+          cargo fetch --manifest-path host/Cargo.toml
+          cargo fetch --manifest-path host/elisp_pack/Cargo.toml
+
+      - name: Build hypervisor
+        run: just build
+
+      - name: Run tests
+        run: just test
