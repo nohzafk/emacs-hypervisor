@@ -3,8 +3,7 @@
   "release-type": "rust",
   "packages": {
     "host": {
-      "component": "emacs-hypervisor",
-      "changelog-path": "../CHANGELOG.md"
+      "component": "emacs-hypervisor"
     }
   },
   "bump-minor-pre-major": true,
