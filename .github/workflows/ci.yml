@@ -16,6 +16,7 @@ permissions:
   pull-requests: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Pin Elle to a known-good commit so upstream breaking changes (epoch
   # bumps, primitive renames) cannot break CI on an unrelated push.
   # Update this when you intentionally adopt newer Elle.
