@@ -150,10 +150,10 @@
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS"
            "elle/runtime-forms/emacs-hypervisor-session-base.el")
-          elpaca-bridge-module
+          package-bridge-module
           (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_ELPACA_BRIDGE_FORMS"
-           "elle/runtime-forms/emacs-hypervisor-elpaca-bridge.el")
+           "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_FORMS"
+           "elle/runtime-forms/emacs-hypervisor-package-bridge.el")
           package-runtime-module
           (emacs-hypervisor-embedded-module-spec
            "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_FORMS"
@@ -325,7 +325,7 @@
               (benchmark:eval-payload
                `(:form ,(runtime-forms:install-session-helpers-form
                          session-base-module
-                         elpaca-bridge-module
+                         package-bridge-module
                          package-runtime-module
                          unit-runtime-module)
                  :metric-name :install-session-helpers

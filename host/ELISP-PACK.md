@@ -58,7 +58,7 @@ Packable files (all under `elle/runtime-forms/`):
 ```text
 emacs-hypervisor-session-base.el        # session lifecycle
 emacs-hypervisor-declarations.el        # package!/config-unit! macros
-emacs-hypervisor-elpaca-bridge.el       # Elpaca integration
+emacs-hypervisor-package-bridge.el      # package.el/package-vc bridge
 emacs-hypervisor-package-runtime.el     # package event handling
 emacs-hypervisor-unit-runtime.el        # unit execution helpers
 emacs-hypervisor-selective-reload.el    # reload diffing + scheduling

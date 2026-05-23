@@ -71,37 +71,10 @@ This applies only when `emacs-hypervisor-show-report-on-startup' is nil.")
      (message "[Hypervisor] initial-buffer-choice failed: %s" err)
      nil)))
 
-(defun emacs-hypervisor-report--elpaca-log-buffer-p (buffer)
-  "Return non-nil when BUFFER is the Elpaca startup log buffer."
-  (and (bufferp buffer)
-       (string= (buffer-name buffer) "*elpaca-log*")))
-
-(defun emacs-hypervisor-report--bury-elpaca-log (&optional replacement)
-  "Bury the Elpaca startup log, optionally replacing its window."
-  (when-let ((elpaca-buffer (get-buffer "*elpaca-log*")))
-    (let ((elpaca-window (get-buffer-window elpaca-buffer t)))
-      (bury-buffer elpaca-buffer)
-      (when (and elpaca-window (window-live-p elpaca-window))
-        (cond
-         (replacement
-          (set-window-buffer elpaca-window replacement)
-          (set-window-prev-buffers elpaca-window nil))
-         ((not (one-window-p t))
-          (delete-window elpaca-window))
-         (t
-          (with-selected-window elpaca-window
-            (switch-to-prev-buffer elpaca-window 'bury))))))))
-
 (defun emacs-hypervisor-report-display-initial-buffer ()
   "Display the configured initial buffer after Hypervisor finishes cleanly."
   (let ((buffer (emacs-hypervisor-report--buffer-from-initial-choice
                  initial-buffer-choice)))
-    (when (emacs-hypervisor-report--elpaca-log-buffer-p buffer)
-      (setq buffer nil))
-    (when (and (not buffer)
-               (get-buffer-window "*elpaca-log*" t))
-      (setq buffer (get-buffer-create "*scratch*")))
-    (emacs-hypervisor-report--bury-elpaca-log buffer)
     (when (and buffer (not (get-buffer-window buffer t)))
       (pop-to-buffer buffer))))
 

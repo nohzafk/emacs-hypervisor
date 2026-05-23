@@ -39,7 +39,7 @@ The current architecture target lives in
   - coordinator for Elle-emitted transient Emacs helper forms
 - [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
   - split emitted runtime modules sent into Emacs at session startup
-  - includes shared base state, Elpaca bridge/runtime, and unit execution helpers
+  - includes shared base state, package bridge/runtime (package-vc-install), and unit execution helpers
 - [elle/hypervisor.lisp](/Users/randall/projects/emacs-hypervisor/elle/hypervisor.lisp)
   - non-spike Elle backend entrypoint using the shared runtime modules
 - [tests/elle/hypervisor-runtime.lisp](/Users/randall/projects/emacs-hypervisor/tests/elle/hypervisor-runtime.lisp)

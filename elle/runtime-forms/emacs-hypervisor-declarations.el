@@ -33,7 +33,7 @@
                  (not (member value result)))
         (push value result)))))
 
-(cl-defmacro package! (name &rest args &key repo host branch tag ref files deps local no-compilation)
+(cl-defmacro package! (name &rest args &key repo host branch tag ref deps local lisp-dir)
   (declare (indent defun))
   (let ((pkg-name (if (stringp name) name (symbol-name name))))
     `(push
@@ -44,10 +44,9 @@
        :branch ,branch
        :tag ,tag
        :ref ,ref
-       :files ',files
        :deps ',(emacs-hypervisor--normalize-symbol-list deps)
        :local ,local
-       :no-compilation ,no-compilation)
+       :lisp-dir ,lisp-dir)
       emacs-hypervisor-packages)))
 
 (defmacro config-unit! (name &rest args)

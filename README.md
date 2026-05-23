@@ -54,8 +54,11 @@ not choose your packages, keybindings, UI, editing model, or workflow.
 
 - **Literate config** --- write `config.org` and Hypervisor auto-tangles it at
   startup and reload; no manual tangle step needed.
-- **Elpaca-backed packages** --- `package!` declarations feed into Elpaca for
-  async, reproducible installation.
+- **Built-in package management** --- `package!` declarations install through
+  Emacs's built-in `package-vc-install` (Emacs 29.1+) with `Package-Requires:`
+  resolved against GNU ELPA, NonGNU ELPA, and MELPA. No third-party package
+  manager is embedded; the bridge clones git sources in parallel and adopts
+  them via `package-vc-install-from-checkout`.
 - **Preflight checks** --- circular dependencies, unset env vars, missing
   executables, and absent features are caught *before* execution begins.
 - **Fault-tolerant execution** --- a failed package or unit skips its
@@ -193,6 +196,12 @@ reload as they always have --- the worst case is the status quo, not breakage.
 See [docs/reload.md](docs/reload.md) for the full data model and API, and
 [docs/effect-system.md](docs/effect-system.md) for the registry contract.
 
+## Requirements
+
+- Emacs 29.1 or later (uses built-in `package-vc-install`)
+- `git` on `PATH`
+- Network access on first run (clones VC packages and refreshes archive indices)
+
 ## Usage
 
 Download the `emacs-hypervisor` binary for your platform, make it executable,
@@ -305,17 +314,21 @@ that file exists.
 
 ### `package!` options
 
+Bare `(package! consult)` installs from `package-archives`. Any of `:repo`,
+`:host`, or `:local` switches to `package-vc-install` (git clone of the
+upstream source). `Package-Requires:` deps are resolved against the archives
+either way.
+
 | Option | Purpose |
 |---|---|
-| `:repo` | Git repository (e.g. `"magit/transient"`) |
-| `:host` | Git host (`"github"`, `"gitlab"`, etc.) |
+| `:repo` | Git repository (e.g. `"magit/magit"`); a full URL is used as-is |
+| `:host` | Git host (`"github"` (default), `"gitlab"`, `"codeberg"`, `"sourcehut"`) |
 | `:branch` | Branch to track |
 | `:tag` | Tag to pin |
-| `:ref` | Exact ref to pin |
-| `:files` | File patterns to include |
-| `:deps` | Package dependencies |
-| `:local` | Local filesystem path |
-| `:no-compilation` | Skip native compilation |
+| `:ref` | Exact commit to pin |
+| `:local` | Local filesystem path instead of a remote URL |
+| `:lisp-dir` | Subdirectory containing the `.el` files (rare; for non-standard layouts) |
+| `:deps` | Package dependencies (used by Elle's topological sort) |
 
 ### `config-unit!` options
 
@@ -348,7 +361,9 @@ startup session.
 | Variable | Default | Purpose |
 |---|---|---|
 | `emacs-hypervisor-show-report-on-startup` | `nil` | When non-nil, display the startup report after package processing finishes, or at the first config-unit when there is no package work. The report always appears when a config-unit fails, regardless of this setting. |
-| `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup and bury Elpaca's startup log if it was shown. |
+| `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup. |
+| `emacs-hypervisor-clone-concurrency` | `8` | Maximum number of parallel git clones during initial package install. |
+| `emacs-hypervisor-default-host` | `"github"` | Host assumed for `:repo` shorthand when no `:host` is given. |
 
 ## Development
 

@@ -38,12 +38,10 @@
   :group 'emacs-hypervisor)
 
 (defun emacs-hypervisor-report-quit-window ()
-  "Quit the report window without surfacing the Elpaca log buffer."
+  "Quit the report window."
   (interactive)
   (let ((window (selected-window))
         (buffer (current-buffer)))
-    (when-let ((elpaca-buffer (get-buffer "*elpaca-log*")))
-      (bury-buffer elpaca-buffer))
     (bury-buffer buffer)
     (if (one-window-p t)
         (switch-to-prev-buffer window 'bury)
@@ -324,7 +322,7 @@
 (defun emacs-hypervisor--package-state ()
   (cond
    (emacs-hypervisor--package-installation-active
-    "Installing with Elpaca")
+    "Installing packages")
    (emacs-hypervisor--package-finished-reason
     (capitalize (format "%s" emacs-hypervisor--package-finished-reason)))
    ((emacs-hypervisor--package-report-basis)
@@ -561,24 +559,9 @@
   "Display the Hypervisor startup report buffer."
   (interactive)
   (let* ((buffer (emacs-hypervisor-report-buffer))
-         (report-window (get-buffer-window buffer t))
-         (elpaca-buffer (get-buffer "*elpaca-log*"))
-         (elpaca-window (and elpaca-buffer
-                             (get-buffer-window elpaca-buffer t))))
+         (report-window (get-buffer-window buffer t)))
     (emacs-hypervisor--render-report-buffer)
-    (when elpaca-buffer
-      (bury-buffer elpaca-buffer))
-    (cond
-     (elpaca-window
-      (set-window-buffer elpaca-window buffer)
-      (set-window-prev-buffers elpaca-window nil)
-      (when (and report-window
-                 (not (eq report-window elpaca-window))
-                 (window-live-p report-window)
-                 (not (one-window-p t)))
-        (delete-window report-window)))
-     (report-window nil)
-     (t
-      (pop-to-buffer buffer)))))
+    (unless report-window
+      (pop-to-buffer buffer))))
 
 (provide 'emacs-hypervisor-report)

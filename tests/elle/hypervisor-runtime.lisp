@@ -86,11 +86,11 @@
 
 (def packages
   (list
-   {:name "ui-pkg" :deps (list "core-pkg") :repo "example/ui-pkg" :host nil :branch nil :tag nil :ref nil :files nil :local nil :no-compilation nil}
-   {:name "runtime-fail-dependent" :deps (list "runtime-fail-pkg") :repo "example/runtime-fail-dependent" :host nil :branch nil :tag nil :ref nil :files nil :local nil :no-compilation nil}
-   {:name "core-pkg" :deps (list) :repo "example/core-pkg" :host nil :branch nil :tag nil :ref nil :files nil :local nil :no-compilation nil}
-   {:name "invalid-root" :deps (list "ghost-pkg") :repo "example/invalid-root" :host nil :branch nil :tag nil :ref nil :files nil :local nil :no-compilation nil}
-   {:name "runtime-fail-pkg" :deps (list) :repo "example/runtime-fail-pkg" :host nil :branch nil :tag nil :ref nil :files nil :local nil :no-compilation nil}))
+   {:name "ui-pkg" :deps (list "core-pkg") :repo "example/ui-pkg" :host nil :branch nil :tag nil :ref nil :local nil :lisp-dir nil}
+   {:name "runtime-fail-dependent" :deps (list "runtime-fail-pkg") :repo "example/runtime-fail-dependent" :host nil :branch nil :tag nil :ref nil :local nil :lisp-dir nil}
+   {:name "core-pkg" :deps (list) :repo "example/core-pkg" :host nil :branch nil :tag nil :ref nil :local nil :lisp-dir nil}
+   {:name "invalid-root" :deps (list "ghost-pkg") :repo "example/invalid-root" :host nil :branch nil :tag nil :ref nil :local nil :lisp-dir nil}
+   {:name "runtime-fail-pkg" :deps (list) :repo "example/runtime-fail-pkg" :host nil :branch nil :tag nil :ref nil :local nil :lisp-dir nil}))
 
 (def units
   (list
@@ -362,19 +362,13 @@
 (println "  2. planning: ok")
 
 # ============================================================================
-# 3. Tracker execution derives package failure and dependent skip after queue.
+# 3. Batch execution derives package failure and dependent skip.
 # ============================================================================
 
 (let* [{:reports planned-package-reports}
        (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-await-responses
-        (stub-response 10 true (list {:name "core-pkg" :status :queued}
-                                     {:name "runtime-fail-pkg" :status :queued})))
-  (push stub-await-responses
-        (stub-response 11 true (list {:name "ui-pkg" :status :queued}
-                                     {:name "runtime-fail-dependent" :status :queued})))
   (push stub-read-messages
         (stub-event :package
                     {:phase :packages :kind :installed :name "core-pkg"}))
@@ -383,12 +377,19 @@
                     {:phase :packages :kind :installed :name "ui-pkg"}))
   (push stub-read-messages
         (stub-event :package
+                    {:phase :packages :kind :failed :name "runtime-fail-pkg"
+                     :reason "clone failed"}))
+  (push stub-read-messages
+        (stub-event :package
                     {:phase :packages :kind :finished :reason "completed"}))
   (push stub-read-messages
-        (stub-response 12 true :processing))
+        (stub-response 10 true
+                       (list {:name "core-pkg" :status :installed}
+                             {:name "ui-pkg" :status :installed}
+                             {:name "runtime-fail-pkg" :status :failed :error "clone failed"}
+                             {:name "runtime-fail-dependent" :status :failed :error "blocked"})))
   (let* [{:reports package-reports
           :installed installed
-          :finished-reason finished-reason
           :next-id next-id}
          (execution:execute-package-entry-plan-tracker
           (planning:plan-items package-plan)
@@ -397,25 +398,25 @@
          ui (graph:find-entry package-reports "ui-pkg")
          runtime-fail (graph:find-entry package-reports "runtime-fail-pkg")
          blocked (graph:find-entry package-reports "runtime-fail-dependent")]
-    (assert (= next-id 13) "tracker next id")
-    (assert (= installed (list "core-pkg" "ui-pkg")) "tracker installed names")
-    (assert (= finished-reason "completed") "tracker finished reason")
-    (assert (= (length stub-sent-requests) 3) "tracker sends two queue evals and one process eval")
-    (let* [queue-request (wire-protocol:from-wire (get stub-sent-requests 0))
-           queue-payload (wire-protocol:from-wire (get queue-request :payload))
-           queue-form (get queue-payload :form)
-           first-body-form (first (rest (rest queue-form)))]
+    (assert (= next-id 11) "tracker next id")
+    (assert (= (length stub-sent-requests) 1) "tracker sends one batch eval")
+    (let* [batch-request (get stub-sent-requests 0)
+           batch-payload (get batch-request :payload)
+           batch-form (get batch-payload :form)
+           call-head (first batch-form)]
       (assert
-       (= first-body-form '(emacs-hypervisor-runtime-ensure-package-manager))
-       "package queue eval lazily ensures package manager"))
+       (= call-head 'emacs-hypervisor-runtime-install-package-batch)
+       "tracker calls install-package-batch"))
+    (assert (graph:member? installed "core-pkg") "tracker installed contains core")
+    (assert (graph:member? installed "ui-pkg") "tracker installed contains ui")
     (assert (= (get core :status) :ok) "tracker core status")
     (assert (= (get ui :status) :ok) "tracker ui status")
-    (assert (= (get runtime-fail :status) :failed) "tracker missing install callback fails package")
-    (assert (= (get (get runtime-fail :details) :source) :tracker) "tracker failure source")
-    (assert (= (get (get runtime-fail :details) :finished-reason) "completed") "tracker failure reason detail")
+    (assert (= (get runtime-fail :status) :failed) "tracker root failure")
+    (assert (= (get (get runtime-fail :details) :source) :eval) "tracker failure source")
+    (assert (= (get (get runtime-fail :details) :error) "clone failed") "tracker failure error detail")
     (assert (= (get blocked :status) :skipped) "tracker blocks dependent package")
     (assert (= (get (get blocked :details) :blockers) (list "runtime-fail-pkg")) "tracker blocked details")))
-(println "  3. tracker execution: ok")
+(println "  3. batch execution: ok")
 
 (let* [local-entry
        {:name "elle-lsp-bridge"
@@ -425,14 +426,11 @@
         :branch nil
         :tag nil
         :ref nil
-        :files (list "*.el" "multiserver")
         :local "/tmp/elle-lsp-bridge"
-        :no-compilation true}
+        :lisp-dir "lisp"}
        local-plan-items
        (list {:name "elle-lsp-bridge" :entry local-entry})]
   (reset-stub-state)
-  (push stub-await-responses
-        (stub-response 50 true (list {:name "elle-lsp-bridge" :status :queued})))
   (push stub-read-messages
         (stub-event :package
                     {:phase :packages :kind :installed :name "elle-lsp-bridge"}))
@@ -440,42 +438,28 @@
         (stub-event :package
                     {:phase :packages :kind :finished :reason "completed"}))
   (push stub-read-messages
-        (stub-response 51 true :processing))
+        (stub-response 50 true
+                       (list {:name "elle-lsp-bridge" :status :installed})))
   (execution:execute-package-entry-plan-tracker local-plan-items 50)
-  (let* [queue-request (get stub-sent-requests 0)
-         queue-payload (wire-protocol:plist-get (get queue-request :payload) :form)
-         queue-form queue-payload
-         queue-step (first (rest (rest (rest queue-form))))
-         queue-body (first (rest (rest queue-step)))
-         elpaca-form (first (rest (rest queue-body)))
-         elpaca-order (first (rest elpaca-form))]
-    (assert
-     (= elpaca-order
-        '(elle-lsp-bridge
-          :files ("*.el" "multiserver")
-          :repo "/tmp/elle-lsp-bridge"
-          :build (:not elpaca-build-compile)))
-     "package queue preserves local :files and disables byte compilation")))
-(println "  3a. local package recipe options: ok")
+  (let* [batch-request (get stub-sent-requests 0)
+         batch-form (wire-protocol:plist-get (get batch-request :payload) :form)
+         entries-quoted (first (rest (rest batch-form)))
+         entries (first (rest entries-quoted))
+         entry (first entries)]
+    (assert (= (length entries) 1) "batch contains one entry")
+    (assert (= (get entry :name) "elle-lsp-bridge") "entry preserves name")
+    (assert (= (get entry :local) "/tmp/elle-lsp-bridge") "entry preserves local path")
+    (assert (= (get entry :lisp-dir) "lisp") "entry preserves lisp-dir")))
+(println "  3a. local package install spec: ok")
 
 (let* [{:reports planned-package-reports}
        (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-await-responses
-        (stub-response 40 true (list {:name "core-pkg" :status :queued}
-                                     {:name "runtime-fail-pkg" :status :queued})))
-  (push stub-await-responses
-        (stub-response 41 true (list {:name "ui-pkg" :status :queued}
-                                     {:name "runtime-fail-dependent" :status :queued})))
   (push stub-read-messages
-        (stub-event :package
-                    {:phase :packages :kind :installed :name "core-pkg"}))
-  (push stub-read-messages
-        (stub-response 42 false nil :error "elpaca process failed"))
+        (stub-response 40 false nil :error "package install failed"))
   (let* [{:reports package-reports
           :installed installed
-          :finished-reason finished-reason
           :next-id next-id}
          (execution:execute-package-entry-plan-tracker
           (planning:plan-items package-plan)
@@ -484,17 +468,15 @@
          ui (graph:find-entry package-reports "ui-pkg")
          runtime-fail (graph:find-entry package-reports "runtime-fail-pkg")
          blocked (graph:find-entry package-reports "runtime-fail-dependent")]
-    (assert (= next-id 43) "tracker failed process next id")
-    (assert (= installed (list "core-pkg")) "tracker preserves installed before process failure")
-    (assert (= finished-reason (list :queue-start-error "elpaca process failed"))
-            "tracker exposes failed process reason")
-    (assert (= (get core :status) :ok) "tracker keeps installed package ok after process failure")
-    (assert (= (get ui :status) :failed) "tracker fails non-installed package after process failure")
-    (assert (= (get (get ui :details) :source) :queue) "tracker failure source is queue")
-    (assert (= (get (get ui :details) :error) "elpaca process failed") "tracker failure error detail")
-    (assert (= (get runtime-fail :status) :failed) "tracker fails missing root after process failure")
-    (assert (= (get blocked :status) :skipped) "tracker blocks dependents after process failure")))
-(println "  3b. tracker process failure preserves installed events: ok")
+    (assert (= next-id 41) "tracker failed batch next id")
+    (assert (empty? installed) "tracker reports no installed on batch failure")
+    (assert (= (get core :status) :failed) "tracker fails all packages on batch failure")
+    (assert (= (get ui :status) :failed) "tracker fails ui on batch failure")
+    (assert (= (get (get ui :details) :source) :eval) "tracker failure source is eval")
+    (assert (= (get (get ui :details) :error) "package install failed") "tracker failure error detail")
+    (assert (= (get runtime-fail :status) :failed) "tracker fails missing root after batch failure")
+    (assert (= (get blocked :status) :failed) "tracker fails dependents after batch failure")))
+(println "  3b. tracker batch failure: ok")
 
 (reset-stub-state)
 (let [{:reports reports :installed installed :next-id next-id}

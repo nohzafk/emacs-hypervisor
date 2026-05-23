@@ -17,113 +17,30 @@
      (eval-payload form metric-name metric-kind phase item-name))
     (protocol:await-response mailbox id))
 
-  (defn local-repo-string? [repo]
-    (and (= (type-of repo) :string)
-         (or (string/starts-with? repo "/")
-             (string/starts-with? repo "~")
-             (string/starts-with? repo "./")
-             (string/starts-with? repo "../"))))
+  (defn package-entry-install-spec [entry]
+    (let* [name (graph:entry-name entry)
+           host (graph:entry-field entry :host)
+           repo (graph:entry-field entry :repo)
+           branch (graph:entry-field entry :branch)
+           tag (graph:entry-field entry :tag)
+           ref (graph:entry-field entry :ref)
+           local (graph:entry-field entry :local)
+           lisp-dir (graph:entry-field entry :lisp-dir)
+           fields (list :name name)
+           fields (append-plist-field fields :repo repo)
+           fields (append-plist-field fields :host host)
+           fields (append-plist-field fields :branch branch)
+           fields (append-plist-field fields :tag tag)
+           fields (append-plist-field fields :ref ref)
+           fields (append-plist-field fields :local local)
+           fields (append-plist-field fields :lisp-dir lisp-dir)]
+      fields))
 
-  (defn expand-home-path [path]
-    (if (and (= (type-of path) :string)
-             (string/starts-with? path "~/"))
-      (if-let [home (sys/env "HOME")]
-        (string home "/" (slice path 2))
-        path)
-      path))
-
-  (defn normalize-host [host]
-    (if (= (type-of host) :string)
-      (read host)
-      host))
-
-  (defn append-recipe-fields [recipe enabled? fields]
-    (if enabled?
-      (append recipe fields)
-      recipe))
-
-  (defn append-recipe-spec [recipe spec]
-    (match spec
-      (enabled fields)
-       (append-recipe-fields recipe enabled fields)
-      _ recipe))
-
-  (defn package-entry-order [entry]
-    (let* [{:name name-string
-            :host host
-            :repo repo
-            :branch branch
-            :tag tag
-            :ref ref
-            :files files
-            :local local
-            :no-compilation no-compilation}
-           entry
-           name (read name-string)
-           repo-is-local (local-repo-string? repo)
-           recipe-specs
-           (list
-            (list
-             (and host (not repo-is-local))
-             `(:host ,(normalize-host host)))
-            (list
-             (and repo (not repo-is-local) (nil? host))
-             '(:host github))
-            (list
-             (and repo (not repo-is-local))
-             `(:repo ,repo))
-            (list branch `(:branch ,branch))
-            (list tag `(:tag ,tag))
-            (list ref `(:ref ,ref))
-            (list files `(:files ,files))
-            (list local `(:repo ,(expand-home-path local)))
-            (list
-             (and repo-is-local (not local))
-             `(:repo ,(expand-home-path repo)))
-            (list
-             no-compilation
-             '(:build (:not elpaca-build-compile))))
-           recipe
-           (reduce append-recipe-spec () recipe-specs)]
-        (if (empty? recipe)
-          name
-          (cons name recipe))))
-
-  (defn package-entry-queue-form [name order]
-    `(elpaca ,order
-       (emacs-hypervisor-runtime-package-callback ,name)))
-
-  (defn package-entry-queue-step-form [name order]
-    `(condition-case err
-       (progn
-         (push
-          (list
-           :phase :packages
-           :event :attempt
-           :name ,name)
-          emacs-hypervisor-execution-events)
-         ,(package-entry-queue-form name order)
-         (push
-          (list :name ,name :status :queued)
-          emacs-hypervisor-batch-queue-results))
-       (error
-        (push
-         (list :name ,name :status :failed :error (format "%S" err))
-         emacs-hypervisor-batch-queue-results))))
-
-  (defn package-queue-batch-form [plan-items]
-    (append
-     '(let ((emacs-hypervisor-batch-queue-results ())))
-     (append
-      '((emacs-hypervisor-runtime-ensure-package-manager))
-      (append
-       (map
-        (fn [{:entry entry :name name}]
-          (package-entry-queue-step-form
-           name
-           (package-entry-order entry)))
-        plan-items)
-       '((nreverse emacs-hypervisor-batch-queue-results))))))
+  (defn package-install-batch-form [plan-items]
+    `(emacs-hypervisor-runtime-install-package-batch
+      ',(map
+         (fn [{:entry entry}] (package-entry-install-spec entry))
+         plan-items)))
 
   (defn execution-error [result]
     (protocol:response-error result))
@@ -131,100 +48,11 @@
   (defn execution-ok? [result]
     (protocol:response-ok? result))
 
-  (defn event-payload [event]
-    (protocol:from-wire (protocol:message-payload event)))
-
   (defn eval-execution-details [error]
     {:source :eval :error error})
 
-  (defn queued-package-report? [report]
-    (and (= (get report :status) :ok)
-         (= (get report :reason) :queued)))
-
-  (defn queued-package-entry-report [name entry]
-    (graph:make-report
-     name
-     :ok
-     :queued
-     (graph:entry-field entry :deps)))
-
-  (defn ordered-plan-reports [plan-items reports]
-    (map
-     (fn [{:name name}]
-       (graph:find-entry reports name))
-     plan-items))
-
-  (defn package-plan-item-blockers [{:entry entry} queued-package-reports]
-    (graph:report-blockers
-     queued-package-reports
-     (graph:entry-field entry :deps)))
-
-  (defn queueable-plan-items [plan-items queued-package-reports]
-    (filter
-     (fn [plan-item]
-       (empty?
-        (package-plan-item-blockers
-         plan-item
-         queued-package-reports)))
-     plan-items))
-
-  (defn remove-plan-items [plan-items removed-plan-items]
-    (let [removed-names (map (fn [{:name name}] name) removed-plan-items)]
-      (filter
-       (fn [{:name name}]
-         (not (graph:member? removed-names name)))
-       plan-items)))
-
-  (defn blocked-package-entry-report
-      [{:entry entry :name name} queued-package-reports]
-    (graph:blocked-report
-     name
-     :blocked-by-package
-     (package-plan-item-blockers
-      {:entry entry :name name}
-      queued-package-reports)))
-
-  (defn queued-package-batch-results [result]
+  (defn batch-install-results [result]
     (protocol:from-wire (protocol:message-payload result)))
-
-  (defn queued-package-batch-entry [queue-results name]
-    (graph:find-entry queue-results name))
-
-  (defn queued-package-batch-report
-      [{:entry entry :name name} queue-results]
-    (if-let [queue-result (queued-package-batch-entry queue-results name)]
-      (if (= (get queue-result :status) :queued)
-        (queued-package-entry-report name entry)
-        (failed-eval-report
-         name
-         (get queue-result :error "missing queue error")))
-      (failed-eval-report name "missing queue result")))
-
-  (defn queue-ready-package-batch-state [ready-plan-items current-id]
-    (let [queue-result
-          (eval-form
-           current-id
-           (package-queue-batch-form ready-plan-items)
-           :queue-package-batch
-           :package-queue
-           :packages
-           nil)]
-      (if (execution-ok? queue-result)
-        (let [queue-results (queued-package-batch-results queue-result)]
-          {:next-id (+ current-id 1)
-           :reports
-           (map
-            (fn [plan-item]
-              (queued-package-batch-report
-               plan-item
-               queue-results))
-            ready-plan-items)})
-        {:next-id (+ current-id 1)
-         :reports
-         (map
-          (fn [{:name name}]
-            (failed-eval-report name (execution-error queue-result)))
-          ready-plan-items)})))
 
   (defn report-state [next-id report]
     {:next-id next-id
@@ -274,123 +102,6 @@
               (cons (next-report (first remaining) collected) collected))))]
       (loop items ())))
 
-  (defn queue-package-entry-plan [plan-items next-id]
-    (letrec
-        [loop
-         (fn [remaining current-id queued-reports]
-           (if (empty? remaining)
-             {:next-id current-id
-              :reports (ordered-plan-reports plan-items queued-reports)}
-             (let [ready-plan-items
-                   (queueable-plan-items remaining queued-reports)]
-               (if (empty? ready-plan-items)
-                 {:next-id current-id
-                  :reports
-                  (ordered-plan-reports
-                   plan-items
-                   (append
-                    (map
-                     (fn [plan-item]
-                       (blocked-package-entry-report
-                        plan-item
-                        queued-reports))
-                     remaining)
-                    queued-reports))}
-                 (let [{:next-id next-id :reports ready-reports}
-                       (queue-ready-package-batch-state
-                        ready-plan-items
-                        current-id)]
-                   (loop
-                    (remove-plan-items remaining ready-plan-items)
-                    next-id
-                    (append ready-reports queued-reports)))))))]
-      (loop plan-items next-id ())))
-
-  (defn tracker-failure-details [reason]
-    (match reason
-      nil
-       {:source :tracker :error :missing-install-callback}
-      "timeout"
-       {:source :tracker :error :timeout}
-      (:queue-start-error error)
-       {:source :queue :error error}
-      _
-       {:source :tracker
-        :error :missing-install-callback
-        :finished-reason reason}))
-
-  (defn tracker-process-result-id? [message process-id]
-    (and (= (protocol:message-kind message) :response)
-         (= (protocol:message-id message) process-id)))
-
-  (defn tracker-installed [installed name]
-    (if (graph:member? installed name)
-      installed
-      (cons name installed)))
-
-  (defn tracker-state [installed finished-reason process-result]
-    (if (and process-result
-             (or (not (execution-ok? process-result))
-                 finished-reason))
-      {:result process-result
-       :installed (reverse installed)
-       :reason finished-reason}
-      nil))
-
-  (defn tracker-process-result [process-id process-result message]
-    (if (tracker-process-result-id? message process-id)
-      message
-      process-result))
-
-  (defn advance-package-tracker-state
-      [process-id installed finished-reason process-result message]
-    (if (and (= (protocol:message-kind message) :event)
-             (= (protocol:message-topic message) :package))
-      (let [payload (event-payload message)
-            name (get payload :name)
-            reason (get payload :reason)]
-        (match [(get payload :phase) (get payload :kind)]
-          [:packages :installed]
-           (collect-package-tracker-state
-            process-id
-            (tracker-installed installed name)
-            finished-reason
-            process-result)
-          [:packages :finished]
-           (collect-package-tracker-state
-            process-id
-            installed
-            reason
-            process-result)
-          [:packages :timeout]
-           (collect-package-tracker-state
-            process-id
-            installed
-            (or reason "timeout")
-            process-result)
-          _
-           (collect-package-tracker-state
-            process-id
-            installed
-            finished-reason
-            process-result)))
-      (collect-package-tracker-state
-       process-id
-       installed
-       finished-reason
-       (tracker-process-result process-id process-result message))))
-
-  (defn collect-package-tracker-state
-      [process-id installed finished-reason process-result]
-    (if-let [state (tracker-state installed finished-reason process-result)]
-      state
-      (advance-package-tracker-state
-       process-id
-       installed
-       finished-reason
-       process-result
-       (protocol:read-message mailbox ":package event or :response"))))
-
   (defn executed-package-report [name entry]
     (graph:make-report
      name
@@ -398,66 +109,51 @@
      :executed
      (graph:entry-field entry :deps)))
 
-  (defn failed-package-report [name finished-reason]
-    (graph:make-report
-     name
-     :failed
-     :execution
-     (tracker-failure-details finished-reason)))
+  (defn drain-events-until-response [process-id]
+    (let [message (protocol:read-message mailbox ":package event or :response")]
+      (if (and (= (protocol:message-kind message) :response)
+               (= (protocol:message-id message) process-id))
+        message
+        (drain-events-until-response process-id))))
 
-  (defn next-tracker-package-entry-report
-      [{:entry entry :name name}
-       queued-package-reports
-       final-package-reports
-       installed-names
-       finished-reason]
-    (let [queued-report (graph:find-entry queued-package-reports name)]
-      (match [(queued-package-report? queued-report)
-              (graph:member? installed-names name)]
-        [false _]
-         queued-report
-        [true true]
+  (defn batch-result-status [batch-result]
+    (and batch-result (get batch-result :status)))
+
+  (defn batch-installed-names [batch-results]
+    (map
+     (fn [r] (get r :name))
+     (filter
+      (fn [r] (= (batch-result-status r) :installed))
+      batch-results)))
+
+  (defn batch-package-report [plan-item batch-results final-reports]
+    (let* [{:entry entry :name name} plan-item
+           batch-result (graph:find-entry batch-results name)
+           status (batch-result-status batch-result)]
+      (match status
+        :installed
          (executed-package-report name entry)
+        :failed
+         (let [deps (graph:entry-field entry :deps)
+               blockers (graph:report-blockers final-reports deps)]
+           (if (empty? blockers)
+             (failed-eval-report
+              name
+              (get batch-result :error "install failed"))
+             (graph:blocked-report name :blocked-by-package blockers)))
         _
-         (let [package-blockers
-               (graph:report-blockers
-                final-package-reports
-                (graph:entry-field entry :deps))]
-           (match (empty? package-blockers)
-             true
-              (failed-package-report name finished-reason)
-             _
-              (graph:blocked-report name :blocked-by-package package-blockers))))))
+         (failed-eval-report name "missing install result"))))
 
-  (defn derive-tracker-package-reports
-      [plan-items queued-package-reports installed-names finished-reason]
+  (defn derive-batch-package-reports [plan-items batch-results]
     (collect-reports
      plan-items
-     (fn [plan-item final-package-reports]
-       (next-tracker-package-entry-report
-        plan-item
-        queued-package-reports
-        final-package-reports
-        installed-names
-        finished-reason))))
+     (fn [plan-item final-reports]
+       (batch-package-report plan-item batch-results final-reports))))
 
-  (defn queued-tracker-plan-items [plan-items queued-package-reports]
-    (filter
-     (fn [{:name name}]
-       (queued-package-report?
-        (graph:find-entry
-         queued-package-reports
-         name)))
+  (defn all-failed-batch-reports [plan-items error]
+    (map
+     (fn [{:name name}] (failed-eval-report name error))
      plan-items))
-
-  (defn tracker-report-state [{:result process-result :installed installed :reason reason}]
-    (let [queue-start-error (list :queue-start-error (execution-error process-result))]
-      (if (execution-ok? process-result)
-        {:result process-result
-         :installed installed
-         :reason reason}
-        {:installed installed
-         :reason (or reason queue-start-error)})))
 
   (defn unit-execution-details [entry]
     {:requires (graph:entry-field entry :requires)
@@ -511,37 +207,29 @@
             result)))))
 
   (defn execute-package-entry-plan-tracker [plan-items next-id]
-    (let [{:reports queued-package-reports :next-id process-id}
-          (queue-package-entry-plan plan-items next-id)
-          queued-plan-items
-          (queued-tracker-plan-items plan-items queued-package-reports)]
-      (if (empty? queued-plan-items)
-        {:next-id process-id
-         :reports queued-package-reports
-         :installed ()}
-         (let [_
-              (protocol:send-request
+    (if (empty? plan-items)
+      {:next-id next-id :reports () :installed ()}
+      (let [process-id next-id
+            _ (protocol:send-request
                process-id
                :eval
                (eval-payload
-                '(emacs-hypervisor-runtime-process-packages)
-                :process-packages
-                :package-start
+                (package-install-batch-form plan-items)
+                :install-package-batch
+                :package-install
                 :packages
                 nil))
-              tracker-state
-              (collect-package-tracker-state process-id () nil nil)
-              {:installed installed-names :reason finished-reason}
-              (tracker-report-state tracker-state)]
+            result (drain-events-until-response process-id)]
+        (if (execution-ok? result)
+          (let [batch-results (batch-install-results result)
+                reports (derive-batch-package-reports plan-items batch-results)
+                installed (batch-installed-names batch-results)]
+            {:next-id (+ process-id 1)
+             :reports reports
+             :installed installed})
           {:next-id (+ process-id 1)
-           :reports
-           (derive-tracker-package-reports
-            plan-items
-            queued-package-reports
-            installed-names
-            finished-reason)
-           :installed installed-names
-           :finished-reason finished-reason}))))
+           :reports (all-failed-batch-reports plan-items (execution-error result))
+           :installed ()}))))
 
   (defn next-unit-execution-report [entry planned-report package-reports executed-unit-reports current-id]
     (let [name (graph:entry-name entry)
