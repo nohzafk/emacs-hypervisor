@@ -9,7 +9,8 @@ default:
     @just --list
 
 [group('Build')]
-build: bootstrap-elle
+build:
+    ./scripts/bootstrap-elle
     ./scripts/build-hypervisor
 
 [group('Build')]

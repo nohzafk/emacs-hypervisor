@@ -78,7 +78,7 @@ jobs:
           cargo fetch --manifest-path host/elisp_pack/Cargo.toml
 
       - name: Build hypervisor
-        run: just build
+        run: ./scripts/build-hypervisor
 
       - name: Run tests
         run: just test
