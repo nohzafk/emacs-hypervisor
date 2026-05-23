@@ -28,13 +28,13 @@
            local (graph:entry-field entry :local)
            lisp-dir (graph:entry-field entry :lisp-dir)
            fields (list :name name)
-           fields (append-plist-field fields :repo repo)
-           fields (append-plist-field fields :host host)
-           fields (append-plist-field fields :branch branch)
-           fields (append-plist-field fields :tag tag)
-           fields (append-plist-field fields :ref ref)
-           fields (append-plist-field fields :local local)
-           fields (append-plist-field fields :lisp-dir lisp-dir)]
+           fields (benchmark:append-plist-field fields :repo repo)
+           fields (benchmark:append-plist-field fields :host host)
+           fields (benchmark:append-plist-field fields :branch branch)
+           fields (benchmark:append-plist-field fields :tag tag)
+           fields (benchmark:append-plist-field fields :ref ref)
+           fields (benchmark:append-plist-field fields :local local)
+           fields (benchmark:append-plist-field fields :lisp-dir lisp-dir)]
       fields))
 
   (defn package-install-batch-form [plan-items]

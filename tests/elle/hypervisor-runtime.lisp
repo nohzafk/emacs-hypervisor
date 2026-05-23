@@ -13,6 +13,7 @@
 (include-file "../../elle/protocol.lisp")
 (include-file "../../elle/preflight.lisp")
 (include-file "../../elle/boot-policy.lisp")
+(include-file "../../elle/reporting.lisp")
 (include-file "../../elle/planning.lisp")
 (include-file "../../elle/execution.lisp")
 
@@ -76,11 +77,16 @@
    :sexp-string string
    :to-wire (fn [payload] payload)})
 
-(def benchmark {:eval-payload (fn [payload] payload)})
+(def benchmark
+  {:eval-payload (fn [payload] payload)
+   :append-plist-field
+   (fn [fields key value]
+     (if value (append fields (list key value)) fields))})
 (def mailbox :stub)
 
 (def preflight (emacs-hypervisor-preflight-module protocol graph mailbox benchmark))
-(def policy (emacs-hypervisor-boot-policy-module protocol graph preflight))
+(def policy (emacs-hypervisor-boot-policy-module graph preflight))
+(def reporting (emacs-hypervisor-reporting-module protocol policy))
 (def planning (emacs-hypervisor-planning-module protocol graph))
 (def execution (emacs-hypervisor-execution-module protocol graph mailbox benchmark))
 
@@ -260,7 +266,7 @@
  "boot-policy suppresses warning for unmanaged init")
 
 (reset-stub-state)
-(policy:emit-bootstrap-warning
+(reporting:emit-bootstrap-warning
  {:init-generated true
   :init-content-hash nil
   :init-file "/tmp/home/init.el"
