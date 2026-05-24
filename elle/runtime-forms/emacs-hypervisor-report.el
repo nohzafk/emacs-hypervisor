@@ -12,6 +12,8 @@
 (defvar emacs-hypervisor--shutdown-reason)
 (defvar emacs-hypervisor--completed)
 (defvar emacs-hypervisor--startup-warnings)
+(defvar emacs-hypervisor--session-started-at)
+(defvar emacs-hypervisor--session-finished-at)
 
 (defvar emacs-hypervisor--report-buffer-name "*emacs-hypervisor-report*")
 
@@ -103,26 +105,6 @@
    :skipped (cl-count :skipped reports :key (lambda (entry) (plist-get entry :status)))
    :invalid (cl-count :invalid reports :key (lambda (entry) (plist-get entry :status)))))
 
-(defun emacs-hypervisor--summary-status (counts)
-  (cond
-   ((> (plist-get counts :failed) 0) :failed)
-   ((> (plist-get counts :invalid) 0) :invalid)
-   ((> (plist-get counts :skipped) 0) :skipped)
-   (t :ok)))
-
-(defun emacs-hypervisor--startup-summary-status ()
-  (emacs-hypervisor--summary-status
-   (emacs-hypervisor--status-counts
-    (emacs-hypervisor--phase-reports :executed :units))))
-
-(defun emacs-hypervisor--format-elapsed ()
-  (let ((started emacs-hypervisor--session-started-at))
-    (if (null started)
-        "0.00s"
-      (format "%.2fs"
-              (- (or emacs-hypervisor--session-finished-at (float-time))
-                 started)))))
-
 (defun emacs-hypervisor--format-duration-ms (duration-ms)
   (format "%.1fms" (or duration-ms 0.0)))
 
@@ -131,41 +113,33 @@
       ""
     (format "%.2fs" (- time (or emacs-hypervisor--session-started-at time)))))
 
-(defun emacs-hypervisor--package-total ()
-  "Return the best known total number of declared packages."
-  (let ((reports (emacs-hypervisor--package-report-basis)))
-    (if reports
-        (length reports)
-      (length (emacs-hypervisor--package-plan-items)))))
+(defun emacs-hypervisor--format-final-elapsed ()
+  (when (and emacs-hypervisor--session-started-at
+             emacs-hypervisor--session-finished-at)
+    (format "%.2fs"
+            (- emacs-hypervisor--session-finished-at
+               emacs-hypervisor--session-started-at))))
 
-(defun emacs-hypervisor--format-package-total ()
-  (when (or (emacs-hypervisor--package-plan-known-p)
-            (emacs-hypervisor--package-report-basis))
-    (let ((total (emacs-hypervisor--package-total)))
-      (format "%d package%s"
-              total
-              (if (= total 1) "" "s")))))
+(defun emacs-hypervisor--final-activity (label preposition)
+  (if-let ((elapsed (emacs-hypervisor--format-final-elapsed)))
+      (format "%s %s %s" label preposition elapsed)
+    label))
 
 (defun emacs-hypervisor--current-activity ()
   (cond
-   (emacs-hypervisor--running-unit-name
-    (format "Running %s" emacs-hypervisor--running-unit-name))
-   (emacs-hypervisor--package-installation-active
-    "Installing packages")
    (emacs-hypervisor--completed
     (if (eq emacs-hypervisor--state :failed)
-        (format "Failed: %s"
-                (or (emacs-hypervisor-failure-summary) "startup failed"))
-      (pcase (emacs-hypervisor--startup-summary-status)
-        (:failed "Finished with failures")
-        (:invalid "Finished with invalid units")
-        (:skipped "Finished with skipped units")
-        (_ "Finished"))))
-   (emacs-hypervisor--last-progress-message
-    (let* ((payload (emacs-hypervisor--message-payload emacs-hypervisor--last-progress-message))
-           (phase (plist-get payload :phase))
-           (step (plist-get payload :step)))
-      (format "%s / %s" (or phase :unknown) (or step :unknown))))
+        (emacs-hypervisor--final-activity "Failed" "after")
+      (emacs-hypervisor--final-activity "Finished" "in")))
+   (emacs-hypervisor--unit-events
+    "Config Units")
+   ((or emacs-hypervisor--package-installation-active
+        emacs-hypervisor--package-events)
+    "Packages")
+   ((or emacs-hypervisor--plan-messages
+        emacs-hypervisor--progress-messages
+        emacs-hypervisor--last-progress-message)
+    "Preparing")
    (t
     "Starting")))
 
@@ -511,11 +485,8 @@
           "\n"))
 
 (defun emacs-hypervisor--insert-banner ()
-  (let ((parts (list (emacs-hypervisor--current-activity)
-                     (emacs-hypervisor--format-package-total)
-                     (emacs-hypervisor--format-elapsed))))
-    (insert (propertize "Hypervisor Startup" 'face '(:weight bold :height 1.15)) "\n")
-    (insert (string-join (delq nil parts) "  |  ") "\n\n")))
+  (insert (propertize "Hypervisor Startup" 'face '(:weight bold :height 1.15)) "\n")
+  (insert (emacs-hypervisor--current-activity) "\n\n"))
 
 (defun emacs-hypervisor--insert-unit-activity-line (name state)
   (let* ((running (equal name emacs-hypervisor--running-unit-name))
@@ -718,24 +689,41 @@
                   "\n")))
       (insert "\n"))))
 
+(defun emacs-hypervisor--insert-report-contents ()
+  (emacs-hypervisor--insert-banner)
+  (emacs-hypervisor--insert-warnings-section)
+  (emacs-hypervisor--insert-metrics-section)
+  (emacs-hypervisor--insert-packages-section)
+  (emacs-hypervisor--insert-activity-section)
+  (emacs-hypervisor--insert-problems-section))
+
 (defun emacs-hypervisor--render-report-buffer ()
-  (with-current-buffer (emacs-hypervisor-report-buffer)
-    (unless (derived-mode-p 'emacs-hypervisor-report-mode)
-      (emacs-hypervisor-report-mode))
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (emacs-hypervisor--insert-banner)
-      (emacs-hypervisor--insert-warnings-section)
-      (emacs-hypervisor--insert-metrics-section)
-      (emacs-hypervisor--insert-packages-section)
-      (emacs-hypervisor--insert-activity-section)
-      (emacs-hypervisor--insert-problems-section)
-      (goto-char (point-min))))
+  (let ((target (emacs-hypervisor-report-buffer))
+        (source (generate-new-buffer " *emacs-hypervisor-report-render*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer target
+            (unless (derived-mode-p 'emacs-hypervisor-report-mode)
+              (emacs-hypervisor-report-mode)))
+          (with-current-buffer source
+            (emacs-hypervisor--insert-report-contents))
+          (with-current-buffer target
+            (let ((inhibit-read-only t)
+                  (rendered (with-current-buffer source (buffer-string))))
+              (unless (equal (buffer-string) rendered)
+                (if (fboundp 'replace-buffer-contents)
+                    (replace-buffer-contents source)
+                  (erase-buffer)
+                  (insert rendered)))
+              (goto-char (point-min)))))
+      (when (buffer-live-p source)
+        (kill-buffer source))))
   nil)
 
 (defun emacs-hypervisor--redisplay-report-buffer ()
-  (unless noninteractive
-    (redisplay t)))
+  ;; Avoid forced redisplay during rapid startup events; Emacs will repaint the
+  ;; report normally, and forcing it makes unchanged banner text visibly flicker.
+  nil)
 
 (defun emacs-hypervisor--refresh-report-buffer ()
   (when (or (get-buffer emacs-hypervisor--report-buffer-name)

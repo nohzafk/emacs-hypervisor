@@ -1634,6 +1634,130 @@
   (should emacs-hypervisor--completed)
   (should (eq emacs-hypervisor--state :completed)))
 
+(ert-deftest emacs-hypervisor-report-banner-hides-wire-progress-events ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--last-progress-message
+        '(:progress :phase :planning :step :plans-emitted :done 5 :total 10))
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Hypervisor Startup\nPreparing")
+                     contents))
+            (should-not (string-match-p
+                         (regexp-quote ":planning / :plans-emitted")
+                         contents))
+            (should-not (string-match-p
+                         (regexp-quote "Planning: plans emitted")
+                         contents))
+            (should-not (string-match-p
+                         (regexp-quote "Event")
+                         contents)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
+(ert-deftest emacs-hypervisor-report-banner-shows-stage-not-details ()
+  (unwind-protect
+      (progn
+        (emacs-hypervisor-reset)
+        (setq emacs-hypervisor--package-installation-active t)
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Hypervisor Startup\nPackages")
+                     contents))))
+        (emacs-hypervisor-reset)
+        (setq emacs-hypervisor--running-unit-name "personal-ui")
+        (setq emacs-hypervisor--unit-events
+              '((:kind :attempt :name "personal-ui" :time 101.0)))
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Hypervisor Startup\nConfig Units")
+                     contents))
+            (should-not (string-match-p
+                         (regexp-quote "Running personal-ui")
+                         contents))))
+        (emacs-hypervisor-reset)
+        (setq emacs-hypervisor--completed t)
+        (setq emacs-hypervisor--state :failed)
+        (setq emacs-hypervisor--shutdown-reason :config-load-failed)
+        (setq emacs-hypervisor--session-started-at 100.0)
+        (setq emacs-hypervisor--session-finished-at 103.25)
+        (setq emacs-hypervisor--last-error-message
+              "config load failed: (error \"bad key\")")
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Hypervisor Startup\nFailed after 3.25s")
+                     contents))
+            (should-not (string-match-p
+                         (regexp-quote "Failed: config load failed")
+                        contents)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
+(ert-deftest emacs-hypervisor-report-banner-shows-finished-elapsed-time ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--completed t)
+  (setq emacs-hypervisor--state :completed)
+  (setq emacs-hypervisor--session-started-at 100.0)
+  (setq emacs-hypervisor--session-finished-at 102.5)
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (should (string-match-p
+                   (regexp-quote "Hypervisor Startup\nFinished in 2.50s")
+                   (buffer-string)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
+(ert-deftest emacs-hypervisor-report-banner-keeps-unit-stage-between-units ()
+  (unwind-protect
+      (progn
+        (emacs-hypervisor-reset)
+        (setq emacs-hypervisor--unit-events
+              '((:kind :attempt :name "unit-a" :time 101.0)))
+        (setq emacs-hypervisor--running-unit-name "unit-a")
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (should (string-match-p
+                   (regexp-quote "Hypervisor Startup\nConfig Units")
+                   (buffer-string))))
+        (setq emacs-hypervisor--unit-events
+              '((:kind :success :name "unit-a" :time 102.0)
+                (:kind :attempt :name "unit-a" :time 101.0)))
+        (setq emacs-hypervisor--running-unit-name nil)
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Hypervisor Startup\nConfig Units")
+                     contents))
+            (should-not (string-match-p
+                         (regexp-quote "Running unit-a")
+                         contents)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
+(ert-deftest emacs-hypervisor-report-render-skips-unchanged-buffer ()
+  (emacs-hypervisor-reset)
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((tick (buffer-chars-modified-tick)))
+            (emacs-hypervisor--render-report-buffer)
+            (should (= tick (buffer-chars-modified-tick))))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
 (ert-deftest emacs-hypervisor-report-packages-section-renders-rolling-window ()
   (let ((emacs-hypervisor-report-package-window-size 3))
     (emacs-hypervisor-reset)
@@ -1666,7 +1790,7 @@
                                       contents))
               (should (string-match-p
                        (regexp-quote
-                        "Hypervisor Startup\nStarting  |  5 packages")
+                        "Hypervisor Startup\nPackages")
                        contents))
               (should (string-match-p
                        (regexp-quote
@@ -1702,7 +1826,7 @@
           (let ((contents (buffer-string)))
             (should (string-match-p
                      (regexp-quote
-                      "Hypervisor Startup\nStarting  |  2 packages")
+                      "Hypervisor Startup\nPreparing")
                      contents))
             (should (string-match-p
                      (regexp-quote "Progress   All packages already installed")
@@ -1739,7 +1863,7 @@
                                     contents))
             (should (string-match-p
                      (regexp-quote
-                      "Hypervisor Startup\nStarting  |  1 package")
+                      "Hypervisor Startup\nPackages")
                      contents))
             (should (string-match-p
                      (regexp-quote
