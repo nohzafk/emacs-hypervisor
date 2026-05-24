@@ -77,6 +77,9 @@
       (load-module-by-name manifest "DECLARATIONS")
       (load-module-by-name manifest "SELECTIVE_RELOAD")
       (load-module-by-name manifest "CONFIG_PATHS")
+      (load-module-by-name manifest "CONFIG_LOADER")
+      (load-module-by-name manifest "RELOAD_REPORT")
+      (load-module-by-name manifest "RELOAD_POLICY")
       (load-module-by-name manifest "COMPOSE")
       '(:emacs-hypervisor-config-surface-ready))))
 

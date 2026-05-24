@@ -23,6 +23,9 @@
 (require 'emacs-hypervisor-effect-kind-keybinding)
 (require 'emacs-hypervisor-declarations)
 (require 'emacs-hypervisor-unit-runtime)
+(require 'emacs-hypervisor-config-loader)
+(require 'emacs-hypervisor-reload-report)
+(require 'emacs-hypervisor-reload-policy)
 (require 'emacs-hypervisor-compose)
 (require 'emacs-hypervisor-report)
 
