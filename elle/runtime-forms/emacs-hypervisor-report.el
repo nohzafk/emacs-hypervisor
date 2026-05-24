@@ -259,10 +259,13 @@
       (emacs-hypervisor--phase-reports :planned :packages)
       nil))
 
+(defun emacs-hypervisor--package-plan-known-p ()
+  (not (null (emacs-hypervisor--find-plan-message :packages))))
+
 (defun emacs-hypervisor--package-plan-items ()
-  (or (emacs-hypervisor--plan-items :packages)
-      (emacs-hypervisor--package-report-basis)
-      nil))
+  (if (emacs-hypervisor--package-plan-known-p)
+      (emacs-hypervisor--plan-items :packages)
+    (or (emacs-hypervisor--package-report-basis) nil)))
 
 (defun emacs-hypervisor--package-plan-names ()
   (mapcar (lambda (item) (plist-get item :name))
@@ -331,18 +334,6 @@
           :completed completed
           :failed failed)))
 
-(defun emacs-hypervisor--package-progress-summary ()
-  (let* ((reports (emacs-hypervisor--package-report-basis))
-         (counts (emacs-hypervisor--status-counts reports))
-         (installed
-          (cl-count :installed emacs-hypervisor--package-events
-                    :key (lambda (entry) (plist-get entry :kind))))
-         (ready (plist-get counts :ok)))
-    (list :installed installed
-          :ready ready
-          :failed (plist-get counts :failed)
-          :skipped (plist-get counts :skipped))))
-
 (defun emacs-hypervisor--package-terminal-state-table ()
   (let ((states (make-hash-table :test 'equal)))
     (dolist (event emacs-hypervisor--package-events states)
@@ -371,6 +362,37 @@
           (:invalid :failed)
           (_ nil)))))
 
+(defun emacs-hypervisor--package-report-installed-p (report)
+  (and (eq (plist-get report :status) :ok)
+       (eq (plist-get report :reason) :installed)))
+
+(defun emacs-hypervisor--package-progress-summary ()
+  (let* ((reports (emacs-hypervisor--package-report-basis))
+         (plan-known (emacs-hypervisor--package-plan-known-p))
+         (plan-names (and plan-known (emacs-hypervisor--package-plan-names)))
+         (states (emacs-hypervisor--package-terminal-state-table))
+         (report-table (emacs-hypervisor--package-report-table))
+         (installed 0)
+         (failed 0)
+         (skipped 0))
+    (dolist (name plan-names)
+      (pcase (emacs-hypervisor--package-state-for-name name states report-table)
+        (:installed (cl-incf installed))
+        (:failed (cl-incf failed))
+        (:skipped (cl-incf skipped))))
+    (let* ((planned (length plan-names))
+           (pending (max 0 (- planned installed failed skipped))))
+      (list :plan-known plan-known
+            :planned planned
+            :installed installed
+            :pending pending
+            :failed failed
+            :skipped skipped
+            :all-installed
+            (and reports
+                 (cl-every #'emacs-hypervisor--package-report-installed-p
+                           reports))))))
+
 (defun emacs-hypervisor--latest-package-event-name ()
   (plist-get
    (seq-find
@@ -395,6 +417,22 @@
      (and (eq (plist-get event :kind) kind)
           (equal (plist-get event :name) name)))
    emacs-hypervisor--package-events))
+
+(defun emacs-hypervisor--format-package-progress (progress)
+  (cond
+   ((not (plist-get progress :plan-known))
+    "Waiting for package plan")
+   ((and (= (plist-get progress :planned) 0)
+         (plist-get progress :all-installed))
+    "All packages already installed")
+   ((= (plist-get progress :planned) 0)
+    "No package work")
+   (t
+    (format "%d installed, %d pending, %d failed, %d skipped"
+            (plist-get progress :installed)
+            (plist-get progress :pending)
+            (plist-get progress :failed)
+            (plist-get progress :skipped)))))
 
 (defun emacs-hypervisor--report-status-counts ()
   (emacs-hypervisor--status-counts (emacs-hypervisor--unit-report-basis)))
@@ -532,15 +570,7 @@
      (emacs-hypervisor--package-state))
     (emacs-hypervisor--insert-status-line
      "Progress"
-     (if (and (= (plist-get progress :installed) 0)
-              (= (plist-get progress :ready) 0)
-              (= (plist-get progress :failed) 0)
-              (= (plist-get progress :skipped) 0))
-         "No package work yet"
-       (format "%d ready, %d failed, %d skipped"
-               (plist-get progress :ready)
-               (plist-get progress :failed)
-               (plist-get progress :skipped))))
+     (emacs-hypervisor--format-package-progress progress))
     (when plan-names
       (let* ((focus (emacs-hypervisor--package-focus-index plan-names states reports))
              (window-size emacs-hypervisor-report-package-window-size)

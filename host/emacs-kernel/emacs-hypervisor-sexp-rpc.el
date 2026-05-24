@@ -20,6 +20,7 @@
 (defvar emacs-hypervisor-context-function nil)
 (defvar emacs-hypervisor-session-data-function nil)
 
+(declare-function emacs-hypervisor-details-buffer "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor--record "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor-benchmark-enabled-p "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor--notify-session-finished "emacs-hypervisor-session-state")
@@ -136,7 +137,10 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
 
 (defun emacs-hypervisor--dispatch-rpc-eval (id form)
   (condition-case err
-      (let ((value (eval form)))
+      (let ((value
+             (with-current-buffer (emacs-hypervisor-details-buffer)
+               (let ((standard-output (current-buffer)))
+                 (eval form)))))
         (emacs-hypervisor-send-response id value))
     (error
      (emacs-hypervisor-send-error-response

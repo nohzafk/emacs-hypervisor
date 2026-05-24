@@ -353,6 +353,11 @@ Set these in the Hypervisor config `early-init.el` before the generated
 | `emacs-hypervisor-binary-name` | `"emacs-hypervisor"` | Binary name for `PATH` lookup |
 | `emacs-hypervisor-open-buffer-on-abnormal-exit` | `t` | Show process buffer on abnormal exit |
 
+Startup uses three diagnostic buffers: ` *emacs-hypervisor*` is the stdio
+protocol buffer, ` *emacs-hypervisor details*` receives incidental output from
+Emacs-side runtime evaluation, and ` *emacs-hypervisor stderr*` receives
+stderr from the host subprocess.
+
 ### Runtime variables
 
 Set these in your `config.org` or `config.el`. They take effect during the

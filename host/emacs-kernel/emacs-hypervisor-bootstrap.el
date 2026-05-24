@@ -56,6 +56,8 @@ unreadable. Returns the names of envvars that were changed."
   (let ((buffer (get-buffer-create emacs-hypervisor--buffer-name)))
     (with-current-buffer buffer
       (erase-buffer))
+    (with-current-buffer (emacs-hypervisor-details-buffer)
+      (erase-buffer))
     (setq emacs-hypervisor--state :starting)
     (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-started)
     (setq emacs-hypervisor--process

@@ -1,6 +1,7 @@
 ;;; emacs-hypervisor-session-state.el --- Session state and observability -*- lexical-binding: t; -*-
 
 (defvar emacs-hypervisor--buffer-name " *emacs-hypervisor*")
+(defvar emacs-hypervisor--details-buffer-name " *emacs-hypervisor details*")
 (defvar emacs-hypervisor--process nil)
 (defvar emacs-hypervisor--message-log nil)
 (defvar emacs-hypervisor--runtime-dispatch-function nil)
@@ -95,6 +96,10 @@ that should not prevent local config reloads."
   (and (processp emacs-hypervisor--process)
        (process-buffer emacs-hypervisor--process)))
 
+(defun emacs-hypervisor-details-buffer ()
+  "Return the buffer used for non-protocol Hypervisor runtime output."
+  (get-buffer-create emacs-hypervisor--details-buffer-name))
+
 (defun emacs-hypervisor-open-process-buffer ()
   "Display the Hypervisor process buffer."
   (interactive)
@@ -103,6 +108,11 @@ that should not prevent local config reloads."
     (unless buffer
       (error "No Hypervisor process buffer is available"))
     (pop-to-buffer buffer)))
+
+(defun emacs-hypervisor-open-details-buffer ()
+  "Display the Hypervisor runtime details buffer."
+  (interactive)
+  (pop-to-buffer (emacs-hypervisor-details-buffer)))
 
 (defun emacs-hypervisor--one-line-message (value)
   "Return the first line of VALUE formatted as a user-facing message."

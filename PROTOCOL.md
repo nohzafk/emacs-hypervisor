@@ -18,6 +18,9 @@ Lisp-to-Lisp properties the project needs:
   `print-escape-control-characters`) so embedded newlines never break framing.
 - The Emacs process filter buffers partial chunks and uses incremental `read`,
   not a blocking loop that assumes whole messages arrive at once.
+- Emacs-side `:eval` forms run with `standard-output` bound to the dedicated
+  ` *emacs-hypervisor details*` buffer. The process buffer is protocol-only;
+  human-readable runtime output must not share the stdio frame stream.
 
 ## Envelope
 

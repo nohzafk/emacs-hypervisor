@@ -1571,6 +1571,36 @@
       (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
         (kill-buffer buffer)))))
 
+(ert-deftest emacs-hypervisor-rpc-eval-routes-details-away-from-transport-buffer ()
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (emacs-hypervisor--details-buffer-name
+          " *emacs-hypervisor-filter-details-test*")
+         (message (emacs-hypervisor-test--request
+                   31
+                   :eval
+                   '(:form (progn
+                             (princ "detail-output")
+                             (current-buffer)))))
+         (wire (concat (emacs-hypervisor--sexp-string message) "\n"))
+         sent)
+    (unwind-protect
+        (cl-letf (((symbol-function 'emacs-hypervisor-send)
+                   (lambda (message)
+                     (push message sent))))
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string))))
+          (with-current-buffer (get-buffer emacs-hypervisor--details-buffer-name)
+            (should (equal (buffer-string) "detail-output")))
+          (let ((response (car sent)))
+            (should (plist-get (cdr response) :ok))
+            (should (eq (plist-get (cdr response) :payload)
+                        (get-buffer emacs-hypervisor--details-buffer-name)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer))
+      (when-let ((buffer (get-buffer emacs-hypervisor--details-buffer-name)))
+        (kill-buffer buffer)))))
+
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-session-state ()
   (emacs-hypervisor-reset)
   (emacs-hypervisor--dispatch
@@ -1634,6 +1664,12 @@
             (let ((contents (buffer-string)))
               (should (string-match-p (regexp-quote "Status     Planned")
                                       contents))
+              (should (string-match-p
+                       (regexp-quote
+                        "Progress   4 installed, 1 pending, 0 failed, 0 skipped")
+                       contents))
+              (should-not (string-match-p (regexp-quote "ready,")
+                                          contents))
               (should (string-match-p (regexp-quote "[x] pkg-c")
                                       contents))
               (should (string-match-p (regexp-quote "[x] pkg-d")
@@ -1645,7 +1681,30 @@
               (should-not (string-match-p (regexp-quote "pkg-b")
                                           contents)))))
       (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-        (kill-buffer buffer)))))
+      (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-report-packages-section-shows-empty-plan-as-installed ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--plan-messages
+        '((:plan :phase :packages :items nil)))
+  (setq emacs-hypervisor--report-messages
+        '((:report :stage :planned :phase :packages
+                   :items ((:name "pkg-a" :status :ok :reason :installed)
+                           (:name "pkg-b" :status :ok :reason :installed)))))
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote "Progress   All packages already installed")
+                     contents))
+            (should-not (string-match-p (regexp-quote "ready,")
+                                        contents))
+            (should-not (string-match-p (regexp-quote "[ ] pkg-a")
+                                        contents)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
 
 (ert-deftest emacs-hypervisor-report-packages-section-shows-finished-status ()
   (emacs-hypervisor-reset)
@@ -1670,6 +1729,10 @@
           (let ((contents (buffer-string)))
             (should (string-match-p (regexp-quote "Status     Completed")
                                     contents))
+            (should (string-match-p
+                     (regexp-quote
+                      "Progress   1 installed, 0 pending, 0 failed, 0 skipped")
+                     contents))
             (should-not (string-match-p (regexp-quote "Status     Planned")
                                         contents))
             (should (string-match-p (regexp-quote "[x] core-pkg")

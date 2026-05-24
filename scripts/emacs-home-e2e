@@ -327,6 +327,9 @@ cat > "$probe" <<'EOF'
    "PROCESS-BUFFER"
    (emacs-hypervisor-e2e-value 'emacs-hypervisor--buffer-name nil))
   (emacs-hypervisor-e2e-print-buffer
+   "DETAILS-BUFFER"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor--details-buffer-name nil))
+  (emacs-hypervisor-e2e-print-buffer
    "STDERR-BUFFER"
    (emacs-hypervisor-e2e-value 'emacs-hypervisor--stderr-buffer-name nil))
 
