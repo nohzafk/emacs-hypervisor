@@ -1,4 +1,3 @@
-(elle/epoch 10)
 ## Shared `sexp-rpc` protocol helpers.
 
 (defn emacs-hypervisor-protocol-module []
@@ -47,21 +46,41 @@
   (defn set-mailbox-responses [mailbox responses]
     (put mailbox :responses responses))
 
+  (defn sexp-sequence-string [values]
+    (match values
+      () ""
+      (item & rest)
+       (let [head (sexp-string item)
+             tail (sexp-sequence-string rest)]
+         (if (= tail "")
+           head
+           (string head " " tail)))
+      _ ""))
+
   (defn sexp-string [value]
     (let [value (if (= (type-of value) :syntax)
                   (syntax->datum value)
                   value)]
-      (case (type-of value)
-        :list (string "(" (string/join (map sexp-string value) " ") ")")
-        :array (string "[" (string/join (map sexp-string value) " ") "]")
-        :@array (string "[" (string/join (map sexp-string value) " ") "]")
-        :string (json/serialize value)
-        :keyword (string ":" (string value))
-        :symbol (string value)
-        (string value))))
+      (if (nil? value)
+        "nil"
+        (case (type-of value)
+          :list (string "(" (sexp-sequence-string value) ")")
+          :array (string "[" (sexp-sequence-string (->list value)) "]")
+          :@array (string "[" (sexp-sequence-string (->list value)) "]")
+          :string (json/serialize value)
+          :integer (string value)
+          :float (string value)
+          :boolean (if value "true" "false")
+          :keyword (string ":" (string value))
+          :symbol (string value)
+          (error
+           (string
+            "cannot serialize value of type "
+            (string (type-of value))
+            " as an S-expression"))))))
 
   (defn send-message [message]
-    (println (sexp-string message)))
+    (println (sexp-string (to-wire message))))
 
   (defn plist-get [xs key]
     (match xs
@@ -113,6 +132,7 @@
         (map from-wire value))
       :array (->array (map from-wire value))
       :@array (thaw (->array (map from-wire value)))
+      :string (string "" value)
       value))
 
   (defn wire-field [value key]

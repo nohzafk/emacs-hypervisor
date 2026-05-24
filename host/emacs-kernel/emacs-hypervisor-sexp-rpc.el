@@ -238,6 +238,13 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
        (push (append '(:report) payload) emacs-hypervisor--report-messages)
        (emacs-hypervisor--report-call 'emacs-hypervisor-report-note-report)
        t)
+      (:package
+       (emacs-hypervisor--report-call
+        'emacs-hypervisor-report-note-package-event
+        (plist-get payload :kind)
+        (plist-get payload :name)
+        (plist-get payload :reason))
+       t)
       (:metric
        (when (emacs-hypervisor-benchmark-enabled-p)
          (emacs-hypervisor--report-call
@@ -275,26 +282,27 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
 
 (defun emacs-hypervisor--consume-input ()
   (let ((input-buffer (current-buffer))
-        (complete-through (point-min))
         value
         done)
-    (goto-char (point-min))
     (while (not done)
+      (goto-char (point-min))
       (condition-case err
           (progn
             (setq value (read (current-buffer)))
-            (emacs-hypervisor--dispatch value)
             (set-buffer input-buffer)
             (skip-chars-forward " \t\r\n")
-            (setq complete-through (point)))
+            ;; Dispatch can run `accept-process-output', so remove the complete
+            ;; message first to prevent reentrant filters from re-reading it.
+            (delete-region (point-min) (point))
+            (emacs-hypervisor--dispatch value)
+            (set-buffer input-buffer))
         (end-of-file
          (set-buffer input-buffer)
          (setq done t))
         (error
          (set-buffer input-buffer)
          (erase-buffer)
-         (signal (car err) (cdr err)))))
-    (delete-region (point-min) complete-through)))
+         (signal (car err) (cdr err)))))))
 
 (defun emacs-hypervisor-sexp-rpc-filter (_proc output)
   (with-current-buffer (get-buffer-create emacs-hypervisor--buffer-name)

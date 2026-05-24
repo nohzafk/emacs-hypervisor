@@ -1,8 +1,9 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-test_emacs_home := justfile_directory() + "/.test-emacs-home"
-test_config_home := justfile_directory() + "/.test-config-home"
 hypervisor_binary := justfile_directory() + "/target/release/emacs-hypervisor"
+e2e_emacs_home := "/tmp/emacs-hypervisor-e2e-home"
+e2e_config_home := "/tmp/emacs-hypervisor-e2e-config"
+emacs_binary := env_var_or_default("EMACS", "emacs")
 
 [group('Default')]
 default:
@@ -56,18 +57,41 @@ test:
       -f ert-run-tests-batch-and-exit
 
 [group('Emacs')]
-emacs-home-reset path=test_emacs_home config_home=test_config_home:
-    rm -rf "{{path}}" "{{config_home}}"
-    XDG_CONFIG_HOME="{{config_home}}" ./target/release/emacs-hypervisor init --home "{{path}}"
-    mkdir -p "{{config_home}}/emacs-hypervisor"
-    cp ~/.config/emacs-hypervisor/early-init.el ~/.config/emacs-hypervisor/config.org "{{config_home}}/emacs-hypervisor"
+emacs-home-e2e path=e2e_emacs_home config_home=e2e_config_home binary=hypervisor_binary emacs_bin=emacs_binary timeout="120" config_source="": build
+    if [ -n "{{config_source}}" ]; then \
+      ./scripts/emacs-home-e2e \
+        --home "{{path}}" \
+        --config-home "{{config_home}}" \
+        --binary "{{binary}}" \
+        --emacs "{{emacs_bin}}" \
+        --timeout "{{timeout}}" \
+        --config-source "{{config_source}}"; \
+    else \
+      ./scripts/emacs-home-e2e \
+        --home "{{path}}" \
+        --config-home "{{config_home}}" \
+        --binary "{{binary}}" \
+        --emacs "{{emacs_bin}}" \
+        --timeout "{{timeout}}"; \
+    fi
 
 [group('Emacs')]
-emacs-home-run path=test_emacs_home binary=hypervisor_binary config_home=test_config_home:
-    XDG_CONFIG_HOME="{{config_home}}" EMACS_HYPERVISOR_BIN="{{binary}}" emacs --init-directory="{{path}}"
-
-[group('Emacs')]
-emacs-home-live-test path=test_emacs_home binary=hypervisor_binary:
-    just build
-    just emacs-home-reset "{{path}}"
-    just emacs-home-run "{{path}}" "{{binary}}"
+emacs-home-e2e-reset path=e2e_emacs_home config_home=e2e_config_home binary=hypervisor_binary emacs_bin=emacs_binary timeout="120" config_source="": build
+    if [ -n "{{config_source}}" ]; then \
+      ./scripts/emacs-home-e2e \
+        --reset \
+        --home "{{path}}" \
+        --config-home "{{config_home}}" \
+        --binary "{{binary}}" \
+        --emacs "{{emacs_bin}}" \
+        --timeout "{{timeout}}" \
+        --config-source "{{config_source}}"; \
+    else \
+      ./scripts/emacs-home-e2e \
+        --reset \
+        --home "{{path}}" \
+        --config-home "{{config_home}}" \
+        --binary "{{binary}}" \
+        --emacs "{{emacs_bin}}" \
+        --timeout "{{timeout}}"; \
+    fi

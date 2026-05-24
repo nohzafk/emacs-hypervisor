@@ -203,6 +203,27 @@
                    "~/projects/lsp-bridge/elle-lsp-bridge"))
     (should (equal (plist-get package :lisp-dir) "emacs"))))
 
+(ert-deftest emacs-hypervisor-package-export-does-not-require-packages ()
+  (emacs-hypervisor-reset-declarations)
+  (package! transient)
+  (let ((required nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &optional filename noerror)
+                 (push (list feature filename noerror) required)
+                 nil))
+              ((symbol-function 'package-installed-p)
+               (lambda (_package &optional _min-version) nil)))
+      (emacs-hypervisor-export-packages))
+    (should-not required)))
+
+(ert-deftest emacs-hypervisor-package-export-normalizes-installed-state ()
+  (emacs-hypervisor-reset-declarations)
+  (package! transient)
+  (let ((package-alist '((transient . (:raw descriptor)))))
+    (should (eq (plist-get (car (emacs-hypervisor-export-packages))
+                           :installed)
+                t))))
+
 (ert-deftest emacs-hypervisor-effect-aware-reload-has-registry-effect-specs ()
   (let* ((specs
           emacs-hypervisor-effect-aware-reload-effect-specs)
@@ -379,6 +400,7 @@
 (ert-deftest emacs-hypervisor-runtime-run-unit-evals-structured-body ()
   (setq emacs-hypervisor-test-runtime-value nil)
   (setq emacs-hypervisor-execution-events nil)
+  (setq emacs-hypervisor-config-units nil)
   (let ((result
          (emacs-hypervisor-runtime-run-unit
           "structured-unit"
@@ -395,6 +417,18 @@
                      ("]" "next tab" ignore)]]))
     (should (member '(:phase :units :event :success :name "structured-unit")
                     emacs-hypervisor-execution-events))))
+
+(ert-deftest emacs-hypervisor-runtime-run-unit-can-resolve-body-by-name ()
+  (setq emacs-hypervisor-test-runtime-value nil)
+  (setq emacs-hypervisor-execution-events nil)
+  (setq emacs-hypervisor-config-units
+        '((:name "lookup-unit"
+           :requires nil
+           :body (progn
+                   (setq emacs-hypervisor-test-runtime-value :lookup-ok)
+                   :lookup-result))))
+  (should (eq (emacs-hypervisor-runtime-run-unit "lookup-unit") :lookup-result))
+  (should (eq emacs-hypervisor-test-runtime-value :lookup-ok)))
 
 (ert-deftest emacs-hypervisor-session-active-p-allows-completed-live-process ()
   (let ((emacs-hypervisor--process :fake-process)
@@ -1730,6 +1764,26 @@
       (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
         (kill-buffer buffer)))))
 
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-removes-message-before-dispatch ()
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (message (emacs-hypervisor-test--request 30 :eval '(:form (+ 1 2))))
+         (wire (concat (emacs-hypervisor--sexp-string message) "\n"))
+         reentered
+         received)
+    (unwind-protect
+        (cl-letf (((symbol-function 'emacs-hypervisor--dispatch)
+                   (lambda (value)
+                     (push value received)
+                     (unless reentered
+                       (setq reentered t)
+                       (emacs-hypervisor-sexp-rpc-filter nil "")))))
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (should (equal received (list message)))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer)))))
+
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-session-state ()
   (emacs-hypervisor-reset)
   (emacs-hypervisor--dispatch
@@ -1762,6 +1816,94 @@
   (should (eq emacs-hypervisor--shutdown-reason :hypervisor-session-complete))
   (should emacs-hypervisor--completed)
   (should (eq emacs-hypervisor--state :completed)))
+
+(ert-deftest emacs-hypervisor-dispatch-rpc-event-records-package-state ()
+  (emacs-hypervisor-reset)
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :package
+    '(:phase :packages :kind :installed :name "core-pkg")))
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :package
+    '(:phase :packages :kind :finished :reason "completed")))
+  (should (equal (mapcar (lambda (event) (plist-get event :kind))
+                         emacs-hypervisor--package-events)
+                 '(:finished :installed)))
+  (should (equal emacs-hypervisor--package-finished-reason "completed")))
+
+(ert-deftest emacs-hypervisor-report-packages-section-renders-rolling-window ()
+  (let ((emacs-hypervisor-report-package-window-size 3))
+    (emacs-hypervisor-reset)
+    (setq emacs-hypervisor--session-started-at 100.0)
+    (setq emacs-hypervisor--plan-messages
+          '((:plan :phase :packages
+                   :items ((:name "pkg-a")
+                           (:name "pkg-b")
+                           (:name "pkg-c")
+                           (:name "pkg-d")
+                           (:name "pkg-e")))))
+    (setq emacs-hypervisor--report-messages
+          '((:report :stage :planned :phase :packages
+                     :items ((:name "pkg-a" :status :ok :reason :ready)
+                             (:name "pkg-b" :status :ok :reason :ready)
+                             (:name "pkg-c" :status :ok :reason :ready)
+                             (:name "pkg-d" :status :ok :reason :ready)
+                             (:name "pkg-e" :status :ok :reason :ready)))))
+    (setq emacs-hypervisor--package-events
+          '((:kind :installed :name "pkg-d" :time 104.0)
+            (:kind :installed :name "pkg-c" :time 103.0)
+            (:kind :installed :name "pkg-b" :time 102.0)
+            (:kind :installed :name "pkg-a" :time 101.0)))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor--render-report-buffer)
+          (with-current-buffer (emacs-hypervisor-report-buffer)
+            (let ((contents (buffer-string)))
+              (should (string-match-p (regexp-quote "Status     Planned")
+                                      contents))
+              (should (string-match-p (regexp-quote "[x] pkg-c")
+                                      contents))
+              (should (string-match-p (regexp-quote "[x] pkg-d")
+                                      contents))
+              (should (string-match-p (regexp-quote "[ ] pkg-e")
+                                      contents))
+              (should-not (string-match-p (regexp-quote "pkg-a")
+                                          contents))
+              (should-not (string-match-p (regexp-quote "pkg-b")
+                                          contents)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-report-packages-section-shows-finished-status ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--plan-messages
+        '((:plan :phase :packages
+                 :items ((:name "core-pkg")))))
+  (setq emacs-hypervisor--report-messages
+        '((:report :stage :planned :phase :packages
+                   :items ((:name "core-pkg" :status :ok :reason :ready)))))
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :package
+    '(:phase :packages :kind :installed :name "core-pkg")))
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :package
+    '(:phase :packages :kind :finished :reason "completed")))
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (let ((contents (buffer-string)))
+            (should (string-match-p (regexp-quote "Status     Completed")
+                                    contents))
+            (should-not (string-match-p (regexp-quote "Status     Planned")
+                                        contents))
+            (should (string-match-p (regexp-quote "[x] core-pkg")
+                                    contents)))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
 
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-failed-shutdown ()
   (let (notified)
@@ -1875,7 +2017,7 @@
         (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
           (kill-buffer buffer))))))
 
-(ert-deftest emacs-hypervisor-report-package-begin-does-not-open-report-on-startup ()
+(ert-deftest emacs-hypervisor-report-package-begin-opens-report-on-startup ()
   (let ((emacs-hypervisor-show-report-on-startup t)
         (emacs-hypervisor--report-startup-opened nil)
         (noninteractive nil)
@@ -1884,7 +2026,41 @@
                (lambda ()
                  (setq report-opened t))))
       (emacs-hypervisor-report-note-package-event :begin)
-      (should-not report-opened))))
+      (should report-opened))))
+
+(ert-deftest emacs-hypervisor-open-report-buffer-redisplays-immediately ()
+  (let ((noninteractive nil)
+        redisplayed
+        popped-buffer)
+    (cl-letf (((symbol-function 'pop-to-buffer)
+               (lambda (buffer &rest _args)
+                 (setq popped-buffer buffer)))
+              ((symbol-function 'redisplay)
+               (lambda (&optional force)
+                 (setq redisplayed force))))
+      (unwind-protect
+          (progn
+            (emacs-hypervisor-open-report-buffer)
+            (should (bufferp popped-buffer))
+            (should redisplayed))
+        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+          (kill-buffer buffer))))))
+
+(ert-deftest emacs-hypervisor-refresh-visible-report-redisplays-immediately ()
+  (let ((noninteractive nil)
+        redisplayed)
+    (cl-letf (((symbol-function 'get-buffer-window)
+               (lambda (_buffer &optional _all-frames)
+                 :visible-window))
+              ((symbol-function 'redisplay)
+               (lambda (&optional force)
+                 (setq redisplayed force))))
+      (unwind-protect
+          (progn
+            (emacs-hypervisor--refresh-report-buffer)
+            (should redisplayed))
+        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+          (kill-buffer buffer))))))
 
 (ert-deftest emacs-hypervisor-report-package-finished-opens-report-on-startup-once ()
   (let ((emacs-hypervisor-show-report-on-startup t)
@@ -1967,6 +2143,9 @@
         sent)
     (setq emacs-hypervisor-installed-packages nil)
     (setq emacs-hypervisor-execution-events nil)
+    (setq emacs-hypervisor-packages
+          '((:name "core-pkg")
+            (:name "ui-pkg")))
     (cl-letf (((symbol-function 'emacs-hypervisor-send-event)
                (lambda (topic payload)
                  (push (list topic payload) sent)))
@@ -1979,15 +2158,13 @@
                  :done)))
       (let ((results
              (emacs-hypervisor-runtime-install-package-batch
-              '((:name "core-pkg")
-                (:name "ui-pkg")))))
+              '("core-pkg"))))
         (should (equal results
-                       '((:name "core-pkg" :status :installed)
-                         (:name "ui-pkg"   :status :failed :error "clone error"))))))
+                       '((:name "core-pkg" :status :installed))))))
     (setq sent (nreverse sent))
     (should (equal emacs-hypervisor-installed-packages '("core-pkg")))
-    (should (equal (mapcar (lambda (e) (plist-get (cadr e) :kind)) sent)
-                   '(:installed :failed :finished)))
+      (should (equal (mapcar (lambda (e) (plist-get (cadr e) :kind)) sent)
+                   '(:installed :finished)))
     (should emacs-hypervisor-runtime-packages-finished-sent)
     (should-not emacs-hypervisor-runtime-packages-installation-active)))
 
@@ -1997,12 +2174,15 @@
         sent)
     (setq emacs-hypervisor-installed-packages nil)
     (setq emacs-hypervisor-execution-events nil)
+    (setq emacs-hypervisor-packages '((:name "core-pkg")))
     (cl-letf (((symbol-function 'emacs-hypervisor-send-event)
                (lambda (topic payload)
                  (push (list topic payload) sent)))
               ((symbol-function 'emacs-hypervisor-bridge-install-batch)
                (lambda (&rest _) (signal 'error '("network down")))))
-      (emacs-hypervisor-runtime-install-package-batch '((:name "core-pkg"))))
+      (should-error
+       (emacs-hypervisor-runtime-install-package-batch '((:name "core-pkg")))
+       :type 'error))
     (setq sent (nreverse sent))
     (should emacs-hypervisor-runtime-packages-finished-sent)
     (let ((finished (cl-find :finished sent
@@ -2010,6 +2190,30 @@
       (should finished)
       (should (string-match-p "network down"
                               (plist-get (cadr finished) :reason))))))
+
+(ert-deftest emacs-hypervisor-runtime-install-package-batch-errors-after-package-failure ()
+  (let ((emacs-hypervisor-runtime-packages-installation-active nil)
+        (emacs-hypervisor-runtime-packages-finished-sent nil)
+        sent)
+    (setq emacs-hypervisor-installed-packages nil)
+    (setq emacs-hypervisor-execution-events nil)
+    (setq emacs-hypervisor-packages '((:name "ui-pkg")))
+    (cl-letf (((symbol-function 'emacs-hypervisor-send-event)
+               (lambda (topic payload)
+                 (push (list topic payload) sent)))
+              ((symbol-function 'emacs-hypervisor-bridge-install-batch)
+               (lambda (_entries _on-installed on-failed)
+                 (funcall on-failed "ui-pkg" "clone error")
+                 :done)))
+      (should-error
+       (emacs-hypervisor-runtime-install-package-batch '("ui-pkg"))
+       :type 'error))
+    (setq sent (nreverse sent))
+    (should (equal (mapcar (lambda (e) (plist-get (cadr e) :kind)) sent)
+                   '(:failed :finished)))
+    (should (equal (plist-get (cadr (car sent)) :reason) "clone error"))
+    (should emacs-hypervisor-runtime-packages-finished-sent)
+    (should-not emacs-hypervisor-runtime-packages-installation-active)))
 
 (ert-deftest emacs-hypervisor-bridge-build-url-honors-host-and-local ()
   (should (equal (emacs-hypervisor-bridge--build-url
@@ -2027,6 +2231,63 @@
             '(:name "x" :local "/tmp/x"))))
   (should-not (emacs-hypervisor-bridge--build-url
                '(:name "x"))))
+
+(ert-deftest emacs-hypervisor-bridge-activate-initializes-installed-packages-only ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (package-user-dir (expand-file-name "wrong-packages/" home-dir))
+         (package--initialized nil)
+         (package-archive-contents nil)
+         (emacs-hypervisor-bridge-ready nil)
+         (emacs-hypervisor-bridge-activated nil)
+         initialized
+         refreshed)
+    (unwind-protect
+        (cl-letf (((symbol-function 'package-initialize)
+                   (lambda (&optional _no-activate)
+                     (setq initialized t)
+                     (setq package--initialized t)))
+                  ((symbol-function 'package-refresh-contents)
+                   (lambda ()
+                     (setq refreshed t))))
+          (should (eq (emacs-hypervisor-bridge-activate) :activated))
+          (should initialized)
+          (should-not refreshed)
+          (should package--initialized)
+          (should emacs-hypervisor-bridge-activated)
+          (should-not emacs-hypervisor-bridge-ready)
+          (should (equal package-user-dir
+                         (expand-file-name "packages/" home-dir)))
+          (should (file-directory-p package-user-dir)))
+      (delete-directory home-dir t))))
+
+(ert-deftest emacs-hypervisor-bridge-start-clone-sentinel-is-idempotent ()
+  (let* ((entry '(:name "clone-idempotent" :repo "example/pkg"))
+         (buffer-name " *hypervisor-clone-clone-idempotent*")
+         captured-sentinel
+         done-events)
+    (when-let ((buffer (get-buffer buffer-name)))
+      (kill-buffer buffer))
+    (cl-letf (((symbol-function 'make-process)
+               (lambda (&rest args)
+                 (setq captured-sentinel (plist-get args :sentinel))
+                 :fake-process))
+              ((symbol-function 'process-status)
+               (lambda (_proc) 'exit))
+              ((symbol-function 'process-exit-status)
+               (lambda (_proc) 1)))
+      (emacs-hypervisor-bridge--start-clone
+       entry
+       (lambda (status) (push status done-events)))
+      (let ((buffer (get-buffer buffer-name)))
+        (should (buffer-live-p buffer))
+        (kill-buffer buffer))
+      (funcall captured-sentinel :fake-process "finished\n")
+      (funcall captured-sentinel :fake-process "finished\n")
+      (should (= (length done-events) 1))
+      (should (equal done-events
+                     '((:error "git clone exited 1: ")))))))
 
 (ert-deftest emacs-hypervisor-bridge-vc-entry-p-detects-archive-vs-vc ()
   (should     (emacs-hypervisor-bridge--vc-entry-p '(:name "magit" :repo "magit/magit")))

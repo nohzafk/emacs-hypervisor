@@ -16,6 +16,7 @@
 (defvar emacs-hypervisor--report-buffer-name "*emacs-hypervisor-report*")
 
 (defvar emacs-hypervisor-report-recent-completed-limit 5)
+(defvar emacs-hypervisor-report-package-window-size 7)
 
 (defface emacs-hypervisor-report-section-title
   '((t (:weight bold)))
@@ -177,6 +178,23 @@
 (defun emacs-hypervisor--format-report-details (details)
   (cond
    ((null details) "")
+   ((plist-get details :deps)
+    (emacs-hypervisor--format-detail-list
+     (plist-get details :deps)))
+   ((or (plist-get details :requires) (plist-get details :after))
+    (let ((requires (emacs-hypervisor--format-detail-list
+                     (plist-get details :requires)))
+          (after (emacs-hypervisor--format-detail-list
+                  (plist-get details :after))))
+      (mapconcat
+       #'identity
+       (delq nil
+             (list
+              (unless (string-empty-p requires)
+                (format "requires: %s" requires))
+              (unless (string-empty-p after)
+                (format "after: %s" after))))
+       ", ")))
    ((plist-get details :blockers)
     (emacs-hypervisor--format-detail-list
      (plist-get details :blockers)))
@@ -240,6 +258,15 @@
   (or (emacs-hypervisor--phase-reports :executed :packages)
       (emacs-hypervisor--phase-reports :planned :packages)
       nil))
+
+(defun emacs-hypervisor--package-plan-items ()
+  (or (emacs-hypervisor--plan-items :packages)
+      (emacs-hypervisor--package-report-basis)
+      nil))
+
+(defun emacs-hypervisor--package-plan-names ()
+  (mapcar (lambda (item) (plist-get item :name))
+          (emacs-hypervisor--package-plan-items)))
 
 (defun emacs-hypervisor--problem-reports ()
   (append
@@ -316,19 +343,79 @@
           :failed (plist-get counts :failed)
           :skipped (plist-get counts :skipped))))
 
+(defun emacs-hypervisor--package-terminal-state-table ()
+  (let ((states (make-hash-table :test 'equal)))
+    (dolist (event emacs-hypervisor--package-events states)
+      (let ((kind (plist-get event :kind))
+            (name (plist-get event :name)))
+        (when (and name
+                   (memq kind '(:installed :failed))
+                   (not (gethash name states)))
+          (puthash name kind states))))))
+
+(defun emacs-hypervisor--package-report-table ()
+  (let ((reports (make-hash-table :test 'equal)))
+    (dolist (report (emacs-hypervisor--package-report-basis) reports)
+      (when-let ((name (plist-get report :name)))
+        (puthash name report reports)))))
+
+(defun emacs-hypervisor--package-state-for-name (name states reports)
+  (or (gethash name states)
+      (let ((report (gethash name reports)))
+        (pcase (plist-get report :status)
+          (:ok
+           (and (eq (plist-get report :reason) :installed)
+                :installed))
+          (:failed :failed)
+          (:skipped :skipped)
+          (:invalid :failed)
+          (_ nil)))))
+
+(defun emacs-hypervisor--latest-package-event-name ()
+  (plist-get
+   (seq-find
+    (lambda (event)
+      (and (plist-get event :name)
+           (memq (plist-get event :kind) '(:installed :failed))))
+    emacs-hypervisor--package-events)
+   :name))
+
+(defun emacs-hypervisor--package-focus-index (plan-names states reports)
+  (or (when-let ((latest-name (emacs-hypervisor--latest-package-event-name)))
+        (cl-position latest-name plan-names :test #'equal))
+      (cl-position-if
+       (lambda (name)
+         (not (emacs-hypervisor--package-state-for-name name states reports)))
+       plan-names)
+      (max 0 (1- (length plan-names)))))
+
+(defun emacs-hypervisor--find-package-event (name kind)
+  (seq-find
+   (lambda (event)
+     (and (eq (plist-get event :kind) kind)
+          (equal (plist-get event :name) name)))
+   emacs-hypervisor--package-events))
+
 (defun emacs-hypervisor--report-status-counts ()
   (emacs-hypervisor--status-counts (emacs-hypervisor--unit-report-basis)))
 
 (defun emacs-hypervisor--package-state ()
-  (cond
-   (emacs-hypervisor--package-installation-active
-    "Installing packages")
-   (emacs-hypervisor--package-finished-reason
-    (capitalize (format "%s" emacs-hypervisor--package-finished-reason)))
-   ((emacs-hypervisor--package-report-basis)
-    "Planned")
-   (t
-    "Waiting")))
+  (let ((reports (emacs-hypervisor--package-report-basis))
+        (executed-reports (emacs-hypervisor--phase-reports :executed :packages)))
+    (cond
+     (emacs-hypervisor--package-installation-active
+      "Installing packages")
+     (emacs-hypervisor--package-finished-reason
+      (capitalize (format "%s" emacs-hypervisor--package-finished-reason)))
+     ((and executed-reports
+           (> (length executed-reports) 0)
+           (= (plist-get (emacs-hypervisor--status-counts executed-reports) :ok)
+              (length executed-reports)))
+      "Ready")
+     (reports
+      "Planned")
+     (t
+      "Waiting"))))
 
 (defun emacs-hypervisor--metric-label (metric)
   (let* ((source (plist-get metric :source))
@@ -403,8 +490,42 @@
                'face 'shadow)))
     (insert "\n")))
 
+(defun emacs-hypervisor--insert-package-activity-line (name state)
+  (let* ((marker
+          (pcase state
+            (:installed "[x]")
+            (:failed "[!]")
+            (:skipped "[-]")
+            (_ "[ ]")))
+         (face
+          (pcase state
+            (:failed 'emacs-hypervisor-report-problem)
+            (:installed 'shadow)
+            (:skipped 'shadow)
+            (_ 'shadow)))
+         (event (and (memq state '(:installed :failed))
+                     (emacs-hypervisor--find-package-event name state)))
+         (time (plist-get event :time))
+         (reason (or (plist-get event :reason) "")))
+    (insert "  "
+            (propertize marker 'face face)
+            " "
+            (propertize name 'face face))
+    (when time
+      (insert (propertize
+               (format "  %s" (emacs-hypervisor--format-since-start time))
+               'face 'shadow)))
+    (when (and (eq state :failed)
+               (not (string-empty-p reason)))
+      (insert (propertize (format "  %s" reason)
+                          'face 'emacs-hypervisor-report-problem)))
+    (insert "\n")))
+
 (defun emacs-hypervisor--insert-packages-section ()
-  (let ((progress (emacs-hypervisor--package-progress-summary)))
+  (let ((progress (emacs-hypervisor--package-progress-summary))
+        (plan-names (emacs-hypervisor--package-plan-names))
+        (states (emacs-hypervisor--package-terminal-state-table))
+        (reports (emacs-hypervisor--package-report-table)))
     (emacs-hypervisor--insert-section "Packages")
     (emacs-hypervisor--insert-status-line
      "Status"
@@ -420,6 +541,22 @@
                (plist-get progress :ready)
                (plist-get progress :failed)
                (plist-get progress :skipped))))
+    (when plan-names
+      (let* ((focus (emacs-hypervisor--package-focus-index plan-names states reports))
+             (window-size emacs-hypervisor-report-package-window-size)
+             (half (/ window-size 2))
+             (start (if emacs-hypervisor--completed
+                        (max 0 (- (length plan-names) window-size))
+                      (max 0 (- focus half))))
+             (end (if emacs-hypervisor--completed
+                      (length plan-names)
+                    (min (length plan-names) (+ start window-size)))))
+        (cl-loop for index from start below end
+                 for name = (nth index plan-names)
+                 for state = (emacs-hypervisor--package-state-for-name
+                              name states reports)
+                 do (emacs-hypervisor--insert-package-activity-line
+                     name state))))
     (insert "\n")))
 
 (defun emacs-hypervisor--insert-metrics-section ()
@@ -550,10 +687,16 @@
       (goto-char (point-min))))
   nil)
 
+(defun emacs-hypervisor--redisplay-report-buffer ()
+  (unless noninteractive
+    (redisplay t)))
+
 (defun emacs-hypervisor--refresh-report-buffer ()
   (when (or (get-buffer emacs-hypervisor--report-buffer-name)
             (not noninteractive))
-    (emacs-hypervisor--render-report-buffer)))
+    (emacs-hypervisor--render-report-buffer)
+    (when (get-buffer-window emacs-hypervisor--report-buffer-name t)
+      (emacs-hypervisor--redisplay-report-buffer))))
 
 (defun emacs-hypervisor-open-report-buffer ()
   "Display the Hypervisor startup report buffer."
@@ -562,6 +705,7 @@
          (report-window (get-buffer-window buffer t)))
     (emacs-hypervisor--render-report-buffer)
     (unless report-window
-      (pop-to-buffer buffer))))
+      (pop-to-buffer buffer))
+    (emacs-hypervisor--redisplay-report-buffer)))
 
 (provide 'emacs-hypervisor-report)

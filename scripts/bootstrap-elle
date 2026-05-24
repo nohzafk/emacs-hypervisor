@@ -6,7 +6,17 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 elle_repo=${ELLE_REPO:-https://github.com/elle-lisp/elle.git}
-elle_ref=${ELLE_REF:-}
+default_elle_ref_file="$repo_dir/.elle-ref"
+if [ -f "$default_elle_ref_file" ]; then
+  IFS= read -r default_elle_ref < "$default_elle_ref_file" || default_elle_ref=""
+else
+  default_elle_ref=""
+fi
+if [ -z "$default_elle_ref" ]; then
+  echo "missing default Elle ref in $default_elle_ref_file" >&2
+  exit 1
+fi
+elle_ref=${ELLE_REF-$default_elle_ref}
 elle_build_plugins=${ELLE_BUILD_PLUGINS:-}
 elle_bin="$elle_dir/target/release/elle"
 
@@ -28,7 +38,9 @@ Artifacts (--plugins / ELLE_BUILD_PLUGINS=1):
 Environment overrides:
 - ELLE_DIR  destination checkout directory (default: $repo_dir/.elle)
 - ELLE_REPO clone URL (default: $elle_repo)
-- ELLE_REF  pin to a specific commit/branch/tag (default: upstream HEAD)
+- ELLE_REF  pin to a specific commit/branch/tag
+            (default: project pin from $default_elle_ref_file; set ELLE_REF= to keep
+            the checkout at its current ref)
 - ELLE_BUILD_PLUGINS  when set to a non-empty value, build the MCP plugins
   (oxigraph, syn) in addition to the elle binary.  Equivalent to --plugins.
 - LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script

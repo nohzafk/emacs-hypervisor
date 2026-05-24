@@ -17,10 +17,6 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Pin Elle to a known-good commit so upstream breaking changes (epoch
-  # bumps, primitive renames) cannot break CI on an unrelated push.
-  # Update this when you intentionally adopt newer Elle.
-  ELLE_REF: 2db56eaf6934b89f3b940fd69c7b45c27a159aa0
 
 jobs:
   test:
@@ -42,7 +38,7 @@ jobs:
         uses: extractions/setup-just@v2
 
       # Cache the Elle checkout so re-runs skip the network fetch.
-      # Keyed on the pinned ELLE_REF.
+      # Keyed on .elle-ref, the project-wide pinned Elle commit.
       - name: Cache Elle checkout
         id: cache-elle-src
         uses: actions/cache@v4
@@ -50,7 +46,7 @@ jobs:
           path: |
             .elle
             !.elle/target
-          key: elle-src-${{ env.ELLE_REF }}
+          key: elle-src-${{ hashFiles('.elle-ref') }}
 
       # Cache cargo registry + workspace target dirs. Keyed on lockfiles
       # so the cache invalidates when dependencies change.

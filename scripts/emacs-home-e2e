@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+home=/tmp/emacs-hypervisor-e2e-home
+config_home=/tmp/emacs-hypervisor-e2e-config
+binary="$repo_dir/target/release/emacs-hypervisor"
+emacs_bin=${EMACS:-emacs}
+timeout_seconds=120
+config_source=
+reset=false
+
+usage() {
+  cat <<USAGE
+usage: scripts/emacs-home-e2e [options]
+
+Run a repeatable end-to-end Emacs Hypervisor startup probe.
+
+Options:
+  --home PATH           Emacs home to recreate (default: $home)
+  --config-home PATH    XDG config home to recreate (default: $config_home)
+  --binary PATH         emacs-hypervisor binary (default: $binary)
+  --emacs PATH          Emacs executable (default: $emacs_bin)
+  --timeout SECONDS     readiness wait timeout (default: $timeout_seconds)
+  --config-source PATH  copy early-init.el/config.org from PATH instead of
+                         generating the focused e2e test config
+  --reset               remove --home and --config-home before running
+  -h, --help            show this help
+
+By default the script preserves --home and --config-home so package downloads
+can be reused across runs. With --reset, it removes both directories first.
+It initializes or upgrades the Emacs home, writes a focused test config unless
+--config-source is provided, then runs Emacs in batch mode and prints startup
+state, reports, warnings, events, and process buffers.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --home)
+      home=${2:?missing value for --home}
+      shift 2
+      ;;
+    --config-home)
+      config_home=${2:?missing value for --config-home}
+      shift 2
+      ;;
+    --binary)
+      binary=${2:?missing value for --binary}
+      shift 2
+      ;;
+    --emacs)
+      emacs_bin=${2:?missing value for --emacs}
+      shift 2
+      ;;
+    --timeout)
+      timeout_seconds=${2:?missing value for --timeout}
+      shift 2
+      ;;
+    --config-source)
+      config_source=${2:?missing value for --config-source}
+      shift 2
+      ;;
+    --reset)
+      reset=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 64
+      ;;
+  esac
+done
+
+if [ ! -x "$binary" ]; then
+  echo "emacs-hypervisor binary is not executable: $binary" >&2
+  exit 1
+fi
+
+if ! command -v "$emacs_bin" >/dev/null 2>&1; then
+  echo "Emacs executable was not found in PATH: $emacs_bin" >&2
+  exit 1
+fi
+
+if [ -n "$config_source" ]; then
+  for config_file in early-init.el config.org; do
+    if [ ! -f "$config_source/$config_file" ]; then
+      echo "Missing config source file: $config_source/$config_file" >&2
+      exit 1
+    fi
+  done
+fi
+
+if [ "$reset" = true ]; then
+  rm -rf "$home" "$config_home"
+fi
+
+mkdir -p "$home" "$config_home/emacs-hypervisor"
+
+if [ -f "$home/init.el" ]; then
+  XDG_CONFIG_HOME="$config_home" "$binary" init --upgrade --home "$home"
+else
+  XDG_CONFIG_HOME="$config_home" "$binary" init --home "$home"
+fi
+
+"$binary" env --home "$home"
+
+if [ -n "$config_source" ]; then
+  cp "$config_source/early-init.el" "$config_source/config.org" "$config_home/emacs-hypervisor/"
+else
+  cat > "$config_home/emacs-hypervisor/early-init.el" <<'EOF'
+;;; early-init.el --- Emacs Hypervisor e2e early init -*- lexical-binding: t; -*-
+EOF
+
+  cat > "$config_home/emacs-hypervisor/config.org" <<'EOF'
+* Emacs Hypervisor E2E Config
+#+begin_src elisp
+  ;; Keep this config intentionally small and focused. The e2e should prove
+  ;; that package installation/activation completes and that config-unit forms
+  ;; run through the end of the file without depending on a personal config.
+#+end_src
+EOF
+fi
+
+cat >> "$config_home/emacs-hypervisor/config.org" <<'EOF'
+
+* Emacs Hypervisor E2E Sentinel
+#+begin_src elisp
+  ;; Exercise packages where multiple package features can come from one
+  ;; upstream repository/check-out. This catches cases where the package is
+  ;; considered installed but its feature is not loadable.
+  (package! consult)
+  (package! magit-section :repo "magit/magit" :branch "main" :lisp-dir "lisp")
+  (package! magit :repo "magit/magit" :branch "main" :deps magit-section :lisp-dir "lisp")
+  (package! embark :repo "oantolin/embark" :branch "master")
+  (package! embark-consult
+    :repo "oantolin/embark"
+    :branch "master"
+    :deps (embark consult))
+
+  (setq emacs-hypervisor-e2e-config-read-to-end t)
+
+  (config-unit! emacs-hypervisor-e2e-config-unit
+    :requires (magit magit-section embark embark-consult)
+    :config
+    (setq emacs-hypervisor-e2e-config-unit-ran t))
+#+end_src
+EOF
+
+probe="$home/e2e-probe.el"
+cat > "$probe" <<'EOF'
+(require 'seq)
+
+(defun emacs-hypervisor-e2e-value (symbol fallback)
+  (if (boundp symbol)
+      (symbol-value symbol)
+    fallback))
+
+(defun emacs-hypervisor-e2e-print-value (label value)
+  (princ (format "%s=%S\n" label value)))
+
+(defun emacs-hypervisor-e2e-print-list (label values)
+  (princ (format "%s-BEGIN\n" label))
+  (dolist (value values)
+    (princ (format "%S\n" value)))
+  (princ (format "%s-END\n" label)))
+
+(defun emacs-hypervisor-e2e-print-buffer (label buffer-name)
+  (princ (format "%s-BEGIN\n" label))
+  (let ((buffer (and buffer-name (get-buffer buffer-name))))
+    (if buffer
+        (with-current-buffer buffer
+          (princ (buffer-string)))
+      (princ (format "<missing buffer %S>\n" buffer-name))))
+  (unless (bolp)
+    (princ "\n"))
+  (princ (format "%s-END\n" label)))
+
+(defun emacs-hypervisor-e2e-message-payload (message)
+  (cdr message))
+
+(defun emacs-hypervisor-e2e-find-plan-message (messages phase)
+  (seq-find
+   (lambda (message)
+     (eq (plist-get (emacs-hypervisor-e2e-message-payload message) :phase)
+         phase))
+   messages))
+
+(defun emacs-hypervisor-e2e-find-report-message (messages stage phase)
+  (seq-find
+   (lambda (message)
+     (let ((payload (emacs-hypervisor-e2e-message-payload message)))
+       (and (eq (plist-get payload :stage) stage)
+            (eq (plist-get payload :phase) phase))))
+   messages))
+
+(defun emacs-hypervisor-e2e-message-items (message)
+  (plist-get (emacs-hypervisor-e2e-message-payload message) :items))
+
+(defun emacs-hypervisor-e2e-item-names (items)
+  (mapcar (lambda (item) (plist-get item :name)) items))
+
+(defun emacs-hypervisor-e2e-missing-names (expected items)
+  (let ((names (emacs-hypervisor-e2e-item-names items)))
+    (seq-remove (lambda (name) (member name names)) expected)))
+
+(let (wait-result caught status readiness exit-code
+                  plan-messages report-messages
+                  package-plan unit-plan
+                  planned-package-report planned-unit-report
+                  executed-package-report executed-unit-report
+                  package-plan-items unit-plan-items
+                  package-report-items unit-report-items
+                  missing-package-reports missing-unit-reports)
+  (condition-case err
+      (setq wait-result
+            (emacs-hypervisor-wait-for-completion
+             (string-to-number
+              (or (getenv "EMACS_HYPERVISOR_E2E_TIMEOUT") "120"))))
+    (error
+     (setq caught err)))
+  (setq readiness
+        (if (fboundp 'emacs-hypervisor-readiness)
+            (emacs-hypervisor-readiness)
+          'missing-readiness-function))
+  (setq status
+        (if (fboundp 'emacs-hypervisor-status)
+            (emacs-hypervisor-status)
+          'missing-status-function))
+  (setq plan-messages
+        (reverse
+         (emacs-hypervisor-e2e-value 'emacs-hypervisor--plan-messages nil)))
+  (setq report-messages
+        (reverse
+         (emacs-hypervisor-e2e-value 'emacs-hypervisor--report-messages nil)))
+  (setq package-plan
+        (emacs-hypervisor-e2e-find-plan-message plan-messages :packages))
+  (setq unit-plan
+        (emacs-hypervisor-e2e-find-plan-message plan-messages :units))
+  (setq planned-package-report
+        (emacs-hypervisor-e2e-find-report-message
+         report-messages :planned :packages))
+  (setq planned-unit-report
+        (emacs-hypervisor-e2e-find-report-message
+         report-messages :planned :units))
+  (setq executed-package-report
+        (emacs-hypervisor-e2e-find-report-message
+         report-messages :executed :packages))
+  (setq executed-unit-report
+        (emacs-hypervisor-e2e-find-report-message
+         report-messages :executed :units))
+  (setq package-plan-items (emacs-hypervisor-e2e-message-items package-plan))
+  (setq unit-plan-items (emacs-hypervisor-e2e-message-items unit-plan))
+  (setq package-report-items
+        (or (emacs-hypervisor-e2e-message-items executed-package-report)
+            (emacs-hypervisor-e2e-message-items planned-package-report)))
+  (setq unit-report-items
+        (or (emacs-hypervisor-e2e-message-items executed-unit-report)
+            (emacs-hypervisor-e2e-message-items planned-unit-report)))
+  (setq missing-package-reports
+        (emacs-hypervisor-e2e-missing-names
+         '("consult" "magit" "magit-section" "embark" "embark-consult")
+         package-report-items))
+  (setq missing-unit-reports
+        (emacs-hypervisor-e2e-missing-names
+         '("emacs-hypervisor-e2e-config-unit")
+         unit-report-items))
+
+  (emacs-hypervisor-e2e-print-value "WAIT" wait-result)
+  (emacs-hypervisor-e2e-print-value "CAUGHT" caught)
+  (emacs-hypervisor-e2e-print-value "READINESS" readiness)
+  (emacs-hypervisor-e2e-print-value "STATUS" status)
+  (emacs-hypervisor-e2e-print-value
+   "LOADED-ENV-FILE"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor-loaded-env-file nil))
+  (emacs-hypervisor-e2e-print-value "PLAN-MESSAGE-COUNT"
+                                     (length plan-messages))
+  (emacs-hypervisor-e2e-print-value "REPORT-MESSAGE-COUNT"
+                                     (length report-messages))
+  (emacs-hypervisor-e2e-print-value "PACKAGE-PLAN-COUNT"
+                                     (length package-plan-items))
+  (emacs-hypervisor-e2e-print-value "UNIT-PLAN-COUNT"
+                                     (length unit-plan-items))
+  (emacs-hypervisor-e2e-print-value "PACKAGE-REPORT-COUNT"
+                                     (length package-report-items))
+  (emacs-hypervisor-e2e-print-value "UNIT-REPORT-COUNT"
+                                     (length unit-report-items))
+  (emacs-hypervisor-e2e-print-value "MISSING-PACKAGE-REPORTS"
+                                     missing-package-reports)
+  (emacs-hypervisor-e2e-print-value "MISSING-UNIT-REPORTS"
+                                     missing-unit-reports)
+
+  (emacs-hypervisor-e2e-print-list
+   "PROGRESS"
+   (reverse
+    (emacs-hypervisor-e2e-value 'emacs-hypervisor--progress-messages nil)))
+  (emacs-hypervisor-e2e-print-list
+   "LOG"
+   (reverse
+    (emacs-hypervisor-e2e-value 'emacs-hypervisor--log-messages nil)))
+  (emacs-hypervisor-e2e-print-list
+   "PLAN"
+   plan-messages)
+  (emacs-hypervisor-e2e-print-list
+   "REPORT"
+   report-messages)
+  (emacs-hypervisor-e2e-print-list
+   "WARNING"
+   (reverse
+    (emacs-hypervisor-e2e-value 'emacs-hypervisor--startup-warnings nil)))
+  (emacs-hypervisor-e2e-print-list
+   "PACKAGE-EVENT"
+   (reverse
+    (emacs-hypervisor-e2e-value 'emacs-hypervisor--package-events nil)))
+  (emacs-hypervisor-e2e-print-list
+   "UNIT-EVENT"
+   (reverse
+    (emacs-hypervisor-e2e-value 'emacs-hypervisor--unit-events nil)))
+
+  (emacs-hypervisor-e2e-print-buffer
+   "PROCESS-BUFFER"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor--buffer-name nil))
+  (emacs-hypervisor-e2e-print-buffer
+   "STDERR-BUFFER"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor--stderr-buffer-name nil))
+
+  (emacs-hypervisor-e2e-print-value
+   "CONFIG-READ-TO-END"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor-e2e-config-read-to-end nil))
+  (emacs-hypervisor-e2e-print-value
+   "CONFIG-UNIT-RAN"
+   (emacs-hypervisor-e2e-value 'emacs-hypervisor-e2e-config-unit-ran nil))
+
+  (setq exit-code
+        (if (and (eq readiness 'ready)
+                 (emacs-hypervisor-e2e-value
+                  'emacs-hypervisor-e2e-config-read-to-end nil)
+                 (emacs-hypervisor-e2e-value
+                  'emacs-hypervisor-e2e-config-unit-ran nil)
+                 (> (length unit-plan-items) 0)
+                 (> (length package-report-items) 0)
+                 (> (length unit-report-items) 0)
+                 (null missing-package-reports)
+                 (null missing-unit-reports))
+            0
+          1))
+  (kill-emacs exit-code))
+EOF
+
+echo "E2E-HOME=$home"
+echo "E2E-CONFIG-HOME=$config_home"
+echo "E2E-BINARY=$binary"
+echo "E2E-EMACS=$emacs_bin"
+echo "E2E-TIMEOUT=$timeout_seconds"
+echo "E2E-CONFIG-SOURCE=${config_source:-<generated>}"
+echo "E2E-RESET=$reset"
+
+XDG_CONFIG_HOME="$config_home" \
+  EMACS_HYPERVISOR_BIN="$binary" \
+  EMACS_HYPERVISOR_E2E_TIMEOUT="$timeout_seconds" \
+  "$emacs_bin" --batch --load "$home/init.el" --load "$probe"

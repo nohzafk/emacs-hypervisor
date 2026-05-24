@@ -1,11 +1,15 @@
 ;;; emacs-hypervisor-unit-runtime.el --- Unit runtime helpers -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'emacs-hypervisor-declarations)
 
 (defun emacs-hypervisor-runtime--unit-entry (name)
   (cl-find name emacs-hypervisor-config-units
            :key (lambda (entry) (plist-get entry :name))
            :test #'equal))
+
+(defun emacs-hypervisor-runtime--unit-entry-at-index (index)
+  (nth index (nreverse (copy-sequence emacs-hypervisor-config-units))))
 
 (defun emacs-hypervisor-runtime-note-unit-event (kind name &optional error)
   (when (fboundp 'emacs-hypervisor-report-note-unit-event)
@@ -32,23 +36,34 @@
     (when missing
       (error "Unit %s missing required features: %S" name missing))))
 
-(defun emacs-hypervisor-runtime-run-unit (name body &optional requires)
+(defun emacs-hypervisor-runtime-run-unit (name &optional body requires)
   (push (list :phase :units :event :attempt :name name)
         emacs-hypervisor-execution-events)
   (emacs-hypervisor-runtime-note-unit-event :attempt name)
   (condition-case err
       (progn
-        (emacs-hypervisor-runtime--require-unit-features name requires)
-        (let ((result (eval body t)))
-          (push (list :phase :units :event :success :name name)
-                emacs-hypervisor-execution-events)
-          (emacs-hypervisor-runtime-note-unit-event :success name)
-          result))
+        (let ((entry (emacs-hypervisor-runtime--unit-entry name)))
+          (unless (or entry body)
+            (error "Unknown config unit: %s" name))
+          (emacs-hypervisor-runtime--require-unit-features
+           name
+           (or requires (and entry (plist-get entry :requires))))
+          (let ((result (eval (or body (plist-get entry :body)) t)))
+            (push (list :phase :units :event :success :name name)
+                  emacs-hypervisor-execution-events)
+            (emacs-hypervisor-runtime-note-unit-event :success name)
+            result)))
     (error
      (emacs-hypervisor-runtime-note-unit-event
       :failed
       name
       (format "%S" err))
      (signal (car err) (cdr err)))))
+
+(defun emacs-hypervisor-runtime-run-unit-at-index (index)
+  (let ((entry (emacs-hypervisor-runtime--unit-entry-at-index index)))
+    (unless entry
+      (error "Unknown config unit index: %S" index))
+    (emacs-hypervisor-runtime-run-unit (plist-get entry :name))))
 
 (provide 'emacs-hypervisor-unit-runtime)

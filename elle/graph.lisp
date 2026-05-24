@@ -1,16 +1,38 @@
-(elle/epoch 10)
 ## Shared graph, validation, and reporting helpers.
 
 (defn emacs-hypervisor-graph-module []
   (defn member? [xs value]
     (any? (fn [item] (= item value)) xs))
 
-  (defn entry-name [{:name name}]
-    name)
+  (defn plist-field [xs key default]
+    (match xs
+      () default
+      (k v & rest)
+       (if (= k key)
+         v
+         (plist-field rest key default))
+      _ default))
 
   (defn entry-field [entry key]
-    (let [value (get entry key ())]
+    (let [value
+          (case (type-of entry)
+            :struct (get entry key ())
+            :@struct (get entry key ())
+            :list (plist-field entry key ())
+            ())]
       (if (nil? value) () value)))
+
+  (defn entry-field-default [entry key default]
+    (let [value (entry-field entry key)]
+      (if (empty? value) default value)))
+
+  (defn entry-name [entry]
+    (let [name (entry-field entry :name)]
+      (if (empty? name)
+        nil
+        (if (= (type-of name) :string)
+          (string "" name)
+          name))))
 
   (defn non-nil-values [values]
     (filter (fn [value] (not (nil? value))) values))
@@ -88,11 +110,15 @@
 
   (defn report-status [reports name]
     (if-let [entry (find-entry reports name)]
-      (get entry :status)
+      (let [status (entry-field entry :status)]
+        (if (= status ()) nil status))
       nil))
 
   (defn make-report [name status reason details]
-    {:name name :status status :reason reason :details details})
+    {:name (if (= (type-of name) :string) (string "" name) name)
+     :status status
+     :reason reason
+     :details details})
 
   (defn missing-details [missing]
     {:missing missing})
@@ -184,7 +210,7 @@
     (filter
      (fn [name]
        (if-let [report (find-entry reports name)]
-         (not (= (get report :status) :ok))
+         (not (= (report-status reports name) :ok))
          false))
      names))
 
@@ -195,6 +221,7 @@
    :cycle-names cycle-names
    :cycle-details cycle-details
    :entry-field entry-field
+   :entry-field-default entry-field-default
    :entry-name entry-name
    :find-entry find-entry
    :invalid-package-report invalid-package-report

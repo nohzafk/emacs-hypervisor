@@ -1,4 +1,3 @@
-(elle/epoch 10)
 ## Shared benchmark and instrumentation helpers.
 
 (defn emacs-hypervisor-benchmark-module [protocol enabled?]
@@ -16,11 +15,11 @@
     (if (empty? payload)
       ()
       (let [key (first payload)
-            rest (rest payload)]
-        (if (empty? rest)
+            tail (rest payload)]
+        (if (empty? tail)
           (list key)
-          (let [value (first rest)
-                remaining (rest rest)]
+          (let [value (first tail)
+                remaining (rest tail)]
             (if (metric-payload-key? key)
               (strip-metric-fields remaining)
               (pair key
@@ -47,10 +46,16 @@
         result)
       (thunk)))
 
+  (defn payload-datum [payload]
+    (if (= (type-of payload) :syntax)
+      (syntax->datum payload)
+      payload))
+
   (defn eval-payload [payload]
-    (if enabled?
-      payload
-      (strip-metric-fields payload)))
+    (let [payload (payload-datum payload)]
+      (if enabled?
+        payload
+        (strip-metric-fields payload))))
 
   {:append-plist-field append-plist-field
    :elapsed-ms elapsed-ms

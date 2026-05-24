@@ -2,8 +2,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use elisp_pack::pack_file;
-
 fn repo_root() -> PathBuf {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR should be set"))
         .join("..")
@@ -80,21 +78,21 @@ fn main() {
     )
     .expect("should write embedded backend source");
 
-    let mut packed_output = String::new();
-    for (const_name, rel_path) in PACKED_RUNTIME_FORMS {
+    let mut elisp_output = String::new();
+    for (const_name, rel_path) in RUNTIME_MODULES {
         let path = repo_dir.join(rel_path);
-        let packed = pack_file(&path)
-            .unwrap_or_else(|error| panic!("failed to pack {}: {}", rel_path, error));
-        packed_output.push_str(&format!(
-            "pub const EMBEDDED_{}_FORMS: &str = {:?};\n",
-            const_name, packed.forms_source
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {}", rel_path, error));
+        elisp_output.push_str(&format!(
+            "pub const EMBEDDED_{}_SOURCE: &str = {:?};\n",
+            const_name, source
         ));
     }
-    fs::write(out_dir.join("embedded_elisp.rs"), packed_output)
-        .expect("should write embedded packed elisp");
+    fs::write(out_dir.join("embedded_elisp.rs"), elisp_output)
+        .expect("should write embedded elisp");
 }
 
-const PACKED_RUNTIME_FORMS: &[(&str, &str)] = &[
+const RUNTIME_MODULES: &[(&str, &str)] = &[
     (
         "REPORT_CORE",
         "elle/runtime-forms/emacs-hypervisor-report-core.el",

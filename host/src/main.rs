@@ -135,75 +135,75 @@ fn default_elle_home_path() -> PathBuf {
     repo_root().join(".elle")
 }
 
-struct PackedElispModule {
+struct EmbeddedElispModule {
     env_name: &'static str,
-    embedded_forms: &'static str,
+    embedded_source: &'static str,
 }
 
-const PACKED_ELISP_MODULES: &[PackedElispModule] = &[
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_FORMS",
-        embedded_forms: embedded::EMBEDDED_REPORT_CORE_FORMS,
+const EMBEDDED_ELISP_MODULES: &[EmbeddedElispModule] = &[
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
+        embedded_source: embedded::EMBEDDED_REPORT_CORE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_FORMS",
-        embedded_forms: embedded::EMBEDDED_REPORT_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
+        embedded_source: embedded::EMBEDDED_REPORT_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_FORMS",
-        embedded_forms: embedded::EMBEDDED_ELLE_CANONICALIZE_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_SOURCE",
+        embedded_source: embedded::EMBEDDED_ELLE_CANONICALIZE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_FORMS",
-        embedded_forms: embedded::EMBEDDED_DECLARATIONS_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
+        embedded_source: embedded::EMBEDDED_DECLARATIONS_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_FORMS",
-        embedded_forms: embedded::EMBEDDED_EFFECT_REGISTRY_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_SOURCE",
+        embedded_source: embedded::EMBEDDED_EFFECT_REGISTRY_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_FORMS",
-        embedded_forms: embedded::EMBEDDED_EFFECT_AWARE_RELOAD_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_SOURCE",
+        embedded_source: embedded::EMBEDDED_EFFECT_AWARE_RELOAD_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_HOOK_FORMS",
-        embedded_forms: embedded::EMBEDDED_EFFECT_KIND_HOOK_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_HOOK_SOURCE",
+        embedded_source: embedded::EMBEDDED_EFFECT_KIND_HOOK_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_FORMS",
-        embedded_forms: embedded::EMBEDDED_EFFECT_KIND_ADVICE_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_SOURCE",
+        embedded_source: embedded::EMBEDDED_EFFECT_KIND_ADVICE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_FORMS",
-        embedded_forms: embedded::EMBEDDED_EFFECT_KIND_KEYBINDING_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_SOURCE",
+        embedded_source: embedded::EMBEDDED_EFFECT_KIND_KEYBINDING_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_FORMS",
-        embedded_forms: embedded::EMBEDDED_SELECTIVE_RELOAD_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_SOURCE",
+        embedded_source: embedded::EMBEDDED_SELECTIVE_RELOAD_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_FORMS",
-        embedded_forms: embedded::EMBEDDED_CONFIG_PATHS_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_SOURCE",
+        embedded_source: embedded::EMBEDDED_CONFIG_PATHS_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_FORMS",
-        embedded_forms: embedded::EMBEDDED_COMPOSE_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
+        embedded_source: embedded::EMBEDDED_COMPOSE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_FORMS",
-        embedded_forms: embedded::EMBEDDED_SESSION_BASE_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_SOURCE",
+        embedded_source: embedded::EMBEDDED_SESSION_BASE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_FORMS",
-        embedded_forms: embedded::EMBEDDED_PACKAGE_BRIDGE_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_SOURCE",
+        embedded_source: embedded::EMBEDDED_PACKAGE_BRIDGE_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_FORMS",
-        embedded_forms: embedded::EMBEDDED_PACKAGE_RUNTIME_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE",
+        embedded_source: embedded::EMBEDDED_PACKAGE_RUNTIME_SOURCE,
     },
-    PackedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_FORMS",
-        embedded_forms: embedded::EMBEDDED_UNIT_RUNTIME_FORMS,
+    EmbeddedElispModule {
+        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE",
+        embedded_source: embedded::EMBEDDED_UNIT_RUNTIME_SOURCE,
     },
 ];
 
@@ -212,8 +212,8 @@ fn install_elisp_modules() -> Result<(), String> {
         "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH",
         generated_init_hash(),
     );
-    for module in PACKED_ELISP_MODULES {
-        env::set_var(module.env_name, module.embedded_forms);
+    for module in EMBEDDED_ELISP_MODULES {
+        env::set_var(module.env_name, module.embedded_source);
     }
     Ok(())
 }
@@ -623,6 +623,9 @@ mod tests {
         assert!(init.contains("Bundled from host/emacs-kernel/home-startup.el"));
         assert!(early_init.contains("Generated Emacs Hypervisor early init"));
         assert!(early_init.contains("emacs-hypervisor"));
+        assert!(early_init.contains(
+            "(setq package-user-dir (expand-file-name \"packages/\" user-emacs-directory))"
+        ));
         assert!(!home.join("lisp").exists());
 
         fs::remove_dir_all(&home).expect("test home cleanup should succeed");

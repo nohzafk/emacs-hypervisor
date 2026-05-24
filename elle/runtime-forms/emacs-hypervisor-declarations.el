@@ -108,12 +108,31 @@ feature preloading, not whether the unit itself is lazy or deferred."
          :body ',body-form)
         emacs-hypervisor-config-units))))
 
+(defun emacs-hypervisor--package-installed-p (entry)
+  (let ((name (plist-get entry :name)))
+    (and name
+         (let ((symbol (intern name)))
+	         (or (featurep symbol)
+	             (and (boundp 'package-alist)
+	                  (not (null (assq symbol package-alist))))
+	             (and (fboundp 'package-installed-p)
+	                  (not (null (package-installed-p symbol)))))))))
+
 (defun emacs-hypervisor-export-packages ()
-  (nreverse (copy-sequence emacs-hypervisor-packages)))
+  (mapcar
+   (lambda (entry)
+     (append
+      (copy-sequence entry)
+      (list :installed (emacs-hypervisor--package-installed-p entry))))
+   (nreverse (copy-sequence emacs-hypervisor-packages))))
 
 (defun emacs-hypervisor-export-config-units ()
-  (mapcar #'emacs-hypervisor--canonicalize-unit
-          (nreverse (copy-sequence emacs-hypervisor-config-units))))
+  (cl-loop for entry in (nreverse (copy-sequence emacs-hypervisor-config-units))
+           for index from 0
+           collect (plist-put
+                    (emacs-hypervisor--canonicalize-unit entry)
+                    :index
+                    index)))
 
 (defun emacs-hypervisor-export-environment-names ()
   (emacs-hypervisor--unique-strings

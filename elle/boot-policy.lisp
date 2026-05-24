@@ -1,4 +1,3 @@
-(elle/epoch 10)
 ## Shared boot-policy helpers built on graph + preflight modules.
 
 (defn emacs-hypervisor-boot-policy-module [graph preflight]
@@ -6,8 +5,8 @@
     (graph:make-report
      (graph:entry-name entry)
      :ok
-     :ready
-     (graph:entry-field entry :deps)))
+     (if (get entry :installed false) :installed :ready)
+     {:deps (graph:entry-field entry :deps)}))
 
   (defn ready-unit-report [entry]
     (graph:make-report

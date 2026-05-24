@@ -40,6 +40,7 @@
 (setq default-directory emacs-hypervisor-home-directory)
 (setq user-emacs-directory
       (file-name-as-directory emacs-hypervisor-home-directory))
+(setq package-user-dir (expand-file-name "packages/" user-emacs-directory))
 
 ;; Bootstrap binary resolution rule:
 ;; 1. Prefer EMACS_HYPERVISOR_BIN when already set.

@@ -1,4 +1,3 @@
-(elle/epoch 10)
 ## Shared helper forms emitted into Emacs at session startup.
 
 (include-file "runtime-forms/module-loader.lisp")
@@ -51,7 +50,8 @@
       (module-loader:load-module-form package-bridge-module :emacs-hypervisor-package-bridge-ready)
       (module-loader:load-module-form package-runtime-module :emacs-hypervisor-package-runtime-ready)
       (module-loader:load-module-form unit-runtime-module :emacs-hypervisor-unit-runtime-ready)
-      '(:emacs-hypervisor-session-helpers-ready))))
+      '((emacs-hypervisor-bridge-activate)
+        :emacs-hypervisor-session-helpers-ready))))
 
   {:install-config-surface-form install-config-surface-form
    :install-session-helpers-form install-session-helpers-form})

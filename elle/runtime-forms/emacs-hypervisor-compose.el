@@ -288,6 +288,31 @@
      config-org-file tangled-file
      emacs-hypervisor--config-org-elisp-lang-regexp)))
 
+(defun emacs-hypervisor-load-startup-config (&optional config-file config-org-file)
+  "Reset declarations and load CONFIG-FILE or tangled CONFIG-ORG-FILE.
+
+When called without arguments, use the configured Hypervisor paths inside
+Emacs. This keeps boot-context paths out of the host-to-Emacs eval payload."
+  (let ((config-file (or config-file (emacs-hypervisor--config-file)))
+        (config-org-file (or config-org-file
+                             (let ((path (emacs-hypervisor--config-org-file)))
+                               (and (file-exists-p path) path))))
+        load-target)
+    (setq load-target config-file)
+    (when config-org-file
+      (let ((tangled-file
+             (expand-file-name
+              ".config.tangled.el"
+              (file-name-directory config-org-file))))
+        (require 'ob-tangle)
+        (org-babel-tangle-file
+         config-org-file tangled-file
+         emacs-hypervisor--config-org-elisp-lang-regexp)
+        (setq load-target tangled-file)))
+    (emacs-hypervisor-reset-declarations)
+    (load-file load-target)
+    :ok))
+
 (defun emacs-hypervisor-reload-config ()
   "Reload changed config units into the current Emacs state.
 

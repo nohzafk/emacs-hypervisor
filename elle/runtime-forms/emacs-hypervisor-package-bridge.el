@@ -5,6 +5,7 @@
 (require 'package-vc)
 
 (defvar emacs-hypervisor-bridge-ready nil)
+(defvar emacs-hypervisor-bridge-activated nil)
 
 (defcustom emacs-hypervisor-clone-concurrency 8
   "Maximum number of git clones run in parallel during package install."
@@ -31,18 +32,34 @@
   (emacs-hypervisor-bridge--ensure-directory
    (expand-file-name "packages-src/" user-emacs-directory)))
 
+(defun emacs-hypervisor-bridge--configure ()
+  "Configure package.el paths and archives for the current Hypervisor home."
+  (emacs-hypervisor-bridge--ensure-directory user-emacs-directory)
+  (let ((expected-package-dir
+         (emacs-hypervisor-bridge--ensure-directory
+          (expand-file-name "packages/" user-emacs-directory))))
+    (unless (equal (file-name-as-directory (expand-file-name package-user-dir))
+                   expected-package-dir)
+      (setq package-user-dir expected-package-dir)
+      (setq package--initialized nil)))
+  (emacs-hypervisor-bridge--staging-root)
+  (dolist (archive emacs-hypervisor-bridge-archives)
+    (cl-pushnew archive package-archives :test #'equal))
+  :configured)
+
+(defun emacs-hypervisor-bridge-activate ()
+  "Activate already installed Hypervisor packages without refreshing archives."
+  (unless emacs-hypervisor-bridge-activated
+    (emacs-hypervisor-bridge--configure)
+    (unless package--initialized
+      (package-initialize))
+    (setq emacs-hypervisor-bridge-activated t))
+  :activated)
+
 (defun emacs-hypervisor-bridge-init ()
   "Configure package.el paths and archives for hypervisor-managed installs."
   (unless emacs-hypervisor-bridge-ready
-    (emacs-hypervisor-bridge--ensure-directory user-emacs-directory)
-    (setq package-user-dir
-          (emacs-hypervisor-bridge--ensure-directory
-           (expand-file-name "packages/" user-emacs-directory)))
-    (emacs-hypervisor-bridge--staging-root)
-    (dolist (archive emacs-hypervisor-bridge-archives)
-      (cl-pushnew archive package-archives :test #'equal))
-    (unless package--initialized
-      (package-initialize))
+    (emacs-hypervisor-bridge-activate)
     (unless package-archive-contents
       (package-refresh-contents))
     (setq emacs-hypervisor-bridge-ready t))
@@ -133,7 +150,8 @@
 (defun emacs-hypervisor-bridge--start-clone (entry on-done)
   "Spawn an async clone for ENTRY. Calls ON-DONE with :ok or (:error REASON)."
   (let* ((name   (plist-get entry :name))
-         (buffer (get-buffer-create (format " *hypervisor-clone-%s*" name))))
+         (buffer (get-buffer-create (format " *hypervisor-clone-%s*" name)))
+         (handled nil))
     (with-current-buffer buffer (erase-buffer))
     (make-process
      :name (format "hypervisor-clone-%s" name)
@@ -142,18 +160,26 @@
      :noquery t
      :sentinel
      (lambda (proc _event)
-       (when (memq (process-status proc) '(exit signal))
+       (when (and (not handled)
+                  (memq (process-status proc) '(exit signal)))
+         (setq handled t)
          (let ((code (process-exit-status proc)))
            (if (zerop code)
                (condition-case err
                    (progn
                      (emacs-hypervisor-bridge--checkout-ref entry)
-                     (kill-buffer buffer)
+                     (when (buffer-live-p buffer)
+                       (kill-buffer buffer))
                      (funcall on-done :ok))
                  (error
+                  (when (buffer-live-p buffer)
+                    (kill-buffer buffer))
                   (funcall on-done (list :error (format "%S" err)))))
-             (let ((output (with-current-buffer buffer (buffer-string))))
-               (kill-buffer buffer)
+             (let ((output (if (buffer-live-p buffer)
+                               (with-current-buffer buffer (buffer-string))
+                             "")))
+               (when (buffer-live-p buffer)
+                 (kill-buffer buffer))
                (funcall on-done
                         (list :error
                               (format "git clone exited %d: %s"
@@ -162,8 +188,19 @@
 (defun emacs-hypervisor-bridge--adopt (entry)
   "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'."
   (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
-         (dir (emacs-hypervisor-bridge--clone-dir entry)))
+         (dir (emacs-hypervisor-bridge--clone-dir entry))
+         (spec (append
+                (list :url (emacs-hypervisor-bridge--build-url entry))
+                (when (plist-get entry :branch)
+                  (list :branch (plist-get entry :branch)))
+                (when (plist-get entry :lisp-dir)
+                  (list :lisp-dir (plist-get entry :lisp-dir))))))
     (unless (package-installed-p sym)
+      ;; `package-vc-install-from-checkout' only accepts DIR and NAME in Emacs
+      ;; 30.  Register the spec first so package-vc can still see :lisp-dir
+      ;; during its unpack step.
+      (when spec
+        (setf (alist-get sym package-vc-selected-packages) spec))
       (package-vc-install-from-checkout dir (symbol-name sym)))))
 
 (defun emacs-hypervisor-bridge--archive-install (entry)

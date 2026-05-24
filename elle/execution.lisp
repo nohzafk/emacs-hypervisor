@@ -1,4 +1,3 @@
-(elle/epoch 10)
 ## Shared execution helpers for package and unit runtime phases.
 
 (defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]
@@ -11,50 +10,40 @@
           fields (benchmark:append-plist-field fields :item-name item-name)]
       (benchmark:eval-payload fields)))
 
-  (defn eval-form [id form metric-name metric-kind phase item-name]
+  (defn send-eval-form-request [id form metric-name metric-kind phase item-name]
     (protocol:send-request
      id
      :eval
-     (eval-payload form metric-name metric-kind phase item-name))
+     (eval-payload form metric-name metric-kind phase item-name)))
+
+  (defn eval-form [id form metric-name metric-kind phase item-name]
+    (send-eval-form-request id form metric-name metric-kind phase item-name)
     (protocol:await-response mailbox id))
 
-  (defn package-entry-install-spec [entry]
-    (let* [name (graph:entry-name entry)
-           host (graph:entry-field entry :host)
-           repo (graph:entry-field entry :repo)
-           branch (graph:entry-field entry :branch)
-           tag (graph:entry-field entry :tag)
-           ref (graph:entry-field entry :ref)
-           local (graph:entry-field entry :local)
-           lisp-dir (graph:entry-field entry :lisp-dir)
-           fields (list :name name)
-           fields (benchmark:append-plist-field fields :repo repo)
-           fields (benchmark:append-plist-field fields :host host)
-           fields (benchmark:append-plist-field fields :branch branch)
-           fields (benchmark:append-plist-field fields :tag tag)
-           fields (benchmark:append-plist-field fields :ref ref)
-           fields (benchmark:append-plist-field fields :local local)
-           fields (benchmark:append-plist-field fields :lisp-dir lisp-dir)]
-      fields))
+  (defn package-install-batch-form []
+    '(emacs-hypervisor-runtime-install-declared-package-batch))
 
-  (defn package-install-batch-form [plan-items]
-    (let [entries (map
-                   (fn [{:entry entry}] (package-entry-install-spec entry))
-                   plan-items)]
-      (list 'emacs-hypervisor-runtime-install-package-batch
-            (list 'quote entries))))
+  (defn unit-run-at-index-form [index]
+    (list 'emacs-hypervisor-runtime-run-unit-at-index index))
 
   (defn execution-error [result]
     (protocol:response-error result))
+
+  (defn execution-error-message [error]
+    (if (nil? error)
+      "eval failed"
+      (case (type-of error)
+        :string (or (first (string/split error "\n")) "eval failed")
+        :keyword (concat ":" (string error))
+        :integer (number->string error)
+        :boolean (if error "true" "false")
+        "eval failed")))
 
   (defn execution-ok? [result]
     (protocol:response-ok? result))
 
   (defn eval-execution-details [error]
-    {:source :eval :error error})
-
-  (defn batch-install-results [result]
-    (protocol:from-wire (protocol:message-payload result)))
+    {:source :eval :error (execution-error-message error)})
 
   (defn report-state [next-id report]
     {:next-id next-id
@@ -93,69 +82,100 @@
                 (pair report collected)))))]
       (loop items next-id ())))
 
-  (defn collect-reports [items next-report]
+  (defn package-event-message? [message]
+    (and (= (protocol:message-kind message) :event)
+         (= (protocol:message-topic message) :package)))
+
+  (defn drain-events-until-response [process-id]
     (letrec
         [loop
-         (fn [remaining collected]
-           (if (empty? remaining)
-             (reverse collected)
-             (loop
-              (rest remaining)
-              (pair (next-report (first remaining) collected) collected))))]
-      (loop items ())))
+         (fn [package-events]
+           (let [message (protocol:read-message mailbox ":package event or :response")]
+             (if (and (= (protocol:message-kind message) :response)
+                      (= (protocol:message-id message) process-id))
+               {:response message
+                :package-events (reverse package-events)}
+               (loop
+                (if (package-event-message? message)
+                  (pair
+                   (protocol:from-wire (protocol:message-payload message))
+                   package-events)
+                  package-events)))))]
+      (loop ())))
 
-  (defn executed-package-report [name entry]
+  (defn all-failed-batch-reports [names error]
+    (map
+     (fn [name] (failed-eval-report name error))
+     names))
+
+  (defn package-event-kind [event]
+    (graph:entry-field event :kind))
+
+  (defn package-event-name [event]
+    (graph:entry-field event :name))
+
+  (defn package-event-reason [event]
+    (graph:entry-field event :reason))
+
+  (defn package-event-for-name [events name]
+    (letrec
+        [loop
+         (fn [remaining found]
+           (match remaining
+             () found
+             (event & rest)
+              (loop
+               rest
+               (if (= (package-event-name event) name)
+                 event
+                 found))
+             _ found))]
+      (loop events nil)))
+
+  (defn package-events-with-kind [events kind]
+    (filter (fn [event] (= (package-event-kind event) kind)) events))
+
+  (defn package-installed-names [events]
+    (map package-event-name (package-events-with-kind events :installed)))
+
+  (defn package-failed-events [events]
+    (package-events-with-kind events :failed))
+
+  (defn planned-package-details [planned-reports name]
+    (graph:entry-field (graph:find-entry planned-reports name) :details))
+
+  (defn installed-package-report [name planned-reports]
     (graph:make-report
      name
      :ok
-     :executed
-     (graph:entry-field entry :deps)))
+     :installed
+     (planned-package-details planned-reports name)))
 
-  (defn drain-events-until-response [process-id]
-    (let [message (protocol:read-message mailbox ":package event or :response")]
-      (if (and (= (protocol:message-kind message) :response)
-               (= (protocol:message-id message) process-id))
-        message
-        (drain-events-until-response process-id))))
-
-  (defn batch-result-status [batch-result]
-    (and batch-result (get batch-result :status)))
-
-  (defn batch-installed-names [batch-results]
-    (map
-     (fn [r] (get r :name))
-     (filter
-      (fn [r] (= (batch-result-status r) :installed))
-      batch-results)))
-
-  (defn batch-package-report [plan-item batch-results final-reports]
-    (let* [{:entry entry :name name} plan-item
-           batch-result (graph:find-entry batch-results name)
-           status (batch-result-status batch-result)]
-      (match status
+  (defn package-event-report [name planned-reports event fallback-error]
+    (if (nil? event)
+      (if (nil? fallback-error)
+        nil
+        (failed-eval-report name fallback-error))
+      (match (package-event-kind event)
         :installed
-         (executed-package-report name entry)
+         (installed-package-report name planned-reports)
         :failed
-         (let [deps (graph:entry-field entry :deps)
-               blockers (graph:report-blockers final-reports deps)]
-           (if (empty? blockers)
-             (failed-eval-report
-              name
-              (get batch-result :error "install failed"))
-             (graph:blocked-report name :blocked-by-package blockers)))
+         (failed-eval-report
+          name
+          (or (package-event-reason event) fallback-error))
         _
-         (failed-eval-report name "missing install result"))))
+         nil)))
 
-  (defn derive-batch-package-reports [plan-items batch-results]
-    (collect-reports
-     plan-items
-     (fn [plan-item final-reports]
-       (batch-package-report plan-item batch-results final-reports))))
-
-  (defn all-failed-batch-reports [plan-items error]
-    (map
-     (fn [{:name name}] (failed-eval-report name error))
-     plan-items))
+  (defn package-event-reports [names planned-reports events fallback-error]
+    (graph:non-nil-values
+     (map
+      (fn [name]
+        (package-event-report
+         name
+         planned-reports
+         (package-event-for-name events name)
+         fallback-error))
+      names)))
 
   (defn unit-execution-details [entry]
     {:requires (graph:entry-field entry :requires)
@@ -168,11 +188,8 @@
      :executed
      (unit-execution-details entry)))
 
-  (defn unit-run-form [entry]
-    `(emacs-hypervisor-runtime-run-unit
-      ,(graph:entry-name entry)
-      ,(list 'quote (graph:entry-field entry :body))
-      ,(list 'quote (graph:entry-field entry :requires))))
+  (defn unit-run-form [name]
+    (list 'emacs-hypervisor-runtime-run-unit name))
 
   (defn execute-unit-entry-state
       [name entry package-reports executed-unit-reports current-id]
@@ -195,12 +212,12 @@
           unit-blockers)
         _
          (let [result
-               (eval-form
-                current-id
-                (unit-run-form entry)
-                :run-unit
-                :unit
-                :units
+                (eval-form
+                 current-id
+                 (unit-run-form name)
+                 :run-unit
+                 :unit
+                 :units
                 name)]
            (eval-report-state
             current-id
@@ -208,34 +225,51 @@
             (executed-unit-report name entry)
             result)))))
 
-  (defn execute-package-entry-plan-tracker [plan-items next-id]
-    (if (empty? plan-items)
-      {:next-id next-id :reports () :installed ()}
+  (defn execute-package-entry-plan-tracker [names planned-reports next-id]
+    (if (empty? names)
+      {:next-id next-id :reports () :installed () :ok true}
       (let [process-id next-id
-            _ (protocol:send-request
+            _ (send-eval-form-request
                process-id
-               :eval
-               (eval-payload
-                (package-install-batch-form plan-items)
-                :install-package-batch
-                :package-install
-                :packages
-                nil))
-            result (drain-events-until-response process-id)]
+               (package-install-batch-form)
+               :install-packages
+               :package
+               :packages
+               nil)
+            drained (drain-events-until-response process-id)
+            result (get drained :response)
+            package-events (get drained :package-events)
+            fallback-error
+            (if (execution-ok? result) nil (execution-error result))]
         (if (execution-ok? result)
-          (let [batch-results (batch-install-results result)
-                reports (derive-batch-package-reports plan-items batch-results)
-                installed (batch-installed-names batch-results)]
-            {:next-id (+ process-id 1)
-             :reports reports
-             :installed installed})
-          {:next-id (+ process-id 1)
-           :reports (all-failed-batch-reports plan-items (execution-error result))
-           :installed ()}))))
+          (let [reports
+                (package-event-reports
+                 names
+                 planned-reports
+                 package-events
+                 nil)
+                installed (package-installed-names package-events)]
+		            {:next-id (+ process-id 1)
+		             :reports reports
+		             :installed installed
+		             :ok (empty? (package-failed-events package-events))})
+	          {:next-id (+ process-id 1)
+	           :reports
+	           (let [reports
+	                 (package-event-reports
+	                  names
+	                  planned-reports
+	                  package-events
+	                  fallback-error)]
+	             (if (empty? reports)
+	               (all-failed-batch-reports names fallback-error)
+	               reports))
+	           :installed (package-installed-names package-events)
+	           :ok false}))))
 
   (defn next-unit-execution-report [entry planned-report package-reports executed-unit-reports current-id]
     (let [name (graph:entry-name entry)
-          planned-status (get planned-report :status)]
+          planned-status (graph:entry-field planned-report :status)]
       (if (not (= planned-status :ok))
         {:next-id current-id :report planned-report}
         (execute-unit-entry-state
@@ -260,13 +294,30 @@
           current-id)))))
 
   (defn next-unit-plan-report
-      [{:entry entry :name name} package-reports executed-unit-reports current-id]
-    (execute-unit-entry-state
-     name
-     entry
-     package-reports
-     executed-unit-reports
-     current-id))
+      [plan-item package-reports executed-unit-reports current-id]
+      (let [name (graph:entry-field plan-item :name)
+          entry (graph:entry-field plan-item :entry)
+          planned-report
+          (graph:entry-field plan-item :planned-report)
+          planned-status
+          (graph:entry-field planned-report :status)]
+      (if (not (= planned-status :ok))
+        {:next-id current-id :report planned-report}
+        (let [index (graph:entry-field entry :index)
+              _request-sent
+              (send-eval-form-request
+               current-id
+               (unit-run-at-index-form index)
+               :run-unit
+               :unit
+               :units
+               name)
+              result (protocol:await-response mailbox current-id)]
+          (eval-report-state
+           current-id
+           name
+           (executed-unit-report name entry)
+           result)))))
 
   (defn execute-unit-plan [plan-items package-reports next-id]
     (collect-report-state
