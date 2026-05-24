@@ -146,9 +146,25 @@
     (when (file-directory-p lisp-dir)
       (add-to-list 'load-path (file-name-as-directory lisp-dir)))))
 
+(defun emacs-hypervisor-bridge--activate-package-load-path (entry)
+  "Add ENTRY's package root to `load-path' when package.el has not yet done so."
+  (let ((dir (emacs-hypervisor-bridge--package-dir entry)))
+    (when (file-directory-p dir)
+      (add-to-list 'load-path (file-name-as-directory dir)))))
+
+(defun emacs-hypervisor-bridge--activate-package (entry)
+  "Activate ENTRY through package.el when it is known to package.el."
+  (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
+    (when (and (fboundp 'package-activate)
+               (package-installed-p sym))
+      (ignore-errors
+        (package-activate sym)))))
+
 (defun emacs-hypervisor-bridge--note-present (entry)
   "Apply runtime metadata for ENTRY that is already present."
   (emacs-hypervisor-bridge--register-vc-spec entry)
+  (emacs-hypervisor-bridge--activate-package entry)
+  (emacs-hypervisor-bridge--activate-package-load-path entry)
   (emacs-hypervisor-bridge--activate-entry-load-path entry))
 
 (defun emacs-hypervisor-bridge--installed-p (entry)
@@ -239,7 +255,8 @@
 (defun emacs-hypervisor-bridge--archive-install (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
     (unless (package-installed-p sym)
-      (package-install sym))))
+      (package-install sym))
+    (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--pump-clones (vc-entries on-each)
   "Run parallel clones for VC-ENTRIES. Call ON-EACH with (entry status).
@@ -266,52 +283,40 @@ Blocks until every entry has reported. STATUS is :ok or (:error REASON)."
   "Install ENTRIES. Call ON-INSTALLED with name when each succeeds.
 Call ON-FAILED with (name reason) on failure."
   (emacs-hypervisor-bridge-init)
-  (let (already to-clone to-adopt archive clone-results)
+  (let (to-clone clone-results)
     (dolist (entry entries)
-      (cond
-       ((emacs-hypervisor-bridge--installed-p entry)
-        (emacs-hypervisor-bridge--note-present entry)
-        (push entry already))
-       ((emacs-hypervisor-bridge--vc-entry-p entry)
-        (if (emacs-hypervisor-bridge--clone-present-p entry)
-            (push entry to-adopt)
-          (push entry to-clone)))
-       (t (push entry archive))))
-    ;; Packages already installed: emit immediately.
-    (dolist (entry (nreverse already))
-      (funcall on-installed (plist-get entry :name)))
-    ;; Phase A: parallel clones for VC entries that aren't already cloned.
+      (when (and (not (emacs-hypervisor-bridge--installed-p entry))
+                 (emacs-hypervisor-bridge--vc-entry-p entry)
+                 (not (emacs-hypervisor-bridge--clone-present-p entry)))
+        (push entry to-clone)))
+    ;; Network-only clone work can run in parallel; install/adopt still follows
+    ;; the dependency-ordered plan from Elle below.
     (emacs-hypervisor-bridge--pump-clones
      (nreverse to-clone)
      (lambda (entry status) (push (cons entry status) clone-results)))
-    ;; Adopt successful clones plus pre-existing checkouts.
-    (dolist (pair (nreverse clone-results))
-      (let ((entry (car pair)) (status (cdr pair)))
-        (if (eq status :ok)
-            (push entry to-adopt)
-          (funcall on-failed
-                   (plist-get entry :name)
-                   (cadr status)))))
-    ;; Phase B: serial adoption.
-    (dolist (entry (nreverse to-adopt))
-      (condition-case err
-          (progn
-            (emacs-hypervisor-bridge--adopt entry)
-            (funcall on-installed (plist-get entry :name)))
-        (error
-         (funcall on-failed
-                  (plist-get entry :name)
-                  (format "%S" err)))))
-    ;; Phase C: archive installs.
-    (dolist (entry (nreverse archive))
-      (condition-case err
-          (progn
-            (emacs-hypervisor-bridge--archive-install entry)
-            (funcall on-installed (plist-get entry :name)))
-        (error
-         (funcall on-failed
-                  (plist-get entry :name)
-                  (format "%S" err)))))
+    (dolist (entry entries)
+      (let* ((name (plist-get entry :name))
+             (clone-status (cdr (assoc entry clone-results))))
+        (cond
+         ((emacs-hypervisor-bridge--installed-p entry)
+          (emacs-hypervisor-bridge--note-present entry)
+          (funcall on-installed name))
+         ((and clone-status (not (eq clone-status :ok)))
+          (funcall on-failed name (cadr clone-status)))
+         ((emacs-hypervisor-bridge--vc-entry-p entry)
+          (condition-case err
+              (progn
+                (emacs-hypervisor-bridge--adopt entry)
+                (funcall on-installed name))
+            (error
+             (funcall on-failed name (format "%S" err)))))
+         (t
+          (condition-case err
+              (progn
+                (emacs-hypervisor-bridge--archive-install entry)
+                (funcall on-installed name))
+            (error
+             (funcall on-failed name (format "%S" err))))))))
     :done))
 
 (provide 'emacs-hypervisor-package-bridge)

@@ -20,8 +20,10 @@
     (send-eval-form-request id form metric-name metric-kind phase item-name)
     (protocol:await-response mailbox id))
 
-  (defn package-install-batch-form []
-    '(emacs-hypervisor-runtime-install-declared-package-batch))
+  (defn package-install-batch-form [names]
+    (list
+     'emacs-hypervisor-runtime-install-package-batch
+     (list 'quote names)))
 
   (defn unit-run-at-index-form [index]
     (list 'emacs-hypervisor-runtime-run-unit-at-index index))
@@ -231,7 +233,7 @@
       (let [process-id next-id
             _ (send-eval-form-request
                process-id
-               (package-install-batch-form)
+               (package-install-batch-form names)
                :install-packages
                :package
                :packages

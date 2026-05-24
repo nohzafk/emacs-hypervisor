@@ -591,8 +591,9 @@
            batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
       (assert
        (= batch-form
-          '(emacs-hypervisor-runtime-install-declared-package-batch))
-       "tracker calls install-package-batch")
+          '(emacs-hypervisor-runtime-install-package-batch
+            '("core-pkg" "ui-pkg" "runtime-fail-pkg" "runtime-fail-dependent")))
+       "tracker sends planned package names to install-package-batch")
       (assert
        (nil? (get batch-request :form-string))
        "tracker sends structured eval form instead of string form"))
@@ -624,8 +625,9 @@
          batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
     (assert
      (= batch-form
-        '(emacs-hypervisor-runtime-install-declared-package-batch))
-     "batch delegates local package lookup to Emacs-side declarations")))
+        '(emacs-hypervisor-runtime-install-package-batch
+          '("elle-lsp-bridge")))
+     "batch sends local package names from the Elle plan")))
 (println "  3a. local package name batch: ok")
 
 (let* [decoded
@@ -675,8 +677,9 @@
          batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
     (assert
      (= batch-form
-        '(emacs-hypervisor-runtime-install-declared-package-batch))
-	 "batch delegates decoded live package payloads to Emacs-side declarations")))
+        '(emacs-hypervisor-runtime-install-package-batch
+          '("magit")))
+	 "batch sends decoded live package names from the Elle plan")))
 (println "  3b. decoded live package batch: ok")
 
 (let* [planned-package-reports

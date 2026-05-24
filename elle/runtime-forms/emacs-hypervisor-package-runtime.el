@@ -85,52 +85,6 @@
    (when error
      (list :error error))))
 
-(defun emacs-hypervisor-runtime--known-package-names ()
-  (mapcar #'emacs-hypervisor-runtime--package-name emacs-hypervisor-packages))
-
-(defun emacs-hypervisor-runtime--package-installed-entry-p (entry)
-  (and (fboundp 'emacs-hypervisor--package-installed-p)
-       (emacs-hypervisor--package-installed-p entry)))
-
-(defun emacs-hypervisor-runtime--missing-package-deps-p (entry known-names)
-  (cl-some (lambda (dep) (not (member dep known-names)))
-           (plist-get entry :deps)))
-
-(defun emacs-hypervisor-runtime--declared-package-plan ()
-  "Return declared package entries in dependency order for installation.
-
-This mirrors the host-side package plan closely enough for the Emacs runtime
-entry point that does not receive a serialized package-name list."
-  (let* ((entries (copy-sequence emacs-hypervisor-packages))
-         (known-names (emacs-hypervisor-runtime--known-package-names))
-         (ready-names nil)
-         (remaining nil)
-         (ordered nil))
-    (dolist (entry entries)
-      (if (emacs-hypervisor-runtime--package-installed-entry-p entry)
-          (push (emacs-hypervisor-runtime--package-name entry) ready-names)
-        (unless (emacs-hypervisor-runtime--missing-package-deps-p entry known-names)
-          (push entry remaining))))
-    (setq remaining (nreverse remaining))
-    (while remaining
-      (let ((next
-             (cl-find-if
-              (lambda (entry)
-                (cl-every (lambda (dep) (member dep ready-names))
-                          (plist-get entry :deps)))
-              remaining)))
-        (if (not next)
-            (setq remaining nil)
-          (push next ordered)
-          (push (emacs-hypervisor-runtime--package-name next) ready-names)
-          (setq remaining (delq next remaining)))))
-    (nreverse ordered)))
-
-(defun emacs-hypervisor-runtime-install-declared-package-batch ()
-  "Install declared packages using the Emacs-side declaration registry."
-  (emacs-hypervisor-runtime-install-package-batch
-   (emacs-hypervisor-runtime--declared-package-plan)))
-
 (defun emacs-hypervisor-runtime-notify-packages-finished (&optional reason)
   (when emacs-hypervisor-runtime-packages-installation-active
     (unless emacs-hypervisor-runtime-packages-finished-sent
