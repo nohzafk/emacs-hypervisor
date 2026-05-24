@@ -131,6 +131,21 @@
       ""
     (format "%.2fs" (- time (or emacs-hypervisor--session-started-at time)))))
 
+(defun emacs-hypervisor--package-total ()
+  "Return the best known total number of declared packages."
+  (let ((reports (emacs-hypervisor--package-report-basis)))
+    (if reports
+        (length reports)
+      (length (emacs-hypervisor--package-plan-items)))))
+
+(defun emacs-hypervisor--format-package-total ()
+  (when (or (emacs-hypervisor--package-plan-known-p)
+            (emacs-hypervisor--package-report-basis))
+    (let ((total (emacs-hypervisor--package-total)))
+      (format "%d package%s"
+              total
+              (if (= total 1) "" "s")))))
+
 (defun emacs-hypervisor--current-activity ()
   (cond
    (emacs-hypervisor--running-unit-name
@@ -497,9 +512,10 @@
 
 (defun emacs-hypervisor--insert-banner ()
   (let ((parts (list (emacs-hypervisor--current-activity)
+                     (emacs-hypervisor--format-package-total)
                      (emacs-hypervisor--format-elapsed))))
     (insert (propertize "Hypervisor Startup" 'face '(:weight bold :height 1.15)) "\n")
-    (insert (string-join parts "  |  ") "\n\n")))
+    (insert (string-join (delq nil parts) "  |  ") "\n\n")))
 
 (defun emacs-hypervisor--insert-unit-activity-line (name state)
   (let* ((running (equal name emacs-hypervisor--running-unit-name))

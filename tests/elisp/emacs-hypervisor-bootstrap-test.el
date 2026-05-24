@@ -1666,6 +1666,10 @@
                                       contents))
               (should (string-match-p
                        (regexp-quote
+                        "Hypervisor Startup\nStarting  |  5 packages")
+                       contents))
+              (should (string-match-p
+                       (regexp-quote
                         "Progress   4 installed, 1 pending, 0 failed, 0 skipped")
                        contents))
               (should-not (string-match-p (regexp-quote "ready,")
@@ -1696,6 +1700,10 @@
         (emacs-hypervisor--render-report-buffer)
         (with-current-buffer (emacs-hypervisor-report-buffer)
           (let ((contents (buffer-string)))
+            (should (string-match-p
+                     (regexp-quote
+                      "Hypervisor Startup\nStarting  |  2 packages")
+                     contents))
             (should (string-match-p
                      (regexp-quote "Progress   All packages already installed")
                      contents))
@@ -1729,6 +1737,10 @@
           (let ((contents (buffer-string)))
             (should (string-match-p (regexp-quote "Status     Completed")
                                     contents))
+            (should (string-match-p
+                     (regexp-quote
+                      "Hypervisor Startup\nStarting  |  1 package")
+                     contents))
             (should (string-match-p
                      (regexp-quote
                       "Progress   1 installed, 0 pending, 0 failed, 0 skipped")
