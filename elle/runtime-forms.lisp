@@ -10,46 +10,84 @@
       ()
       (append (first lists) (append-all (rest lists)))))
 
-  (defn install-config-surface-form
-      [report-core-module
-       report-module
-       elle-canonicalize-module
-       effect-registry-module
-       effect-aware-reload-module
-       effect-kind-hook-module
-       effect-kind-advice-module
-       effect-kind-keybinding-module
-       declarations-module
-       selective-reload-module
-       config-paths-module
-       compose-module]
+  (defn module-field [entry key]
+    (match entry
+      ()
+      nil
+      (field value & rest)
+       (if (= field key)
+         value
+         (module-field rest key))
+      _
+      nil))
+
+  (defn embedded-module-spec [entry]
+    (let [env-name (module-field entry :env-name)
+          path (module-field entry :path)
+          source (sys/env env-name)]
+      (assert source
+              (string "expected embedded module source in " env-name))
+      {:path path
+       :source source}))
+
+  (defn module-entry [manifest name]
+    (letrec [loop
+             (fn [remaining]
+               (match remaining
+                 () nil
+                 (entry & rest)
+                  (if (= (module-field entry :name) name)
+                    entry
+                    (loop rest))
+                 _ nil))]
+      (loop manifest)))
+
+  (defn module-spec [manifest name]
+    (let [entry (module-entry manifest name)]
+      (assert entry (string "expected embedded runtime module " name))
+      (embedded-module-spec entry)))
+
+  (defn module-ready-marker [manifest name]
+    (let [entry (module-entry manifest name)]
+      (assert entry (string "expected embedded runtime module " name))
+      (let [ready-marker (module-field entry :ready-marker)]
+        (assert ready-marker
+                (string "expected ready marker for embedded runtime module " name))
+        ready-marker)))
+
+  (defn load-module-by-name [manifest name]
+    (module-loader:load-module-form
+     (module-spec manifest name)
+     (module-ready-marker manifest name)))
+
+  (defn install-config-surface-form [manifest]
     (append-all
      (list
       '(progn)
-      (module-loader:load-module-form report-core-module :emacs-hypervisor-report-core-ready)
-      (module-loader:load-module-form report-module :emacs-hypervisor-report-ready)
+      (load-module-by-name manifest "REPORT_CORE")
+      (load-module-by-name manifest "REPORT")
       '((emacs-hypervisor-report-reset)
         (emacs-hypervisor-report-session-started))
-      (module-loader:load-module-form elle-canonicalize-module :emacs-hypervisor-elle-canonicalize-ready)
-      (module-loader:load-module-form effect-registry-module :emacs-hypervisor-effect-registry-ready)
-      (module-loader:load-module-form effect-aware-reload-module :emacs-hypervisor-effect-aware-reload-ready)
-      (module-loader:load-module-form effect-kind-hook-module :emacs-hypervisor-effect-kind-hook-ready)
-      (module-loader:load-module-form effect-kind-advice-module :emacs-hypervisor-effect-kind-advice-ready)
-      (module-loader:load-module-form effect-kind-keybinding-module :emacs-hypervisor-effect-kind-keybinding-ready)
-      (module-loader:load-module-form declarations-module :emacs-hypervisor-config-surface-ready)
-      (module-loader:load-module-form selective-reload-module :emacs-hypervisor-selective-reload-ready)
-      (module-loader:load-module-form config-paths-module :emacs-hypervisor-config-paths-ready)
-      (module-loader:load-module-form compose-module :emacs-hypervisor-compose-ready)
+      (load-module-by-name manifest "ELLE_CANONICALIZE")
+      (load-module-by-name manifest "EFFECT_REGISTRY")
+      (load-module-by-name manifest "EFFECT_AWARE_RELOAD")
+      (load-module-by-name manifest "EFFECT_KIND_HOOK")
+      (load-module-by-name manifest "EFFECT_KIND_ADVICE")
+      (load-module-by-name manifest "EFFECT_KIND_KEYBINDING")
+      (load-module-by-name manifest "DECLARATIONS")
+      (load-module-by-name manifest "SELECTIVE_RELOAD")
+      (load-module-by-name manifest "CONFIG_PATHS")
+      (load-module-by-name manifest "COMPOSE")
       '(:emacs-hypervisor-config-surface-ready))))
 
-  (defn install-session-helpers-form [session-base-module package-bridge-module package-runtime-module unit-runtime-module]
+  (defn install-session-helpers-form [manifest]
     (append-all
      (list
       '(progn)
-      (module-loader:load-module-form session-base-module :emacs-hypervisor-session-base-ready)
-      (module-loader:load-module-form package-bridge-module :emacs-hypervisor-package-bridge-ready)
-      (module-loader:load-module-form package-runtime-module :emacs-hypervisor-package-runtime-ready)
-      (module-loader:load-module-form unit-runtime-module :emacs-hypervisor-unit-runtime-ready)
+      (load-module-by-name manifest "SESSION_BASE")
+      (load-module-by-name manifest "PACKAGE_BRIDGE")
+      (load-module-by-name manifest "PACKAGE_RUNTIME")
+      (load-module-by-name manifest "UNIT_RUNTIME")
       '((emacs-hypervisor-bridge-activate)
         :emacs-hypervisor-session-helpers-ready))))
 

@@ -135,84 +135,16 @@ fn default_elle_home_path() -> PathBuf {
     repo_root().join(".elle")
 }
 
-struct EmbeddedElispModule {
-    env_name: &'static str,
-    embedded_source: &'static str,
-}
-
-const EMBEDDED_ELISP_MODULES: &[EmbeddedElispModule] = &[
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE",
-        embedded_source: embedded::EMBEDDED_REPORT_CORE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE",
-        embedded_source: embedded::EMBEDDED_REPORT_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_SOURCE",
-        embedded_source: embedded::EMBEDDED_ELLE_CANONICALIZE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE",
-        embedded_source: embedded::EMBEDDED_DECLARATIONS_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_SOURCE",
-        embedded_source: embedded::EMBEDDED_EFFECT_REGISTRY_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_SOURCE",
-        embedded_source: embedded::EMBEDDED_EFFECT_AWARE_RELOAD_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_HOOK_SOURCE",
-        embedded_source: embedded::EMBEDDED_EFFECT_KIND_HOOK_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_SOURCE",
-        embedded_source: embedded::EMBEDDED_EFFECT_KIND_ADVICE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_SOURCE",
-        embedded_source: embedded::EMBEDDED_EFFECT_KIND_KEYBINDING_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_SOURCE",
-        embedded_source: embedded::EMBEDDED_SELECTIVE_RELOAD_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_SOURCE",
-        embedded_source: embedded::EMBEDDED_CONFIG_PATHS_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE",
-        embedded_source: embedded::EMBEDDED_COMPOSE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_SOURCE",
-        embedded_source: embedded::EMBEDDED_SESSION_BASE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_SOURCE",
-        embedded_source: embedded::EMBEDDED_PACKAGE_BRIDGE_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE",
-        embedded_source: embedded::EMBEDDED_PACKAGE_RUNTIME_SOURCE,
-    },
-    EmbeddedElispModule {
-        env_name: "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE",
-        embedded_source: embedded::EMBEDDED_UNIT_RUNTIME_SOURCE,
-    },
-];
-
 fn install_elisp_modules() -> Result<(), String> {
     env::set_var(
         "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH",
         generated_init_hash(),
     );
-    for module in EMBEDDED_ELISP_MODULES {
+    env::set_var(
+        "EMACS_HYPERVISOR_EMBEDDED_RUNTIME_MODULES",
+        embedded::EMBEDDED_ELISP_MODULE_MANIFEST,
+    );
+    for module in embedded::EMBEDDED_ELISP_MODULES {
         env::set_var(module.env_name, module.embedded_source);
     }
     Ok(())

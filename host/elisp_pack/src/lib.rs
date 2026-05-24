@@ -486,6 +486,7 @@ fn canonicalize(expr: &Expr) -> Result<Expr, String> {
 #[cfg(test)]
 mod tests {
     use super::{pack_file, pack_source};
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -532,25 +533,18 @@ mod tests {
     #[test]
     fn packs_current_static_modules() {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-        let files = [
-            "elle/runtime-forms/emacs-hypervisor-report-core.el",
-            "elle/runtime-forms/emacs-hypervisor-report.el",
-            "elle/runtime-forms/emacs-hypervisor-elle-canonicalize.el",
-            "elle/runtime-forms/emacs-hypervisor-declarations.el",
-            "elle/runtime-forms/emacs-hypervisor-effect-registry.el",
-            "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el",
-            "elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el",
-            "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el",
-            "elle/runtime-forms/emacs-hypervisor-selective-reload.el",
-            "elle/runtime-forms/emacs-hypervisor-config-paths.el",
-            "elle/runtime-forms/emacs-hypervisor-compose.el",
-            "elle/runtime-forms/emacs-hypervisor-session-base.el",
-            "elle/runtime-forms/emacs-hypervisor-package-bridge.el",
-            "elle/runtime-forms/emacs-hypervisor-package-runtime.el",
-            "elle/runtime-forms/emacs-hypervisor-unit-runtime.el",
-        ];
+        let manifest = fs::read_to_string(repo_root.join("elle/runtime-forms/modules.manifest"))
+            .expect("runtime module manifest should be readable");
 
-        for file in files {
+        for file in manifest
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
+            .map(|line| {
+                line.split('|')
+                    .nth(1)
+                    .unwrap_or_else(|| panic!("invalid runtime module manifest line: {}", line))
+            })
+        {
             pack_file(&repo_root.join(file)).unwrap_or_else(|error| panic!("{}", error));
         }
     }

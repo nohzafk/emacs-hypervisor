@@ -23,12 +23,10 @@
 (def graph (emacs-hypervisor-graph-module))
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
 
-(defn emacs-hypervisor-embedded-module-spec [env-name source-path]
-  (let [source (sys/env env-name)]
-    (assert source
-            (string "expected embedded module source in " env-name))
-    {:path source-path
-     :source source}))
+(defn emacs-hypervisor-runtime-module-manifest []
+  (let [source (sys/env "EMACS_HYPERVISOR_EMBEDDED_RUNTIME_MODULES")]
+    (assert source "expected embedded runtime module manifest")
+    (read source)))
 
 (defn emacs-hypervisor-config-load-failure-message [config-file config-org-file error]
   (string
@@ -174,70 +172,8 @@
           (and (get boot-context :repo-dir)
                (string (get boot-context :repo-dir)))
           boot-expected-init-hash (sys/env "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH")
-          report-core-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_REPORT_CORE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-report-core.el")
-          report-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_REPORT_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-report.el")
-          elle-canonicalize-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_ELLE_CANONICALIZE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-elle-canonicalize.el")
-          declarations-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_DECLARATIONS_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-declarations.el")
-          effect-registry-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_REGISTRY_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-effect-registry.el")
-          effect-aware-reload-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_AWARE_RELOAD_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-effect-aware-reload.el")
-          effect-kind-hook-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_HOOK_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el")
-          effect-kind-advice-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_ADVICE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el")
-          effect-kind-keybinding-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_EFFECT_KIND_KEYBINDING_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el")
-          selective-reload-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_SELECTIVE_RELOAD_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-selective-reload.el")
-          config-paths-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_CONFIG_PATHS_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-config-paths.el")
-          compose-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_COMPOSE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-compose.el")
-          session-base-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_SESSION_BASE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-session-base.el")
-          package-bridge-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_BRIDGE_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-package-bridge.el")
-          package-runtime-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_PACKAGE_RUNTIME_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-package-runtime.el")
-          unit-runtime-module
-          (emacs-hypervisor-embedded-module-spec
-           "EMACS_HYPERVISOR_EMBEDDED_UNIT_RUNTIME_SOURCE"
-           "elle/runtime-forms/emacs-hypervisor-unit-runtime.el")
+          runtime-module-manifest
+          (emacs-hypervisor-runtime-module-manifest)
           config-file
           (or boot-config-file
               (and boot-repo-dir
@@ -271,18 +207,7 @@
       :eval
       (benchmark:eval-payload
        `(:form ,(runtime-forms:install-config-surface-form
-                 report-core-module
-                 report-module
-                 elle-canonicalize-module
-                 effect-registry-module
-                 effect-aware-reload-module
-                 effect-kind-hook-module
-                 effect-kind-advice-module
-                 effect-kind-keybinding-module
-                 declarations-module
-                 selective-reload-module
-                 config-paths-module
-                 compose-module)
+                 runtime-module-manifest)
          :metric-name :install-config-surface
          :metric-kind :runtime-setup
          :phase :startup)))
@@ -387,10 +312,7 @@
               :eval
               (benchmark:eval-payload
                `(:form ,(runtime-forms:install-session-helpers-form
-                         session-base-module
-                         package-bridge-module
-                         package-runtime-module
-                         unit-runtime-module)
+                         runtime-module-manifest)
                  :metric-name :install-session-helpers
                  :metric-kind :runtime-setup
                  :phase :startup)))
