@@ -45,6 +45,10 @@ bootstrap-elle:
 start-elle-mcp:
     ./scripts/start-elle-mcp
 
+[group('Elle')]
+analyze-runtime:
+    ./scripts/analyze-runtime-modules
+
 [group('Test')]
 test:
     cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
