@@ -48,6 +48,9 @@ jobs:
             !.elle/target
           key: elle-src-${{ hashFiles('.elle-ref') }}
 
+      - name: Checkout Elle
+        run: ./scripts/bootstrap-elle --checkout-only
+
       # Cache cargo registry + workspace target dirs. Keyed on lockfiles
       # so the cache invalidates when dependencies change.
       - name: Cache cargo
@@ -58,7 +61,7 @@ jobs:
             host/elisp_pack -> target
             .elle -> target
           shared-key: hypervisor-ci
-          key: ${{ hashFiles('host/Cargo.lock', 'host/elisp_pack/Cargo.toml', '.github/workflows/ci.yml') }}
+          key: ${{ hashFiles('.elle-ref', 'host/Cargo.lock', 'host/elisp_pack/Cargo.toml', '.github/workflows/ci.yml') }}
 
       - name: Bootstrap Elle
         run: ./scripts/bootstrap-elle

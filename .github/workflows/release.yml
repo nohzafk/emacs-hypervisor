@@ -54,6 +54,9 @@ jobs:
             !.elle/target
           key: elle-src-${{ hashFiles('.elle-ref') }}
 
+      - name: Checkout Elle
+        run: ./scripts/bootstrap-elle --checkout-only
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -62,7 +65,7 @@ jobs:
             host/elisp_pack -> target
             .elle -> target
           shared-key: release-${{ matrix.target }}
-          key: ${{ hashFiles('host/Cargo.lock') }}
+          key: ${{ hashFiles('.elle-ref', 'host/Cargo.lock') }}
 
       - name: Bootstrap Elle
         run: ./scripts/bootstrap-elle

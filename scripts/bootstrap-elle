@@ -18,15 +18,20 @@ if [ -z "$default_elle_ref" ]; then
 fi
 elle_ref=${ELLE_REF-$default_elle_ref}
 elle_build_plugins=${ELLE_BUILD_PLUGINS:-}
+elle_checkout_only=0
 elle_bin="$elle_dir/target/release/elle"
 
 usage() {
   cat <<EOF
-usage: scripts/bootstrap-elle [--plugins]
+usage: scripts/bootstrap-elle [--checkout-only] [--plugins]
 
 Clone Elle into the repo-local .elle checkout if needed, build the release
 binary.  With --plugins, also initialize submodules and build the MCP
 plugins (oxigraph, syn) for development use.
+
+With --checkout-only, stop after cloning/fetching the repo-local Elle checkout
+and checking out the configured ref.  This is useful before restoring cargo
+target caches that live below .elle.
 
 Artifacts (always):
 - .elle/target/release/elle
@@ -134,28 +139,32 @@ detect_libclang_path() {
   return 1
 }
 
-case "${1-}" in
-  "")
-    ;;
-  --plugins)
-    elle_build_plugins=1
-    ;;
-  -h|--help)
-    usage
-    exit 0
-    ;;
-  *)
-    usage >&2
-    exit 64
-    ;;
-esac
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --checkout-only)
+      elle_checkout_only=1
+      ;;
+    --plugins)
+      elle_build_plugins=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 64
+      ;;
+  esac
+  shift
+done
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required but was not found in PATH" >&2
   exit 1
 fi
 
-if ! command -v cargo >/dev/null 2>&1; then
+if [ "$elle_checkout_only" -eq 0 ] && ! command -v cargo >/dev/null 2>&1; then
   echo "cargo is required but was not found in PATH" >&2
   exit 1
 fi
@@ -179,6 +188,11 @@ if [ -n "$elle_ref" ]; then
   echo "Checking out Elle ref: $elle_ref"
   git -C "$elle_dir" fetch --tags origin "$elle_ref" || git -C "$elle_dir" fetch --tags origin
   git -C "$elle_dir" checkout --quiet "$elle_ref"
+fi
+
+if [ "$elle_checkout_only" -ne 0 ]; then
+  echo "Elle checkout ready."
+  exit 0
 fi
 
 echo "Building Elle release binary"
