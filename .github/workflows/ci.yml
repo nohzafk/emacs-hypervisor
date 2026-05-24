@@ -12,8 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -82,14 +81,3 @@ jobs:
 
       - name: Run tests
         run: just test
-
-  # Only runs on main, after tests pass. Analyzes conventional commits
-  # and opens/updates a release PR with changelog + version bump.
-  release-please:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
