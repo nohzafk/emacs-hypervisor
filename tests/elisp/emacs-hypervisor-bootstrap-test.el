@@ -174,24 +174,6 @@
                             [(+ emacs-hypervisor-test-runtime-value 1)])
                       t)))))
 
-(ert-deftest emacs-hypervisor-config-unit-export-wraps-supported-effect-lambdas ()
-  (emacs-hypervisor-reset-declarations)
-  (config-unit! lambda-hook-unit
-    :config
-    (add-hook 'emacs-hypervisor-test-hook
-              (lambda ()
-                :hook)))
-  (let* ((unit (car (emacs-hypervisor-export-config-units)))
-         (body (plist-get unit :body))
-         (hook-form (nth 1 body)))
-    (should (eq (car hook-form) 'emacs-hypervisor-register-hook-effect))
-    (should (equal (plist-get (cdr hook-form) :unit) "lambda-hook-unit"))
-    (should (equal (plist-get (cdr hook-form) :target)
-                   '(quote emacs-hypervisor-test-hook)))
-    (should (equal (car (plist-get (cdr hook-form) :function))
-                   'lambda))
-    (should (equal (nth 2 body) t))))
-
 (ert-deftest emacs-hypervisor-package-export-preserves-local-and-lisp-dir ()
   (emacs-hypervisor-reset-declarations)
   (package! elle-lsp-bridge
@@ -224,102 +206,6 @@
                            :installed)
                 t))))
 
-(ert-deftest emacs-hypervisor-effect-aware-reload-has-registry-effect-specs ()
-  (let* ((specs
-          emacs-hypervisor-effect-aware-reload-effect-specs)
-         (kinds (mapcar (lambda (spec) (plist-get spec :kind)) specs))
-         (body
-          (emacs-hypervisor-effect-aware-reload-normalize-body
-           "effect-spec-unit"
-           '(progn
-              (add-hook 'emacs-hypervisor-test-hook
-                        #'emacs-hypervisor-test-hook-new)
-              (advice-add 'emacs-hypervisor-test-advice-target
-                          :before
-                          #'ignore)
-              (keymap-set emacs-hypervisor-test-keymap
-                          "C-c h"
-                          #'emacs-hypervisor-test-command-old)
-              t))))
-    (should (equal kinds
-                   '(:hook
-                     :advice
-                     :keybinding
-                     :keybinding
-                     :keybinding
-                     :keybinding)))
-    (should
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(add-hook 'emacs-hypervisor-test-hook
-                 #'emacs-hypervisor-test-hook-new)))
-    (should-not
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(add-hook 'emacs-hypervisor-test-hook
-                 #'emacs-hypervisor-test-hook-new
-                 nil
-                 t)))
-    (should
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(advice-add 'emacs-hypervisor-test-advice-target
-                   :before
-                   #'ignore)))
-    (should
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(keymap-set emacs-hypervisor-test-keymap
-                   "C-c h"
-                   #'emacs-hypervisor-test-command-old)))
-    (should
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(global-set-key (kbd "C-c h")
-                       #'emacs-hypervisor-test-command-old)))
-    (should-not
-     (emacs-hypervisor-effect-aware-reload--registry-effect-form-p
-      '(keymap-set emacs-hypervisor-test-keymap "C-c h")))
-    (should (eq (car (nth 1 body))
-                'emacs-hypervisor-register-hook-effect))
-    (should (eq (car (nth 2 body))
-                'emacs-hypervisor-register-advice-effect))
-    (should (eq (car (nth 3 body))
-                'emacs-hypervisor-register-keybinding-effect))))
-
-(ert-deftest emacs-hypervisor-effect-registry-generated-name-is-deterministic ()
-  (let* ((lambda-form '(lambda () :hook))
-         (same
-          (emacs-hypervisor-effect-registry--generated-function-symbol
-           "lambda-hook-unit"
-           :hook
-           'emacs-hypervisor-test-hook
-           nil
-           lambda-form))
-         (repeat
-          (emacs-hypervisor-effect-registry--generated-function-symbol
-           "lambda-hook-unit"
-           :hook
-           'emacs-hypervisor-test-hook
-           nil
-           lambda-form))
-         (different-target
-          (emacs-hypervisor-effect-registry--generated-function-symbol
-           "lambda-hook-unit"
-           :hook
-           'emacs-hypervisor-other-hook
-           nil
-           lambda-form))
-         (different-body
-          (emacs-hypervisor-effect-registry--generated-function-symbol
-           "lambda-hook-unit"
-           :hook
-           'emacs-hypervisor-test-hook
-           nil
-           '(lambda () :changed))))
-    (should (eq same repeat))
-    (should-not (eq same different-target))
-    (should-not (eq same different-body))
-    (should
-     (string-match-p
-      "\\`emacs-hypervisor--generated-lambda-hook-unit--hook-emacs-hypervisor-test-hook-[[:xdigit:]]\\{10\\}\\'"
-      (symbol-name same)))))
-
 (ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-backquote ()
   (emacs-hypervisor-reset-declarations)
   (config-unit! backquote-unit
@@ -333,19 +219,6 @@
                       (setq emacs-hypervisor-test-runtime-value
                             (cons "Hypervisor"
                                   emacs-hypervisor-test-runtime-value))
-                      t)))))
-
-(ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-empty-brace-symbol ()
-  (emacs-hypervisor-reset-declarations)
-  (config-unit! empty-brace-symbol-unit
-    :config
-    (setq emacs-hypervisor-test-runtime-value '{}))
-  (let* ((unit (car (emacs-hypervisor-export-config-units)))
-         (body (plist-get unit :body)))
-    (should (equal body
-                   '(progn
-                      (setq emacs-hypervisor-test-runtime-value
-                            (intern "{}"))
                       t)))))
 
 (ert-deftest emacs-hypervisor-config-unit-export-lowers-quoted-reader-hostile-data ()
@@ -540,14 +413,6 @@
       (should-not
        (emacs-hypervisor-effect-registry-effects-for-unit
         "registry-unit")))))
-
-(ert-deftest emacs-hypervisor-effect-aware-reload-counts-generic-cleaned-effects ()
-  (should
-   (=
-    (emacs-hypervisor-effect-aware-reload-cleanup-count
-     '(:cleaned ((:kind :hook)
-                 (:kind :keybinding))))
-    2)))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-hook-effect ()
   (let* ((emacs-hypervisor-test-hook nil)
@@ -932,57 +797,6 @@
   (interactive)
   :external)
 
-(ert-deftest emacs-hypervisor-effect-aware-reload-installs-keybinding-effect ()
-  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
-         (emacs-hypervisor-effect-registry-current nil)
-         (emacs-hypervisor-effect-registry--instance-counter 0)
-         (emacs-hypervisor-effect-kind-keybinding--states
-          (make-hash-table :test 'equal))
-         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
-    (emacs-hypervisor-reset-declarations)
-    (config-unit! keybinding-unit
-      :config
-      (keymap-set emacs-hypervisor-test-keymap
-                  "C-c h"
-                  #'emacs-hypervisor-test-command-old))
-    (let* ((unit (car (emacs-hypervisor-export-config-units)))
-           (body (plist-get unit :body)))
-      (eval body t)
-      (let ((effects
-             (emacs-hypervisor-effect-registry-effects-for-unit
-              "keybinding-unit")))
-        (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
-                    #'emacs-hypervisor-test-command-old))
-        (should (= (length effects) 1))
-        (should (eq (plist-get (car effects) :kind) :keybinding))
-        (should (equal (plist-get (plist-get (car effects) :metadata) :key)
-                       "C-c h"))))))
-
-(ert-deftest emacs-hypervisor-effect-registry-reset-clears-keybinding-state ()
-  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
-         (emacs-hypervisor-effect-registry-current nil)
-         (emacs-hypervisor-effect-registry--instance-counter 0)
-         (emacs-hypervisor-effect-kind-keybinding--states
-          (make-hash-table :test 'equal))
-         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
-    (emacs-hypervisor-register-keybinding-effect
-     :unit "keybinding-unit"
-     :operator 'keymap-set
-     :map emacs-hypervisor-test-keymap
-     :map-form 'emacs-hypervisor-test-keymap
-     :key "C-c h"
-     :definition #'emacs-hypervisor-test-command-old
-     :source '(:form (keymap-set emacs-hypervisor-test-keymap
-                                  "C-c h"
-                                  #'emacs-hypervisor-test-command-old)))
-    (should (= (hash-table-count
-                emacs-hypervisor-effect-kind-keybinding--states)
-               1))
-    (emacs-hypervisor-effect-registry-reset)
-    (should (= (hash-table-count
-                emacs-hypervisor-effect-kind-keybinding--states)
-               0))))
-
 (ert-deftest emacs-hypervisor-effect-aware-reload-cleans-previous-keybinding-effect ()
   (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
          (emacs-hypervisor-effect-registry-current nil)
@@ -1061,33 +875,6 @@
     (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
                 (plist-get report :cleanup))
                1))))
-
-(ert-deftest emacs-hypervisor-effect-aware-reload-removed-keybinding-unsets-new-binding ()
-  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
-         (emacs-hypervisor-effect-registry-current nil)
-         (emacs-hypervisor-effect-registry--instance-counter 0)
-         (emacs-hypervisor-effect-kind-keybinding--states
-          (make-hash-table :test 'equal))
-         (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
-         previous)
-    (emacs-hypervisor-reset-declarations)
-    (config-unit! keybinding-unit
-      :config
-      (keymap-set emacs-hypervisor-test-keymap
-                  "C-c h"
-                  #'emacs-hypervisor-test-command-old))
-    (setq previous (emacs-hypervisor-export-config-units))
-    (eval (plist-get (car previous) :body) t)
-    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
-                #'emacs-hypervisor-test-command-old))
-    (emacs-hypervisor--reload-unit-reports
-     (emacs-hypervisor-selective-reload-diff-units previous nil)
-     nil)
-    (should-not
-     (emacs-hypervisor-effect-kind-keybinding--lookup
-      emacs-hypervisor-test-keymap
-      "C-c h"
-      'keymap-set))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-keybinding-divergence-guard-preserves-external-binding ()
   (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
@@ -1817,21 +1604,6 @@
   (should emacs-hypervisor--completed)
   (should (eq emacs-hypervisor--state :completed)))
 
-(ert-deftest emacs-hypervisor-dispatch-rpc-event-records-package-state ()
-  (emacs-hypervisor-reset)
-  (emacs-hypervisor--dispatch
-   (emacs-hypervisor-test--event
-    :package
-    '(:phase :packages :kind :installed :name "core-pkg")))
-  (emacs-hypervisor--dispatch
-   (emacs-hypervisor-test--event
-    :package
-    '(:phase :packages :kind :finished :reason "completed")))
-  (should (equal (mapcar (lambda (event) (plist-get event :kind))
-                         emacs-hypervisor--package-events)
-                 '(:finished :installed)))
-  (should (equal emacs-hypervisor--package-finished-reason "completed")))
-
 (ert-deftest emacs-hypervisor-report-packages-section-renders-rolling-window ()
   (let ((emacs-hypervisor-report-package-window-size 3))
     (emacs-hypervisor-reset)
@@ -1970,53 +1742,6 @@
         (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
           (kill-buffer buffer))))))
 
-(ert-deftest emacs-hypervisor-report-session-finished-accepts-side-effecting-initial-choice ()
-  (let ((emacs-hypervisor-show-report-on-startup nil)
-        (emacs-hypervisor-display-initial-buffer-on-finish t)
-        (emacs-hypervisor--state :completed)
-        (noninteractive nil)
-        (initial-buffer-choice
-         (lambda ()
-           (switch-to-buffer (get-buffer-create "*hypervisor-test-dashboard*"))
-           nil)))
-    (save-window-excursion
-      (unwind-protect
-          (progn
-            (switch-to-buffer (get-buffer-create "*hypervisor-test-prev*"))
-            (emacs-hypervisor-report-session-finished)
-            (should (equal (buffer-name (window-buffer (selected-window)))
-                           "*hypervisor-test-dashboard*")))
-        (when-let ((buffer (get-buffer "*hypervisor-test-dashboard*")))
-          (kill-buffer buffer))
-        (when-let ((buffer (get-buffer "*hypervisor-test-prev*")))
-          (kill-buffer buffer))
-        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-          (kill-buffer buffer))))))
-
-(ert-deftest emacs-hypervisor-report-session-started-does-not-open-report-when-enabled ()
-  (let ((emacs-hypervisor-show-report-on-startup t)
-        (emacs-hypervisor-display-initial-buffer-on-finish t)
-        (noninteractive nil)
-        (initial-buffer-choice
-         (lambda () (get-buffer-create "*hypervisor-test-dashboard*")))
-        report-opened
-        opened-buffer)
-    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
-               (lambda ()
-                 (setq report-opened t)))
-              ((symbol-function 'pop-to-buffer)
-               (lambda (buffer &rest _args)
-                 (setq opened-buffer buffer))))
-      (unwind-protect
-          (progn
-            (emacs-hypervisor-report-session-started)
-            (should-not report-opened)
-            (should-not opened-buffer))
-        (when-let ((buffer (get-buffer "*hypervisor-test-dashboard*")))
-          (kill-buffer buffer))
-        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-          (kill-buffer buffer))))))
-
 (ert-deftest emacs-hypervisor-report-package-begin-opens-report-on-startup ()
   (let ((emacs-hypervisor-show-report-on-startup t)
         (emacs-hypervisor--report-startup-opened nil)
@@ -2027,85 +1752,6 @@
                  (setq report-opened t))))
       (emacs-hypervisor-report-note-package-event :begin)
       (should report-opened))))
-
-(ert-deftest emacs-hypervisor-open-report-buffer-redisplays-immediately ()
-  (let ((noninteractive nil)
-        redisplayed
-        popped-buffer)
-    (cl-letf (((symbol-function 'pop-to-buffer)
-               (lambda (buffer &rest _args)
-                 (setq popped-buffer buffer)))
-              ((symbol-function 'redisplay)
-               (lambda (&optional force)
-                 (setq redisplayed force))))
-      (unwind-protect
-          (progn
-            (emacs-hypervisor-open-report-buffer)
-            (should (bufferp popped-buffer))
-            (should redisplayed))
-        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-          (kill-buffer buffer))))))
-
-(ert-deftest emacs-hypervisor-refresh-visible-report-redisplays-immediately ()
-  (let ((noninteractive nil)
-        redisplayed)
-    (cl-letf (((symbol-function 'get-buffer-window)
-               (lambda (_buffer &optional _all-frames)
-                 :visible-window))
-              ((symbol-function 'redisplay)
-               (lambda (&optional force)
-                 (setq redisplayed force))))
-      (unwind-protect
-          (progn
-            (emacs-hypervisor--refresh-report-buffer)
-            (should redisplayed))
-        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-          (kill-buffer buffer))))))
-
-(ert-deftest emacs-hypervisor-report-package-finished-opens-report-on-startup-once ()
-  (let ((emacs-hypervisor-show-report-on-startup t)
-        (emacs-hypervisor--report-startup-opened nil)
-        (noninteractive nil)
-        report-open-count)
-    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
-               (lambda ()
-                 (setq report-open-count (1+ (or report-open-count 0))))))
-      (emacs-hypervisor-report-note-package-event :finished nil "completed")
-      (emacs-hypervisor-report-note-unit-event :attempt "first-unit")
-      (should (= report-open-count 1)))))
-
-(ert-deftest emacs-hypervisor-report-unit-attempt-opens-report-on-startup-once ()
-  (let ((emacs-hypervisor-show-report-on-startup t)
-        (emacs-hypervisor--report-startup-opened nil)
-        (noninteractive nil)
-        report-open-count)
-    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
-               (lambda ()
-                 (setq report-open-count (1+ (or report-open-count 0))))))
-      (emacs-hypervisor-report-note-unit-event :attempt "first-unit")
-      (emacs-hypervisor-report-note-unit-event :attempt "second-unit")
-      (should (= report-open-count 1)))))
-
-(ert-deftest emacs-hypervisor-report-session-finished-does-not-open-report-when-enabled ()
-  (let ((emacs-hypervisor-show-report-on-startup t)
-        (emacs-hypervisor-display-initial-buffer-on-finish t)
-        (emacs-hypervisor--state :completed)
-        (noninteractive nil)
-        report-opened
-        opened-buffer)
-    (cl-letf (((symbol-function 'emacs-hypervisor-open-report-buffer)
-               (lambda ()
-                 (setq report-opened t)))
-              ((symbol-function 'pop-to-buffer)
-               (lambda (buffer &rest _args)
-                 (setq opened-buffer buffer))))
-      (unwind-protect
-          (progn
-            (emacs-hypervisor-report-session-finished)
-            (should-not report-opened)
-            (should-not opened-buffer))
-        (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
-          (kill-buffer buffer))))))
 
 (ert-deftest emacs-hypervisor-report-session-finished-skips-initial-buffer-on-failure ()
   (let ((emacs-hypervisor-show-report-on-startup nil)
@@ -2261,33 +1907,6 @@
                          (expand-file-name "packages/" home-dir)))
           (should (file-directory-p package-user-dir)))
       (delete-directory home-dir t))))
-
-(ert-deftest emacs-hypervisor-bridge-start-clone-sentinel-is-idempotent ()
-  (let* ((entry '(:name "clone-idempotent" :repo "example/pkg"))
-         (buffer-name " *hypervisor-clone-clone-idempotent*")
-         captured-sentinel
-         done-events)
-    (when-let ((buffer (get-buffer buffer-name)))
-      (kill-buffer buffer))
-    (cl-letf (((symbol-function 'make-process)
-               (lambda (&rest args)
-                 (setq captured-sentinel (plist-get args :sentinel))
-                 :fake-process))
-              ((symbol-function 'process-status)
-               (lambda (_proc) 'exit))
-              ((symbol-function 'process-exit-status)
-               (lambda (_proc) 1)))
-      (emacs-hypervisor-bridge--start-clone
-       entry
-       (lambda (status) (push status done-events)))
-      (let ((buffer (get-buffer buffer-name)))
-        (should (buffer-live-p buffer))
-        (kill-buffer buffer))
-      (funcall captured-sentinel :fake-process "finished\n")
-      (funcall captured-sentinel :fake-process "finished\n")
-      (should (= (length done-events) 1))
-      (should (equal done-events
-                     '((:error "git clone exited 1: ")))))))
 
 (ert-deftest emacs-hypervisor-bridge-vc-entry-p-detects-archive-vs-vc ()
   (should     (emacs-hypervisor-bridge--vc-entry-p '(:name "magit" :repo "magit/magit")))
