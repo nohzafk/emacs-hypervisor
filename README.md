@@ -59,8 +59,9 @@ not choose your packages, keybindings, UI, editing model, or workflow.
   resolved against GNU ELPA, NonGNU ELPA, and MELPA. No third-party package
   manager is embedded; the bridge clones git sources in parallel and adopts
   them via `package-vc-install-from-checkout`.
-- **Preflight checks** --- circular dependencies, unset env vars, missing
-  executables, and absent features are caught *before* execution begins.
+- **Preflight checks** --- circular dependencies, unset env vars, and missing
+  executables are caught before startup execution begins; absent `:requires`
+  features are caught before the affected unit body runs.
 - **Fault-tolerant execution** --- a failed package or unit skips its
   dependents; independent units continue normally.
 - **Selective reload** --- edit one unit and apply only what changed, without
@@ -315,9 +316,9 @@ that file exists.
 ### `package!` options
 
 Bare `(package! consult)` installs from `package-archives`. Any of `:repo`,
-`:host`, or `:local` switches to `package-vc-install` (git clone of the
-upstream source). `Package-Requires:` deps are resolved against the archives
-either way.
+`:host`, or `:local` switches to the package-vc bridge (git clone of the
+upstream source, then adoption via `package-vc-install-from-checkout`).
+`Package-Requires:` deps are resolved against the archives either way.
 
 | Option | Purpose |
 |---|---|

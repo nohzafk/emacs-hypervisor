@@ -328,7 +328,10 @@ generically.
 | `elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el` | `advice-add` effect recognizer, rewriter, installer |
 | `elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el` | keybinding effect recognizers, rewriter, installer |
 | `elle/runtime-forms/emacs-hypervisor-declarations.el` | `config-unit!` macro, calls the body rewriter at macro-expansion time |
-| `elle/runtime-forms/emacs-hypervisor-compose.el` | Reload command, wires selective reload + effect cleanup |
+| `elle/runtime-forms/emacs-hypervisor-config-loader.el` | Config loading and Org tangling helpers used by startup and reload |
+| `elle/runtime-forms/emacs-hypervisor-reload-policy.el` | Emacs-resident reload policy: preflight checks, dependency blocking, cleanup, execution |
+| `elle/runtime-forms/emacs-hypervisor-reload-report.el` | Reload report summaries, warnings, and cleanup log formatting |
+| `elle/runtime-forms/emacs-hypervisor-compose.el` | User-facing reload command wiring |
 | `elle/runtime-forms/emacs-hypervisor-selective-reload.el` | Unit diffing: new/changed/unchanged/removed |
 | `tests/elisp/emacs-hypervisor-bootstrap-test.el` | All existing tests |
 

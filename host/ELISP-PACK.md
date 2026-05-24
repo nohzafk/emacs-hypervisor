@@ -13,6 +13,11 @@ without a manual conversion step during development.
 Dynamic, session-specific forms are still generated directly by Elle ---
 `elisp_pack` only handles static modules.
 
+The embedded runtime module inventory lives in
+`elle/runtime-forms/modules.manifest`. The host build reads that manifest to
+embed module sources, and the packer test reads the same manifest so coverage
+stays aligned with the runtime inventory.
+
 ## How It Works
 
 `elisp_pack` uses tree-sitter with tree-sitter-elisp to parse `.el` source
@@ -56,12 +61,16 @@ modules still use source-backed loading. The packer is ready for wider
 Packable files (all under `elle/runtime-forms/`):
 
 ```text
+modules.manifest                         # embedded runtime module inventory
 emacs-hypervisor-session-base.el        # session lifecycle
 emacs-hypervisor-declarations.el        # package!/config-unit! macros
 emacs-hypervisor-package-bridge.el      # package.el/package-vc bridge
 emacs-hypervisor-package-runtime.el     # package event handling
 emacs-hypervisor-unit-runtime.el        # unit execution helpers
 emacs-hypervisor-selective-reload.el    # reload diffing + scheduling
+emacs-hypervisor-config-loader.el       # startup/reload config loading
+emacs-hypervisor-reload-policy.el       # Emacs-resident soft reload policy
+emacs-hypervisor-reload-report.el       # reload reports and log formatting
 emacs-hypervisor-effect-registry.el     # generic effect records
 emacs-hypervisor-effect-aware-reload.el # effect rewrite dispatcher + cleanup
 emacs-hypervisor-effect-kind-hook.el    # add-hook effect kind

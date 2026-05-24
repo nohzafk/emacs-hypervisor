@@ -40,7 +40,7 @@ flowchart TD
     subgraph Emacs
         Kernel["trusted kernel<br/>sexp-rpc · session state · eval surface"]
         Decls["package! / config-unit! declarations"]
-        Runtime["emitted runtime helpers<br/>Elpaca bridge · unit execution · reload · reports"]
+        Runtime["emitted runtime helpers<br/>package-vc bridge · unit execution · reload · reports"]
     end
 
     subgraph Binary["emacs-hypervisor binary"]
@@ -57,8 +57,17 @@ flowchart TD
 | Layer | Lifetime | Owns |
 |---|---|---|
 | **Emacs kernel** | Resident, small | Process startup, session state, sexp-rpc dispatch, `package!` / `config-unit!` macros, trusted `:eval` surface |
-| **Elle backend** | Runs in binary | Dependency graphs, preflight checks, boot policy, execution ordering, failure propagation, reports |
-| **Runtime forms** | Transient, per session | Elpaca bridge, unit execution, reload, report rendering — execution substrate, not a second policy engine |
+| **Elle backend** | Runs in binary | Startup dependency graphs, startup preflight checks, boot policy, execution ordering, failure propagation, reports |
+| **Runtime forms** | Transient, per session | package.el/package-vc bridge, unit execution substrate, live reload policy, report rendering |
+
+Startup and reload intentionally have different policy owners. Elle owns the
+startup control plane because the session-scoped subprocess is alive while
+packages and initial config units are planned and executed. Soft reload happens
+after that subprocess has exited, so the Emacs-resident runtime owns live reload:
+it reloads declarations, diffs units, checks reload-time env/executable/feature
+requirements, cleans registry effects, applies changed units, and reports the
+result. Shared data shapes keep the two paths aligned, but reload is not merely
+an eval helper.
 
 ## Three-Stage Bootstrap
 
@@ -199,6 +208,7 @@ emacs-hypervisor/
 │   ├── execution.lisp                 # config-unit execution
 │   ├── runtime-forms.lisp             # coordinates emitted runtime modules
 │   └── runtime-forms/                 # transient Elisp emitted per session
+│       ├── modules.manifest           #   single source for embedded runtime modules
 │       ├── module-loader.lisp         #   module loading coordinator
 │       ├── emacs-hypervisor-declarations.el       #   package!/config-unit! macros
 │       ├── emacs-hypervisor-package-bridge.el      #   package.el/package-vc bridge
@@ -206,6 +216,9 @@ emacs-hypervisor/
 │       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
 │       ├── emacs-hypervisor-session-base.el        #   session lifecycle
 │       ├── emacs-hypervisor-selective-reload.el    #   reload diffing + scheduling
+│       ├── emacs-hypervisor-config-loader.el       #   startup/reload config loading
+│       ├── emacs-hypervisor-reload-policy.el       #   Emacs-resident soft reload policy
+│       ├── emacs-hypervisor-reload-report.el       #   reload reports, warnings, log formatting
 │       ├── emacs-hypervisor-effect-registry.el     #   generic effect records
 │       ├── emacs-hypervisor-effect-aware-reload.el #   effect rewrite dispatcher + cleanup
 │       ├── emacs-hypervisor-effect-kind-hook.el    #   add-hook effect kind
@@ -220,7 +233,8 @@ emacs-hypervisor/
 │   └── elisp/emacs-hypervisor-bootstrap-test.el   # kernel + runtime helper tests
 │
 ├── scripts/
-│   └── analyze-runtime.lisp           # compile-aware analysis script
+│   ├── analyze-runtime.lisp           # compile-aware analysis source
+│   └── analyze-runtime-modules        # repo-local analysis runner
 │
 ├── config.org                         # repo test configuration
 ├── config/                            # repo-local support files for config.org
