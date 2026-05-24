@@ -2103,7 +2103,7 @@
           (should emacs-hypervisor-bridge-activated)
           (should-not emacs-hypervisor-bridge-ready)
           (should (equal package-user-dir
-                         (expand-file-name "packages/" home-dir)))
+                         (expand-file-name "hypervisor/packages/" home-dir)))
           (should (file-directory-p package-user-dir)))
       (delete-directory home-dir t))))
 
@@ -2111,7 +2111,7 @@
   (let* ((home-dir (file-name-as-directory
                     (make-temp-file "emacs-hypervisor-bridge-home" t)))
          (user-emacs-directory home-dir)
-         (package-user-dir (expand-file-name "packages/" home-dir))
+         (package-user-dir (expand-file-name "hypervisor/packages/" home-dir))
          (package-vc-selected-packages nil)
          (package-alist nil)
          (entry '(:name "ghostel"
@@ -2120,7 +2120,9 @@
                   :lisp-dir "lisp"))
          (load-path load-path)
          (lisp-dir (file-name-as-directory
-                    (expand-file-name "packages/ghostel/lisp" home-dir))))
+                    (expand-file-name
+                     "hypervisor/packages/ghostel/lisp"
+                     home-dir))))
     (unwind-protect
         (progn
           (make-directory lisp-dir t)
@@ -2146,6 +2148,17 @@
       (emacs-hypervisor-bridge--archive-install entry)
       (should installed)
       (should (equal noted-entry entry)))))
+
+(ert-deftest emacs-hypervisor-bridge-uses-namespaced-source-root ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (entry '(:name "vc-tool" :repo "example/vc-tool")))
+    (unwind-protect
+        (should (equal
+                 (emacs-hypervisor-bridge--clone-dir entry)
+                 (expand-file-name "hypervisor/sources/vc-tool" home-dir)))
+      (delete-directory home-dir t))))
 
 (ert-deftest emacs-hypervisor-bridge-install-batch-preserves-plan-order ()
   (let* ((entries

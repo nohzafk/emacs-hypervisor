@@ -28,16 +28,22 @@
     (make-directory path t)
     path))
 
+(defun emacs-hypervisor-bridge--state-root ()
+  (emacs-hypervisor-bridge--ensure-directory
+   (expand-file-name "hypervisor/" user-emacs-directory)))
+
 (defun emacs-hypervisor-bridge--staging-root ()
   (emacs-hypervisor-bridge--ensure-directory
-   (expand-file-name "packages-src/" user-emacs-directory)))
+   (expand-file-name "sources/" (emacs-hypervisor-bridge--state-root))))
+
+(defun emacs-hypervisor-bridge--package-root ()
+  (emacs-hypervisor-bridge--ensure-directory
+   (expand-file-name "packages/" (emacs-hypervisor-bridge--state-root))))
 
 (defun emacs-hypervisor-bridge--configure ()
   "Configure package.el paths and archives for the current Hypervisor home."
   (emacs-hypervisor-bridge--ensure-directory user-emacs-directory)
-  (let ((expected-package-dir
-         (emacs-hypervisor-bridge--ensure-directory
-          (expand-file-name "packages/" user-emacs-directory))))
+  (let ((expected-package-dir (emacs-hypervisor-bridge--package-root)))
     (unless (equal (file-name-as-directory (expand-file-name package-user-dir))
                    expected-package-dir)
       (setq package-user-dir expected-package-dir)
