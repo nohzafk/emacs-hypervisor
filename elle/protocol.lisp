@@ -1,3 +1,4 @@
+(elle/epoch 10)
 ## Shared `sexp-rpc` protocol helpers.
 
 (defn emacs-hypervisor-protocol-module []
@@ -6,12 +7,7 @@
   (def protocol-version 1)
 
   (defn make-mailbox []
-    @{:arrival ()
-      :events {}
-      :monitor (sync:make-monitor)
-      :other ()
-      :reader-started false
-      :responses {}})
+    @{:arrival () :events {} :monitor (sync:make-monitor) :other () :reader-started false :responses {}})
 
   (defn mailbox-arrival [mailbox]
     (get mailbox :arrival ()))
@@ -50,34 +46,28 @@
     (match values
       () ""
       (item & rest)
-       (let [head (sexp-string item)
-             tail (sexp-sequence-string rest)]
-         (if (= tail "")
-           head
-           (string head " " tail)))
+        (let [head (sexp-string item)
+              tail (sexp-sequence-string rest)]
+          (if (= tail "") head (string head " " tail)))
       _ ""))
 
   (defn sexp-string [value]
-    (let [value (if (= (type-of value) :syntax)
-                  (syntax->datum value)
-                  value)]
+    (let [value (if (= (type-of value) :syntax) (syntax->datum value) value)]
       (if (nil? value)
         "nil"
         (case (type-of value)
           :list (string "(" (sexp-sequence-string value) ")")
-          :array (string "[" (sexp-sequence-string (->list value)) "]")
-          :@array (string "[" (sexp-sequence-string (->list value)) "]")
+          :array
+            (string "[" (sexp-sequence-string (->list value)) "]")
+          :@array
+            (string "[" (sexp-sequence-string (->list value)) "]")
           :string (json/serialize value)
           :integer (string value)
           :float (string value)
           :boolean (if value "true" "false")
           :keyword (string ":" (string value))
           :symbol (string value)
-          (error
-           (string
-            "cannot serialize value of type "
-            (string (type-of value))
-            " as an S-expression"))))))
+          (error (string "cannot serialize value of type " (string (type-of value)) " as an S-expression"))))))
 
   (defn send-message [message]
     (println (sexp-string (to-wire message))))
@@ -85,28 +75,20 @@
   (defn plist-get [xs key]
     (match xs
       () nil
-      (k v & rest)
-       (if (= k key)
-         v
-         (plist-get rest key))
+      (k v & rest) (if (= k key) v (plist-get rest key))
       _ nil))
 
   (defn plist-like? [xs]
     (match xs
       () true
       (k _ & rest)
-       (and (= (type-of k) :keyword)
-            (plist-like? rest))
+        (and (= (type-of k) :keyword) (plist-like? rest))
       _ false))
 
   (defn from-wire-plist [xs]
     (match xs
       () {}
-      (k v & rest)
-       (put
-        (from-wire-plist rest)
-        k
-        (from-wire v))
+      (k v & rest) (put (from-wire-plist rest) k (from-wire v))
       _ {}))
 
   (defn raw-wire-field? [raw-keys key]
@@ -116,22 +98,15 @@
     (match xs
       () {}
       (k v & rest)
-       (put
-        (from-wire-plist-preserving rest raw-keys)
-        k
-        (if (raw-wire-field? raw-keys k)
-          v
-          (from-wire v)))
+        (put (from-wire-plist-preserving rest raw-keys) k (if (raw-wire-field? raw-keys k) v (from-wire v)))
       _ {}))
 
   (defn from-wire [value]
     (case (type-of value)
-      :list
-      (if (plist-like? value)
-        (from-wire-plist value)
-        (map from-wire value))
+      :list (if (plist-like? value) (from-wire-plist value) (map from-wire value))
       :array (->array (map from-wire value))
-      :@array (thaw (->array (map from-wire value)))
+      :@array
+        (thaw (->array (map from-wire value)))
       :string (string "" value)
       value))
 
@@ -152,11 +127,7 @@
      :env (map from-wire (or (wire-field payload :env) ()))})
 
   (defn to-wire-struct [value]
-    (reduce
-     (fn [fields key]
-       (append fields (list key (to-wire (get value key)))))
-     ()
-     (keys value)))
+    (reduce (fn [fields key] (append fields (list key (to-wire (get value key))))) () (keys value)))
 
   (defn to-wire [value]
     (case (type-of value)
@@ -164,15 +135,15 @@
       :@struct (to-wire-struct value)
       :list (map to-wire value)
       :array (->array (map to-wire value))
-      :@array (thaw (->array (map to-wire value)))
+      :@array
+        (thaw (->array (map to-wire value)))
       value))
 
   (defn message-body [message]
     (rest message))
 
   (defn rpc-message? [message]
-    (and (= (first message) :rpc)
-         (= (plist-get (message-body message) :protocol) protocol-name)
+    (and (= (first message) :rpc) (= (plist-get (message-body message) :protocol) protocol-name)
          (= (plist-get (message-body message) :version) protocol-version)))
 
   (defn message-kind [message]
@@ -197,9 +168,7 @@
     (plist-get (message-body message) :error))
 
   (defn make-envelope [kind fields]
-    (append
-     `(:rpc :protocol ,protocol-name :version ,protocol-version :kind ,kind)
-     fields))
+    (append `(:rpc :protocol ,protocol-name :version ,protocol-version :kind ,kind) fields))
 
   (defn make-request [id op payload]
     (make-envelope :request `(:id ,id :op ,op :payload ,payload)))
@@ -238,14 +207,15 @@
     (let [line (port/read-line (*stdin*))]
       (assert line (string "expected " label " from Emacs"))
       (let [message (read line)]
-        (assert (rpc-message? message)
-                (string "expected sexp-rpc envelope for " label))
+        (assert (rpc-message? message) (string "expected sexp-rpc envelope for " label))
         message)))
 
   (defn message-route [message]
     (case (message-kind message)
-      :response `(:response ,(message-id message))
-      :event `(:event ,(message-topic message))
+      :response
+        `(:response ,(message-id message))
+      :event
+        `(:event ,(message-topic message))
       '(:other)))
 
   (defn route-queue [mailbox route]
@@ -257,24 +227,14 @@
   (defn set-route-queue [mailbox route queue]
     (match route
       (:response id)
-       (set-mailbox-responses
-        mailbox
-        (put (mailbox-responses mailbox) id queue))
+        (set-mailbox-responses mailbox (put (mailbox-responses mailbox) id queue))
       (:event topic)
-       (set-mailbox-events
-        mailbox
-        (put (mailbox-events mailbox) topic queue))
-      _
-       (set-mailbox-other mailbox queue)))
+        (set-mailbox-events mailbox (put (mailbox-events mailbox) topic queue))
+      _ (set-mailbox-other mailbox queue)))
 
   (defn enqueue-routed-message [mailbox route message]
-    (set-route-queue
-     mailbox
-     route
-     (append (route-queue mailbox route) (list message)))
-    (set-mailbox-arrival
-     mailbox
-     (append (mailbox-arrival mailbox) (list route))))
+    (set-route-queue mailbox route (append (route-queue mailbox route) (list message)))
+    (set-mailbox-arrival mailbox (append (mailbox-arrival mailbox) (list route))))
 
   (defn route-message [mailbox message]
     (enqueue-routed-message mailbox (message-route message) message))
@@ -283,9 +243,7 @@
     (match routes
       () ()
       (route & rest)
-       (if (= route expected)
-         rest
-         (pair route (remove-first-route rest expected)))
+        (if (= route expected) rest (pair route (remove-first-route rest expected)))
       _ ()))
 
   (defn pop-route-message [mailbox route]
@@ -294,9 +252,7 @@
         nil
         (let [message (first queue)]
           (set-route-queue mailbox route (rest queue))
-          (set-mailbox-arrival
-           mailbox
-           (remove-first-route (mailbox-arrival mailbox) route))
+          (set-mailbox-arrival mailbox (remove-first-route (mailbox-arrival mailbox) route))
           message))))
 
   (defn pop-arrival-message [mailbox]
@@ -313,60 +269,46 @@
   (defn await-mailbox-message [mailbox label pop-message]
     (let [monitor (mailbox-monitor mailbox)
           message @[nil]]
-      (monitor:with
-       (fn []
-         (assert (mailbox-reader-started? mailbox)
-                 (string "mailbox reader not started for " label))
-         (while (nil? (message 0))
-           (if-let [next-message (pop-message)]
-             (put message 0 next-message)
-             (begin
-               (monitor:wait)
-               (assert (mailbox-reader-started? mailbox)
-                       (string "mailbox reader not started for " label)))))
-         (message 0)))))
+      (monitor:with (fn []
+                      (assert (mailbox-reader-started? mailbox) (string "mailbox reader not started for " label))
+                      (while (nil? (message 0))
+                        (if-let [next-message (pop-message)] (put message 0 next-message)
+                                (begin
+                                  (monitor:wait)
+                                  (assert (mailbox-reader-started? mailbox)
+                                          (string "mailbox reader not started for " label)))))
+                      (message 0)))))
 
   (defn run-mailbox-reader [mailbox]
     (let [monitor (mailbox-monitor mailbox)]
       (while true
         (let [message (read-next-message "rpc message")]
-          (monitor:with
-           (fn []
-             (route-message mailbox message)
-             (monitor:broadcast)))))))
+          (monitor:with (fn []
+                          (route-message mailbox message)
+                          (monitor:broadcast)))))))
 
   (defn with-mailbox-reader [mailbox body]
-    (ev/scope
-     (fn [spawn]
-       (set-mailbox-reader-started mailbox true)
-       (spawn (fn [] (run-mailbox-reader mailbox)))
-       (body))))
+    (ev/scope (fn [spawn]
+                (set-mailbox-reader-started mailbox true)
+                (spawn (fn [] (run-mailbox-reader mailbox)))
+                (body))))
 
   (defn read-message [mailbox label]
-    (await-mailbox-message
-     mailbox
-     label
-     (fn [] (pop-arrival-message mailbox))))
+    (await-mailbox-message mailbox label (fn [] (pop-arrival-message mailbox))))
 
   (defn await-route-message [mailbox route label]
-    (await-mailbox-message
-     mailbox
-     label
-     (fn [] (pop-route-message mailbox route))))
+    (await-mailbox-message mailbox label (fn [] (pop-route-message mailbox route))))
 
   (defn expect-message-kind [message expected label]
-    (assert (= (message-kind message) expected)
-            (string "expected " label)))
+    (assert (= (message-kind message) expected) (string "expected " label)))
 
   (defn expect-request-op [message expected label]
     (expect-message-kind message :request label)
-    (assert (= (message-op message) expected)
-            (string "expected request " label)))
+    (assert (= (message-op message) expected) (string "expected request " label)))
 
   (defn expect-event-topic [message expected label]
     (expect-message-kind message :event label)
-    (assert (= (message-topic message) expected)
-            (string "expected event " label)))
+    (assert (= (message-topic message) expected) (string "expected event " label)))
 
   (defn await-response [mailbox id]
     (await-route-message mailbox `(:response ,id) ":response"))

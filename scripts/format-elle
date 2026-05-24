@@ -1,0 +1,92 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+elle_bin=${ELLE_BIN:-"$repo_dir/.elle/target/release/elle"}
+line_length=${ELLE_FMT_LINE_LENGTH:-120}
+check=0
+staged=0
+
+usage() {
+    cat <<EOF
+usage: scripts/format-elle [--check] [--staged] [file...]
+
+Formats Elle .lisp files with the repo-local Elle formatter.
+
+Options:
+  --check    check formatting instead of writing files
+  --staged   use staged .lisp files only
+
+Environment:
+  ELLE_BIN                Elle binary to use (default: $repo_dir/.elle/target/release/elle)
+  ELLE_FMT_LINE_LENGTH    formatter line length (default: 120)
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --check)
+            check=1
+            shift
+            ;;
+        --staged)
+            staged=1
+            shift
+            ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            usage >&2
+            exit 64
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ ! -x "$elle_bin" ]; then
+    cat >&2 <<EOF
+Elle binary not found at:
+- $elle_bin
+
+Set ELLE_BIN to an existing Elle binary or run:
+- scripts/bootstrap-elle
+EOF
+    exit 1
+fi
+
+cd "$repo_dir"
+
+if [ "$#" -eq 0 ]; then
+    if [ "$staged" -eq 1 ]; then
+        file_list=$(git diff --cached --name-only --diff-filter=ACMR -- '*.lisp')
+    else
+        file_list=$(git ls-files '*.lisp')
+    fi
+
+    if [ -z "$file_list" ]; then
+        exit 0
+    fi
+
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        set -- "$@" "$file"
+    done <<EOF
+$file_list
+EOF
+fi
+
+if [ "$check" -eq 1 ]; then
+    exec "$elle_bin" fmt --check --line-length="$line_length" "$@"
+fi
+
+exec "$elle_bin" fmt --line-length="$line_length" "$@"

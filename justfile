@@ -46,8 +46,16 @@ start-elle-mcp:
     ./scripts/start-elle-mcp
 
 [group('Elle')]
+fmt:
+    ./scripts/format-elle
+
+[group('Elle')]
 analyze-runtime:
     ./scripts/analyze-runtime-modules
+
+[group('Git')]
+install-hooks:
+    git config core.hooksPath .githooks
 
 [group('Test')]
 test:

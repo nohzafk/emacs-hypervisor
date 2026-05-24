@@ -377,6 +377,8 @@ For working on Hypervisor itself, not normal user configuration.
 
 ```bash
 just bootstrap-elle          # use repo-local Elle checkout
+just fmt                     # format Elle Lisp files at 120 columns
+just install-hooks           # enable repo Git hooks
 just build                   # build the binary
 just test                    # run tests
 just analyze-runtime         # compile-aware analysis after Elle changes

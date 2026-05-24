@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+cd "$repo_dir"
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.lisp')
+
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    if ! git diff --quiet -- "$file"; then
+        cat >&2 <<EOF
+Cannot auto-format partially staged Elle file:
+- $file
+
+Stage or stash the unstaged changes in this file, then commit again.
+EOF
+        exit 1
+    fi
+done <<EOF
+$files
+EOF
+
+"$repo_dir/scripts/format-elle" --staged
+
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    git add -- "$file"
+done <<EOF
+$files
+EOF
