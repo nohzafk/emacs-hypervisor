@@ -115,6 +115,42 @@
 (defun emacs-hypervisor-bridge--package-symbol (entry)
   (intern (plist-get entry :name)))
 
+(defun emacs-hypervisor-bridge--vc-spec (entry)
+  "Return the `package-vc-selected-packages' spec for ENTRY."
+  (append
+   (list :url (emacs-hypervisor-bridge--build-url entry))
+   (when (plist-get entry :branch)
+     (list :branch (plist-get entry :branch)))
+   (when (plist-get entry :ref)
+     (list :rev (plist-get entry :ref)))
+   (when (plist-get entry :lisp-dir)
+     (list :lisp-dir (plist-get entry :lisp-dir)))))
+
+(defun emacs-hypervisor-bridge--register-vc-spec (entry)
+  "Register ENTRY in `package-vc-selected-packages' when it is VC-backed."
+  (when (emacs-hypervisor-bridge--vc-entry-p entry)
+    (let ((spec (emacs-hypervisor-bridge--vc-spec entry)))
+      (when spec
+        (setf (alist-get (emacs-hypervisor-bridge--package-symbol entry)
+                         package-vc-selected-packages)
+              spec)))))
+
+(defun emacs-hypervisor-bridge--entry-lisp-dir (entry)
+  "Return ENTRY's expanded package lisp directory, or nil."
+  (when-let ((lisp-dir (plist-get entry :lisp-dir)))
+    (expand-file-name lisp-dir (emacs-hypervisor-bridge--package-dir entry))))
+
+(defun emacs-hypervisor-bridge--activate-entry-load-path (entry)
+  "Add ENTRY's package lisp directory to `load-path' when declared."
+  (when-let ((lisp-dir (emacs-hypervisor-bridge--entry-lisp-dir entry)))
+    (when (file-directory-p lisp-dir)
+      (add-to-list 'load-path (file-name-as-directory lisp-dir)))))
+
+(defun emacs-hypervisor-bridge--note-present (entry)
+  "Apply runtime metadata for ENTRY that is already present."
+  (emacs-hypervisor-bridge--register-vc-spec entry)
+  (emacs-hypervisor-bridge--activate-entry-load-path entry))
+
 (defun emacs-hypervisor-bridge--installed-p (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
     (or (package-installed-p sym)
@@ -126,8 +162,11 @@
 (defun emacs-hypervisor-bridge--clone-command (entry)
   (let* ((url    (emacs-hypervisor-bridge--build-url entry))
          (branch (plist-get entry :branch))
+         (ref    (plist-get entry :ref))
          (dir    (emacs-hypervisor-bridge--clone-dir entry)))
-    (append (list "git" "clone" "--depth" "1" "--no-single-branch")
+    (append (list "git" "clone")
+            (unless ref
+              (list "--depth" "1" "--no-single-branch"))
             (when branch (list "--branch" branch))
             (list url dir))))
 
@@ -188,20 +227,14 @@
 (defun emacs-hypervisor-bridge--adopt (entry)
   "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'."
   (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
-         (dir (emacs-hypervisor-bridge--clone-dir entry))
-         (spec (append
-                (list :url (emacs-hypervisor-bridge--build-url entry))
-                (when (plist-get entry :branch)
-                  (list :branch (plist-get entry :branch)))
-                (when (plist-get entry :lisp-dir)
-                  (list :lisp-dir (plist-get entry :lisp-dir))))))
+         (dir (emacs-hypervisor-bridge--clone-dir entry)))
     (unless (package-installed-p sym)
       ;; `package-vc-install-from-checkout' only accepts DIR and NAME in Emacs
       ;; 30.  Register the spec first so package-vc can still see :lisp-dir
       ;; during its unpack step.
-      (when spec
-        (setf (alist-get sym package-vc-selected-packages) spec))
-      (package-vc-install-from-checkout dir (symbol-name sym)))))
+      (emacs-hypervisor-bridge--register-vc-spec entry)
+      (package-vc-install-from-checkout dir (symbol-name sym)))
+    (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--archive-install (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
@@ -237,6 +270,7 @@ Call ON-FAILED with (name reason) on failure."
     (dolist (entry entries)
       (cond
        ((emacs-hypervisor-bridge--installed-p entry)
+        (emacs-hypervisor-bridge--note-present entry)
         (push entry already))
        ((emacs-hypervisor-bridge--vc-entry-p entry)
         (if (emacs-hypervisor-bridge--clone-present-p entry)

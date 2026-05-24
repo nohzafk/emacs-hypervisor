@@ -1971,7 +1971,55 @@
           (should (file-directory-p package-user-dir)))
       (delete-directory home-dir t))))
 
+(ert-deftest emacs-hypervisor-bridge-installed-vc-entry-activates-lisp-dir ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (package-user-dir (expand-file-name "packages/" home-dir))
+         (package-vc-selected-packages nil)
+         (package-alist nil)
+         (entry '(:name "ghostel"
+                  :repo "dakra/ghostel"
+                  :branch "main"
+                  :lisp-dir "lisp"))
+         (load-path load-path)
+         (lisp-dir (file-name-as-directory
+                    (expand-file-name "packages/ghostel/lisp" home-dir))))
+    (unwind-protect
+        (progn
+          (make-directory lisp-dir t)
+          (should (emacs-hypervisor-bridge--installed-p entry))
+          (emacs-hypervisor-bridge--note-present entry)
+          (should (equal (alist-get 'ghostel package-vc-selected-packages)
+                         '(:url "https://github.com/dakra/ghostel"
+                           :branch "main"
+                           :lisp-dir "lisp")))
+          (should (member lisp-dir load-path)))
+      (delete-directory home-dir t))))
+
 (ert-deftest emacs-hypervisor-bridge-vc-entry-p-detects-archive-vs-vc ()
   (should     (emacs-hypervisor-bridge--vc-entry-p '(:name "magit" :repo "magit/magit")))
   (should     (emacs-hypervisor-bridge--vc-entry-p '(:name "x" :local "/tmp/x")))
   (should-not (emacs-hypervisor-bridge--vc-entry-p '(:name "consult"))))
+
+(ert-deftest emacs-hypervisor-bridge-vc-spec-preserves-ref ()
+  (should (equal
+           (emacs-hypervisor-bridge--vc-spec
+            '(:name "marginalia"
+              :repo "minad/marginalia"
+              :ref "4a0628dfdf944a5d307d31d2a514825cc5386986"))
+           '(:url "https://github.com/minad/marginalia"
+             :rev "4a0628dfdf944a5d307d31d2a514825cc5386986"))))
+
+(ert-deftest emacs-hypervisor-bridge-ref-clones-are-not-shallow ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (entry '(:name "marginalia"
+                  :repo "minad/marginalia"
+                  :ref "4a0628dfdf944a5d307d31d2a514825cc5386986")))
+    (unwind-protect
+        (let ((command (emacs-hypervisor-bridge--clone-command entry)))
+          (should-not (member "--depth" command))
+          (should-not (member "--no-single-branch" command)))
+      (delete-directory home-dir t))))
