@@ -21,7 +21,11 @@ fn parse_include_file(line: &str) -> Option<&str> {
         .and_then(|rest| rest.strip_suffix("\")"))
 }
 
-fn expand_source(path: &Path, stack: &mut Vec<PathBuf>) -> Result<String, String> {
+fn is_epoch_declaration(line: &str) -> bool {
+    line.trim_start().starts_with("(elle/epoch ")
+}
+
+fn expand_source(path: &Path, stack: &mut Vec<PathBuf>, root: bool) -> Result<String, String> {
     if stack.iter().any(|entry| entry == path) {
         let cycle = stack
             .iter()
@@ -43,10 +47,12 @@ fn expand_source(path: &Path, stack: &mut Vec<PathBuf>) -> Result<String, String
                 .parent()
                 .expect("source file should have a parent directory")
                 .join(spec);
-            expanded.push_str(&expand_source(&include_path, stack)?);
+            expanded.push_str(&expand_source(&include_path, stack, false)?);
             if !expanded.ends_with('\n') {
                 expanded.push('\n');
             }
+        } else if !root && is_epoch_declaration(line) {
+            continue;
         } else {
             expanded.push_str(line);
             expanded.push('\n');
@@ -118,7 +124,8 @@ fn main() {
     let repo_dir = repo_root();
     let backend_path = repo_dir.join("elle").join("hypervisor.lisp");
     let expanded_backend =
-        expand_source(&backend_path, &mut Vec::new()).expect("backend expansion should succeed");
+        expand_source(&backend_path, &mut Vec::new(), true)
+            .expect("backend expansion should succeed");
     let runtime_modules =
         parse_runtime_module_manifest(&repo_dir).expect("runtime module manifest should parse");
 

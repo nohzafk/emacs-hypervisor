@@ -1,5 +1,7 @@
 ;;; emacs-hypervisor-sexp-rpc.el --- S-expression RPC transport -*- lexical-binding: t; -*-
 
+(require 'cl-lib)
+
 (defconst emacs-hypervisor-protocol-name :sexp-rpc)
 (defconst emacs-hypervisor-protocol-version 1)
 
@@ -17,6 +19,8 @@
 (defvar emacs-hypervisor--last-error-message nil)
 (defvar emacs-hypervisor--shutdown-reason nil)
 (defvar emacs-hypervisor--completed nil)
+(defvar emacs-hypervisor--next-request-id 100000)
+(defvar emacs-hypervisor--pending-responses nil)
 (defvar emacs-hypervisor-context-function nil)
 (defvar emacs-hypervisor-session-data-function nil)
 
@@ -105,6 +109,25 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
 (defun emacs-hypervisor-send-event (topic payload)
   (emacs-hypervisor-send
    (emacs-hypervisor--make-rpc-event topic payload)))
+
+(defun emacs-hypervisor--make-rpc-request (id op payload)
+  (list :rpc
+        :protocol emacs-hypervisor-protocol-name
+        :version emacs-hypervisor-protocol-version
+        :kind :request
+        :id id
+        :op op
+        :payload payload))
+
+(defun emacs-hypervisor-send-request (op payload)
+  "Send an Emacs-initiated request with OP and PAYLOAD.
+Return the request id."
+  (let ((id emacs-hypervisor--next-request-id))
+    (setq emacs-hypervisor--next-request-id
+          (1+ emacs-hypervisor--next-request-id))
+    (emacs-hypervisor-send
+     (emacs-hypervisor--make-rpc-request id op payload))
+    id))
 
 (defun emacs-hypervisor--rpc-metric-details (id op payload)
   (append
@@ -275,6 +298,50 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
        t)
       (_ nil))))
 
+(defun emacs-hypervisor--dispatch-rpc-response (message)
+  (let ((id (emacs-hypervisor--rpc-id message)))
+    (setq emacs-hypervisor--pending-responses
+          (plist-put emacs-hypervisor--pending-responses id message))
+    t))
+
+(defun emacs-hypervisor--pop-pending-response (id)
+  (let ((response (plist-get emacs-hypervisor--pending-responses id)))
+    (when response
+      (cl-remf emacs-hypervisor--pending-responses id))
+    response))
+
+(defun emacs-hypervisor-await-response (id &optional timeout)
+  "Wait for an Emacs-initiated request response with ID.
+Signal an error when TIMEOUT seconds elapse."
+  (let ((deadline (and timeout (+ (float-time) timeout)))
+        response)
+    (while (and (not (setq response (emacs-hypervisor--pop-pending-response id)))
+                (emacs-hypervisor-live-p)
+                (or (null deadline) (< (float-time) deadline)))
+      (accept-process-output emacs-hypervisor--process 0.05))
+    (cond
+     (response response)
+     ((not (emacs-hypervisor-live-p))
+      (error "Hypervisor process is not live"))
+     (t
+      (error "Timed out waiting for Hypervisor response %s" id)))))
+
+(defun emacs-hypervisor-request (op payload &optional timeout)
+  "Send OP and PAYLOAD to Elle, then wait for the response payload."
+  (let* ((id (emacs-hypervisor-send-request op payload))
+         (response (emacs-hypervisor-await-response id timeout)))
+    (if (plist-get (cdr response) :ok)
+        (plist-get (cdr response) :payload)
+      (error "%s" (or (plist-get (cdr response) :error)
+                      "Hypervisor request failed")))))
+
+(defun emacs-hypervisor-extension-call (extension method args &optional timeout)
+  "Call Elle EXTENSION METHOD with ARGS over `sexp-rpc'."
+  (emacs-hypervisor-request
+   :extension-call
+   (list :extension extension :method method :args args)
+   timeout))
+
 (defun emacs-hypervisor--dispatch (message)
   (emacs-hypervisor--record :recv message)
   (unless (emacs-hypervisor--rpc-message-p message)
@@ -282,6 +349,7 @@ shortcuts `'x' and `#'x', which elle's reader does not accept."
   (pcase (emacs-hypervisor--rpc-kind message)
     (:request (emacs-hypervisor--dispatch-rpc-request message))
     (:event (emacs-hypervisor--dispatch-rpc-event message))
+    (:response (emacs-hypervisor--dispatch-rpc-response message))
     (_ nil)))
 
 (defun emacs-hypervisor--consume-input ()

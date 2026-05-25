@@ -36,22 +36,24 @@ One rule: **Emacs keeps a small trusted kernel; Elle owns orchestration
 policy.**
 
 ```mermaid
-flowchart TD
-    subgraph Emacs
-        Kernel["trusted kernel<br/>sexp-rpc · session state · eval surface"]
-        Decls["package! / config-unit! declarations"]
-        Runtime["emitted runtime helpers<br/>package-vc bridge · unit execution · reload · reports"]
+flowchart LR
+    subgraph Emacs["Emacs process"]
+        direction TD
+        Decls["Declarations<br/>package! · config-unit!"]
+        Kernel["Trusted kernel<br/>sexp-rpc · session state"]
+        Runtime["Runtime helpers<br/>package-vc · unit exec · reload"]
     end
 
-    subgraph Binary["emacs-hypervisor binary"]
+    subgraph Hypervisor["emacs-hypervisor binary"]
+        direction TD
+        Embedded[("Embedded sources<br/>Elle + runtime Elisp")]
         Elle["Elle backend"]
-        Embedded["embedded Elle source + runtime Elisp"]
     end
 
-    Kernel <-- "sexp-rpc over stdio" --> Elle
-    Decls -- "export session data" --> Elle
-    Elle -- "emit forms via :eval" --> Runtime
-    Embedded -. "bundled at compile time" .-> Elle
+    Decls -->|export session data| Elle
+    Kernel <-->|sexp-rpc over stdio| Elle
+    Elle -->|emit forms via :eval| Runtime
+    Embedded -.->|bundled at compile time| Elle
 ```
 
 | Layer | Lifetime | Owns |

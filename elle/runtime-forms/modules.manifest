@@ -10,6 +10,8 @@ DECLARATIONS|elle/runtime-forms/emacs-hypervisor-declarations.el|:emacs-hypervis
 SELECTIVE_RELOAD|elle/runtime-forms/emacs-hypervisor-selective-reload.el|:emacs-hypervisor-selective-reload-ready
 CONFIG_PATHS|elle/runtime-forms/emacs-hypervisor-config-paths.el|:emacs-hypervisor-config-paths-ready
 CONFIG_LOADER|elle/runtime-forms/emacs-hypervisor-config-loader.el|:emacs-hypervisor-config-loader-ready
+EXTENSIONS|elle/runtime-forms/emacs-hypervisor-extensions.el|:emacs-hypervisor-extensions-ready
+MARKDOWN_MERMAID|elle/runtime-forms/emacs-hypervisor-markdown-mermaid.el|:emacs-hypervisor-markdown-mermaid-ready
 RELOAD_REPORT|elle/runtime-forms/emacs-hypervisor-reload-report.el|:emacs-hypervisor-reload-report-ready
 RELOAD_POLICY|elle/runtime-forms/emacs-hypervisor-reload-policy.el|:emacs-hypervisor-reload-policy-ready
 COMPOSE|elle/runtime-forms/emacs-hypervisor-compose.el|:emacs-hypervisor-compose-ready

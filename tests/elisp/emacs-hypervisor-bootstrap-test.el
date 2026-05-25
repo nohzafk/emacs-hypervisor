@@ -8,6 +8,47 @@
 (defconst emacs-hypervisor-test--source-directory
   (file-name-directory (or load-file-name buffer-file-name default-directory)))
 
+(defun emacs-hypervisor-test--repo-root ()
+  "Return the repository root for the loaded test file."
+  (expand-file-name "../.." emacs-hypervisor-test--source-directory))
+
+(defun emacs-hypervisor-test--elle-binary ()
+  "Return the Elle binary used by integration-style ERT checks."
+  (let ((elle-bin (getenv "ELLE_BIN")))
+    (if (and elle-bin (not (string-empty-p elle-bin)))
+        elle-bin
+      (expand-file-name ".elle/target/release/elle"
+                        (emacs-hypervisor-test--repo-root)))))
+
+(defun emacs-hypervisor-test--run-elle-source (source)
+  "Run SOURCE through Elle from the repo root.
+Return a cons cell of (STATUS . OUTPUT)."
+  (let* ((repo-root (emacs-hypervisor-test--repo-root))
+         (script (make-temp-file
+                  (expand-file-name ".emacs-hypervisor-elle-test-" repo-root)
+                  nil
+                  ".lisp"))
+         (buffer (generate-new-buffer " *emacs-hypervisor-elle-test*"))
+         status output)
+    (unwind-protect
+        (progn
+          (with-temp-file script
+            (insert source))
+          (let ((default-directory repo-root))
+            (setq status
+                  (process-file (emacs-hypervisor-test--elle-binary)
+                                nil
+                                buffer
+                                nil
+                                script)))
+          (with-current-buffer buffer
+            (setq output (buffer-string)))
+          (cons status output))
+      (when (file-exists-p script)
+        (delete-file script))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (defvar emacs-hypervisor-installed-packages nil)
 (defvar emacs-hypervisor-execution-events nil)
 (defvar emacs-hypervisor-test-runtime-value nil)
@@ -28,6 +69,8 @@
 (require 'emacs-hypervisor-reload-policy)
 (require 'emacs-hypervisor-compose)
 (require 'emacs-hypervisor-report)
+(require 'emacs-hypervisor-extensions)
+(require 'emacs-hypervisor-markdown-mermaid)
 
 (defvar emacs-hypervisor-config-file nil)
 (defvar emacs-hypervisor-config-org-file nil)
@@ -49,6 +92,16 @@
     :kind :event
     :topic ,topic
     :payload ,payload))
+
+(defun emacs-hypervisor-test--response (id ok &optional payload error)
+  `(:rpc
+    :protocol :sexp-rpc
+    :version 1
+    :kind :response
+    :id ,id
+    :ok ,ok
+    :payload ,payload
+    :error ,error))
 
 (defun emacs-hypervisor-test--unit (name body &optional metadata)
   (let ((entry (list :name name
@@ -1498,6 +1551,60 @@
                    '(:requested (:packages) :packages ((:name "core-pkg")))))
     (should (equal (plist-get (cdr (nth 3 sent)) :payload) 42))))
 
+(ert-deftest emacs-hypervisor-extension-call-routes-emacs-initiated-response ()
+  (let (sent)
+    (emacs-hypervisor-reset)
+    (setq emacs-hypervisor--process 'fake-process)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc _wire)
+                 (push (emacs-hypervisor--make-rpc-request
+                        100000
+                        :extension-call
+                        '(:extension :mermaid
+                                     :method :render
+                                     :args (:source "flowchart LR; A-->B"
+                                            :style :ascii)))
+                       sent)
+                 (emacs-hypervisor--dispatch
+                  (emacs-hypervisor-test--response
+                   100000
+                   t
+                   '(:ok t :kind :text :mime "text/plain" :text "A -> B")))))
+              ((symbol-function 'accept-process-output)
+               (lambda (&rest _args) nil)))
+      (let ((payload (emacs-hypervisor-extension-call
+                      :mermaid
+                      :render
+                      '(:source "flowchart LR; A-->B" :style :ascii)
+                      1)))
+        (should (equal (plist-get payload :text) "A -> B"))
+        (should (null emacs-hypervisor--pending-responses))
+        (should (= emacs-hypervisor--next-request-id 100001))
+        (should (= (length sent) 1))
+        (should (eq (plist-get (cdr (car sent)) :op) :extension-call))))))
+
+(ert-deftest emacs-hypervisor-extension-call-signals-rpc-error ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--process 'fake-process)
+  (cl-letf (((symbol-function 'process-live-p)
+             (lambda (_proc) t))
+            ((symbol-function 'process-send-string)
+             (lambda (&rest _args)
+               (emacs-hypervisor--dispatch
+                (emacs-hypervisor-test--response
+                 100000
+                 nil
+                 nil
+                 "extension unavailable: mermaid"))))
+            ((symbol-function 'accept-process-output)
+             (lambda (&rest _args) nil)))
+    (should-error
+     (emacs-hypervisor-extension-call
+      :mermaid :render '(:source "x" :style :ascii) 1)
+     :type 'error)))
+
 (ert-deftest emacs-hypervisor-sexp-rpc-filter-keeps-partial-symbol-prefixes ()
   (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
          (message (emacs-hypervisor-test--event
@@ -1603,6 +1710,193 @@
         (kill-buffer buffer))
       (when-let ((buffer (get-buffer emacs-hypervisor--details-buffer-name)))
         (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-detects-fenced-blocks ()
+  (with-temp-buffer
+    (insert "# Demo\n\n```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((blocks (emacs-hypervisor-markdown-mermaid--source-blocks)))
+      (should (= (length blocks) 1))
+      (should (string-match-p "flowchart LR" (nth 4 (car blocks)))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-renders-ascii-overlay ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (extension method args &optional _timeout)
+                   (should (eq extension :mermaid))
+                   (should (eq method :render))
+                   (should (eq (plist-get args :style) :ascii))
+                   (should (integerp (plist-get (plist-get args :viewport) :width)))
+                   '(:ok t :kind :text :mime "text/plain" :text "A --> B"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)
+        (should (= (length emacs-hypervisor-markdown-mermaid--overlays) 1))
+        (should (string-match-p
+                 "A --> B"
+                 (overlay-get (car emacs-hypervisor-markdown-mermaid--overlays)
+                              'after-string)))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-renders-svg-overlay ()
+  (skip-unless (image-type-available-p 'svg))
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :svg))
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (extension method args &optional _timeout)
+                   (should (eq extension :mermaid))
+                   (should (eq method :render))
+                   (should (eq (plist-get args :style) :svg))
+                   '(:ok t :kind :image :mime "image/svg+xml"
+                         :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\"/></svg>"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)
+        (let ((display (overlay-get (car emacs-hypervisor-markdown-mermaid--overlays)
+                                    'after-string)))
+          (should (stringp display))
+          (should (get-text-property 1 'display display)))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-render-style-accepts-common-forms ()
+  (cl-letf (((symbol-function 'image-type-available-p)
+             (lambda (type)
+               (should (eq type 'svg))
+               t)))
+    (dolist (style '(:auto auto "auto" :svg svg "svg"))
+      (let ((emacs-hypervisor-markdown-mermaid-render-style style))
+        (should (eq (emacs-hypervisor-markdown-mermaid--render-style) :svg)))))
+  (dolist (style '(:ascii ascii "ascii"))
+    (let ((emacs-hypervisor-markdown-mermaid-render-style style))
+      (should (eq (emacs-hypervisor-markdown-mermaid--render-style) :ascii)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-auto-falls-back-to-ascii-without-svg ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :auto))
+      (cl-letf (((symbol-function 'image-type-available-p)
+                 (lambda (type)
+                   (should (eq type 'svg))
+                   nil))
+                ((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (_extension _method args &optional _timeout)
+                   (should (eq (plist-get args :style) :ascii))
+                   '(:ok t :kind :text :mime "text/plain" :text "rendered"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-viewport-uses-visible-width ()
+  (with-temp-buffer
+    (insert "    ```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+      (cl-letf (((symbol-function 'get-buffer-window)
+                 (lambda (&rest _args) 'visible-window))
+                ((symbol-function 'window-text-width)
+                 (lambda (window)
+                   (should (eq window 'visible-window))
+                   54))
+                ((symbol-function 'window-body-width)
+                 (lambda (&rest _args) 62))
+                ((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (_extension _method args &optional _timeout)
+                   (should (= (plist-get (plist-get args :viewport) :width) 54))
+                   '(:ok t :kind :text :mime "text/plain" :text "rendered"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-renders-error-payload ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (_extension _method args &optional _timeout)
+                   (should (eq (plist-get args :style) :ascii))
+                   '(:ok false :error :invalid-request :message "bad style"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)
+        (should (string-match-p
+                 "bad style"
+                 (overlay-get (car emacs-hypervisor-markdown-mermaid--overlays)
+                              'after-string)))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-refresh-command-rerenders-buffer ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (render-count 0))
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (&rest _args)
+                   (setq render-count (1+ render-count))
+                   '(:ok t :kind :text :mime "text/plain" :text "rendered"))))
+        (emacs-hypervisor-markdown-mermaid-mode 1)
+        (should (= render-count 1))
+        (should (eq (keymap-lookup emacs-hypervisor-markdown-mermaid-mode-map "C-c C-r")
+                    #'emacs-hypervisor-markdown-mermaid-refresh))
+        (emacs-hypervisor-markdown-mermaid-refresh)
+        (should (= render-count 2))
+        (emacs-hypervisor-markdown-mermaid-mode -1)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-edits-schedule-refresh ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-auto-refresh-delay 0.2)
+          scheduled-delay
+          scheduled-buffer)
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (&rest _args)
+                   '(:ok t :kind :text :mime "text/plain" :text "rendered")))
+                ((symbol-function 'run-with-idle-timer)
+                 (lambda (secs _repeat function buffer)
+                   (setq scheduled-delay secs)
+                   (setq scheduled-buffer buffer)
+                   (list :timer function buffer))))
+        (emacs-hypervisor-markdown-mermaid-mode 1)
+        (goto-char (point-min))
+        (insert "\n")
+        (should (= scheduled-delay 0.2))
+        (should (eq scheduled-buffer (current-buffer)))
+        (emacs-hypervisor-markdown-mermaid-mode -1)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-mmdflux-renders-quoted-edge-label ()
+  (let ((elle-bin (emacs-hypervisor-test--elle-binary)))
+    (unless (file-executable-p elle-bin)
+      (ert-skip (format "Elle binary is unavailable: %s" elle-bin))))
+  (let* ((source
+          (string-join
+           '("(include-file \"elle/extensions.lisp\")"
+             "(include-file \"elle/extension-mermaid.lisp\")"
+             "(def protocol {:plist-get (fn [_payload _key] nil)})"
+             "(def extensions (emacs-hypervisor-extensions-module protocol))"
+             "(def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))"
+             "(let [[ok? mmdflux] (protect (import \"plugin/mmdflux\"))]"
+             "  (if (not ok?)"
+             "    (begin"
+             "      (println (string \"SKIP mmdflux unavailable: \" mmdflux))"
+             "      (exit 77))"
+             "    (let [payload (mermaid-extension:render mmdflux"
+             "                    {:source \"flowchart TD\\n  Kernel <-- \\\"sexp-rpc over stdio\\\" --> Elle\\n\""
+             "                     :style :svg"
+             "                     :viewport {:width 72}})]"
+             "      (if (and (= (get payload :ok) true)"
+             "               (= (get payload :kind) :image)"
+             "               (= (get payload :mime) \"image/svg+xml\")"
+             "               (string/contains? (get payload :svg) \"<svg\"))"
+             "        (println \"OK\")"
+             "        (begin"
+             "          (println (string \"FAIL \" payload))"
+             "          (exit 1))))))")
+           "\n"))
+         (result (emacs-hypervisor-test--run-elle-source source))
+         (status (car result))
+         (output (cdr result)))
+    (cond
+     ((equal status 77)
+      (ert-skip (string-trim output)))
+     ((not (equal status 0))
+      (ert-fail (format "Elle mmdflux render failed with status %S:\n%s"
+                        status
+                        output)))
+     (t
+      (should (string-match-p "\\bOK\\b" output))))))
 
 (ert-deftest emacs-hypervisor-dispatch-rpc-event-records-session-state ()
   (emacs-hypervisor-reset)

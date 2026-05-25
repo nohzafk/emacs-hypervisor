@@ -16,10 +16,19 @@ build:
 
 [group('Build')]
 install bin_dir="$HOME/.local/bin": build
-    just build
     mkdir -p "{{bin_dir}}"
     rm -f "{{bin_dir}}/emacs-hypervisor"
     cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"
+    elle_plugins="${EMACS_HYPERVISOR_ELLE_PLUGINS:-$(tr '\n' ',' < "{{justfile_directory()}}/.elle-plugins" 2>/dev/null | sed 's/,$//')}"; \
+    if [ -n "$elle_plugins" ]; then \
+      ext="$(case "$(uname -s)" in Darwin) printf dylib ;; *) printf so ;; esac)"; \
+      IFS=',' read -r -a plugins <<< "$elle_plugins"; \
+      for plugin in "${plugins[@]}"; do \
+        plugin="${plugin//[[:space:]]/}"; \
+        [ -n "$plugin" ] || continue; \
+        cp "{{justfile_directory()}}/.elle/target/release/libelle_${plugin}.${ext}" "{{bin_dir}}/libelle_${plugin}.${ext}"; \
+      done; \
+    fi
     if [ "$(uname)" = "Darwin" ]; then \
       codesign --force --sign - "{{bin_dir}}/emacs-hypervisor"; \
     fi

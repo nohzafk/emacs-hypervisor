@@ -124,7 +124,8 @@
   (defn from-wire-session-data [payload]
     {:packages (map from-wire (or (wire-field payload :packages) ()))
      :units (map from-wire-unit-entry (or (wire-field payload :units) ()))
-     :env (map from-wire (or (wire-field payload :env) ()))})
+     :env (map from-wire (or (wire-field payload :env) ()))
+     :extensions (from-wire (wire-field payload :extensions))})
 
   (defn to-wire-struct [value]
     (reduce (fn [fields key] (append fields (list key (to-wire (get value key))))) () (keys value)))

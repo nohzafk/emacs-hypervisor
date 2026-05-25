@@ -162,6 +162,13 @@ feature preloading, not whether the unit itself is lazy or deferred."
       (setq payload
             (append payload
                     (list :env (emacs-hypervisor-export-environment)))))
+    (when (memq :extensions requested)
+      (setq payload
+            (append payload
+                    (list :extensions
+                          (if (fboundp 'emacs-hypervisor-export-extension-settings)
+                              (emacs-hypervisor-export-extension-settings)
+                            '(:extensions-enabled nil :extensions nil))))))
     payload))
 
 (provide 'emacs-hypervisor-declarations)

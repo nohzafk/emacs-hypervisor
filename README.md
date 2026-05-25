@@ -370,6 +370,58 @@ startup session.
 | `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup. |
 | `emacs-hypervisor-clone-concurrency` | `8` | Maximum number of parallel git clones during initial package install. |
 | `emacs-hypervisor-default-host` | `"github"` | Host assumed for `:repo` shorthand when no `:host` is given. |
+| `emacs-hypervisor-extensions` | `nil` | Comma-separated extension features to enable, for example `"mermaid"` or `"mermaid,egui"`; `nil` disables extensions. |
+
+## Extensions
+
+Extensions keep the Elle control plane alive after startup so Emacs can send
+typed requests over the existing `sexp-rpc` pipe. They are local-only: no
+network listener is opened, and Emacs sends data payloads rather than remote
+`:eval` forms.
+
+The extension layer is intentionally separate from individual plugin features:
+
+- `emacs-hypervisor-extensions.el` owns the generic extension list option and
+  feature settings registration.
+- `elle/extensions.lisp` owns extension request dispatch and handler lookup.
+- Each plugin feature adds its own Emacs runtime module and Elle handler module.
+
+The first plugin feature renders Mermaid diagrams in Markdown buffers through
+the Elle `mmdflux` plugin. Enable it from `config.org` or `config.el`:
+
+```elisp
+(setq emacs-hypervisor-extensions "mermaid")
+```
+
+When enabled, Hypervisor installs `emacs-hypervisor-markdown-mermaid-mode` for
+`markdown-mode`, `markdown-ts-mode`, and `gfm-mode`. The mode renders below
+fenced Mermaid blocks as SVG images when Emacs supports SVG, falling back to
+ASCII art otherwise. Set `emacs-hypervisor-markdown-mermaid-render-style` to
+`:svg`, `:ascii`, or `:auto` to choose explicitly. Emacs sends the current
+window width with each request, and the Elle `mmdflux` plugin uses that width
+as a fit hint for ASCII output.
+
+The binary must be built with the matching Elle plugin available. Project
+defaults live in `.elle-plugins`, so the standard build includes `mmdflux`:
+
+```bash
+just build
+```
+
+For a local install, the requested plugin libraries are copied next to the
+installed binary:
+
+```bash
+just install
+```
+
+Set `EMACS_HYPERVISOR_ELLE_PLUGINS` to override the project plugin list for
+ad hoc builds.
+
+Future extensions should follow the same shape: compile the needed Elle plugin,
+add one feature-specific runtime module that registers its settings, then add
+one Elle handler module that registers its extension methods with the generic
+dispatcher.
 
 ## Development
 

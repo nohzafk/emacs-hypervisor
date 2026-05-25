@@ -67,6 +67,8 @@
   (setq emacs-hypervisor--last-error-message nil)
   (setq emacs-hypervisor--shutdown-reason nil)
   (setq emacs-hypervisor--completed nil)
+  (setq emacs-hypervisor--next-request-id 100000)
+  (setq emacs-hypervisor--pending-responses nil)
   (setq emacs-hypervisor--finish-notified nil)
   (setq emacs-hypervisor--startup-warnings nil)
   (setq emacs-hypervisor-loaded-env-file nil)

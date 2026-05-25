@@ -6,9 +6,27 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 manifest_path="$repo_dir/host/Cargo.toml"
 lock_path="$repo_dir/host/Cargo.lock"
 seed_lock_path="$repo_dir/.elle/Cargo.lock"
+default_elle_plugins_file="$repo_dir/.elle-plugins"
 target_dir=${CARGO_TARGET_DIR:-"$repo_dir/target"}
 profile=release
 cargo_args=(build --offline --locked --manifest-path "$manifest_path" --release)
+if [ -f "$default_elle_plugins_file" ]; then
+  default_elle_plugins=$(tr '\n' ',' < "$default_elle_plugins_file" | sed 's/,$//')
+else
+  default_elle_plugins=""
+fi
+elle_plugins=${EMACS_HYPERVISOR_ELLE_PLUGINS:-$default_elle_plugins}
+
+plugin_manifest_path() {
+  local plugin_name=$1
+  local local_manifest="$repo_dir/plugins/$plugin_name/Cargo.toml"
+
+  if [ -f "$local_manifest" ]; then
+    printf '%s\n' "$local_manifest"
+  else
+    printf '%s\n' "$repo_dir/.elle/plugins/Cargo.toml"
+  fi
+}
 
 usage() {
   cat <<USAGE
@@ -22,11 +40,14 @@ Artifacts:
 - $target_dir/debug/emacs-hypervisor (with --debug)
 
 Notes:
-- builds offline against the checked-in host lockfile
+- builds requested Elle extension plugins into .elle/target/release first
+- builds the host binary offline against the checked-in host lockfile
 - if host/Cargo.lock is missing, it is seeded from .elle/Cargo.lock
 
 Environment overrides:
 - CARGO_TARGET_DIR  cargo target directory (default: $repo_dir/target)
+- EMACS_HYPERVISOR_ELLE_PLUGINS  comma-separated Elle plugins required by
+  extensions. Defaults to project plugins from .elle-plugins.
 USAGE
 }
 
@@ -72,6 +93,30 @@ EOF2
     exit 1
   fi
   cp "$seed_lock_path" "$lock_path"
+fi
+
+if [ -n "$elle_plugins" ]; then
+  IFS=',' read -r -a plugin_names <<< "$elle_plugins"
+  for plugin_name in "${plugin_names[@]}"; do
+    plugin_name=${plugin_name//[[:space:]]/}
+    [ -n "$plugin_name" ] || continue
+    plugin_manifest=$(plugin_manifest_path "$plugin_name")
+    echo "Building Elle extension plugin: $plugin_name"
+    (
+      cd "$repo_dir/.elle"
+      cargo build --release --manifest-path "$plugin_manifest" --target-dir target -p "elle-$plugin_name"
+    )
+    case "$(uname -s)" in
+      Darwin) plugin_ext=dylib ;;
+      *) plugin_ext=so ;;
+    esac
+    plugin_path="$repo_dir/.elle/target/release/libelle_${plugin_name}.${plugin_ext}"
+    if [ ! -f "$plugin_path" ]; then
+      echo "Missing Elle plugin artifact: $plugin_path" >&2
+      echo "Run: EMACS_HYPERVISOR_ELLE_PLUGINS=$elle_plugins scripts/bootstrap-elle" >&2
+      exit 1
+    fi
+  done
 fi
 
 echo "Building emacs-hypervisor ($profile)"
