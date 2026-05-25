@@ -446,15 +446,15 @@ Set `emacs-hypervisor-markdown-mermaid-render-style` to `:svg`, `:ascii`, or
 request, and the Elle `mmdflux` plugin uses that width as a fit hint for ASCII
 output.
 
-SVG rendering uses `mermaid-layered` layout and `lossy` path simplification by
-default, while theme and theme mode are left to mmdflux unless configured.
+SVG rendering uses `mermaid-layered` layout and `lossless` path simplification
+by default, while theme and theme mode are left to mmdflux unless configured.
 Tune the renderer with:
 
 | Option | Default | Purpose |
 |---|---|---|
 | `emacs-hypervisor-markdown-mermaid-layout-engine` | `"mermaid-layered"` | Selects the mmdflux layout engine. |
 | `emacs-hypervisor-markdown-mermaid-edge-preset` | `nil` | Optional mmdflux edge preset override. |
-| `emacs-hypervisor-markdown-mermaid-path-simplification` | `"lossy"` | Controls routed SVG path simplification. |
+| `emacs-hypervisor-markdown-mermaid-path-simplification` | `"lossless"` | Controls routed SVG path simplification. |
 | `emacs-hypervisor-markdown-mermaid-theme` | `nil` | Optional mmdflux SVG theme override. |
 | `emacs-hypervisor-markdown-mermaid-theme-mode` | `nil` | Optional mmdflux SVG theme output mode override. |
 

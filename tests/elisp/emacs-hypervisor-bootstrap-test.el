@@ -1730,7 +1730,7 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq (plist-get args :style) :ascii))
                    (should (equal (plist-get args :options)
                                   '(:layout-engine "mermaid-layered"
-                                    :path-simplification "lossy")))
+                                    :path-simplification "lossless")))
                    (should (integerp (plist-get (plist-get args :viewport) :width)))
                    '(:ok t :kind :text :mime "text/plain" :text "A --> B"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
@@ -1753,7 +1753,7 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq (plist-get args :style) :svg))
                    (should (equal (plist-get args :options)
                                   '(:layout-engine "mermaid-layered"
-                                    :path-simplification "lossy")))
+                                    :path-simplification "lossless")))
                    '(:ok t :kind :image :mime "image/svg+xml"
                          :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\"/></svg>"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
@@ -1966,7 +1966,7 @@ Return a cons cell of (STATUS . OUTPUT)."
                            (setq source-seen (plist-get args :source))
                            (should (equal (plist-get args :options)
                                           '(:layout-engine "mermaid-layered"
-                                            :path-simplification "lossy")))
+                                            :path-simplification "lossless")))
                            '(:ok t :kind :image :mime "image/svg+xml"
                                  :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"9\" height=\"9\"></svg>"))))
                 (setq viewer (emacs-hypervisor-markdown-mermaid--viewer-buffer
@@ -2114,7 +2114,8 @@ Return a cons cell of (STATUS . OUTPUT)."
              "      (if (and (= (get payload :ok) true)"
              "               (= (get payload :kind) :image)"
              "               (= (get payload :mime) \"image/svg+xml\")"
-             "               (string/contains? (get payload :svg) \"<svg\"))"
+             "               (string/contains? (get payload :svg) \"<svg\")"
+             "               (string/contains? (get payload :svg) \"marker-end\"))"
              "        (println \"OK\")"
              "        (begin"
              "          (println (string \"FAIL \" payload))"

@@ -27,8 +27,7 @@ fall back to ASCII text otherwise."
 (defcustom emacs-hypervisor-markdown-mermaid-layout-engine "mermaid-layered"
   "mmdflux layout engine used for SVG Mermaid renders."
   :type '(choice (const :tag "Mermaid layered" "mermaid-layered")
-                 (const :tag "Flux layered" "flux-layered")
-                 (string :tag "Custom engine"))
+                 (const :tag "Flux layered" "flux-layered"))
   :group 'emacs-hypervisor-markdown-mermaid)
 
 (defcustom emacs-hypervisor-markdown-mermaid-edge-preset nil
@@ -40,17 +39,15 @@ Set to nil to use mmdflux's engine-specific edge default."
                  (const :tag "Step" "step")
                  (const :tag "Smooth step" "smooth-step")
                  (const :tag "Curved step" "curved-step")
-                 (const :tag "Basis" "basis")
-                 (string :tag "Custom preset"))
+                 (const :tag "Basis" "basis"))
   :group 'emacs-hypervisor-markdown-mermaid)
 
-(defcustom emacs-hypervisor-markdown-mermaid-path-simplification "lossy"
+(defcustom emacs-hypervisor-markdown-mermaid-path-simplification "lossless"
   "mmdflux path simplification level used for SVG Mermaid renders."
   :type '(choice (const :tag "None" "none")
                  (const :tag "Lossless" "lossless")
                  (const :tag "Lossy" "lossy")
-                 (const :tag "Minimal" "minimal")
-                 (string :tag "Custom level"))
+                 (const :tag "Minimal" "minimal"))
   :group 'emacs-hypervisor-markdown-mermaid)
 
 (defcustom emacs-hypervisor-markdown-mermaid-theme nil
