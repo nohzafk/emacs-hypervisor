@@ -403,10 +403,8 @@ Enable it from `config.org` or `config.el`:
 
 When enabled, Hypervisor installs `emacs-hypervisor-markdown-mermaid-mode` for
 `markdown-mode`, `markdown-ts-mode`, and `gfm-mode`. The mode renders a bounded
-preview below fenced Mermaid blocks as an image, falling back to ASCII art
-otherwise. By default previews display the SVG returned by mmdflux directly.
-Set `emacs-hypervisor-markdown-mermaid-image-format` to `:png` to rasterize the
-SVG through `resvg` before display. The inline image preview is capped by
+preview below fenced Mermaid blocks natively as a vector SVG image, falling back to ASCII art
+otherwise. Previews display the compatible SVG returned by mmdflux directly. The inline image preview is capped by
 `emacs-hypervisor-markdown-mermaid-preview-max-width` and
 `emacs-hypervisor-markdown-mermaid-preview-max-height`, which default to the
 current `fill-column` width and 30% of the current window height. This mirrors
@@ -416,7 +414,7 @@ inspection happens in an image viewer.
 Click an image preview with mouse-1 to open the full diagram in a dedicated image
 viewer buffer. The viewer uses standard Emacs image-mode navigation and adds
 visible header-line hints for zoom, fit, refresh, source jump, and quit.
-Viewer buffers are backed by SVG or PNG cache files under the Hypervisor
+Viewer buffers are backed by SVG cache files under the Hypervisor
 temporary cache directory and are cleaned up automatically when Emacs exits.
 
 The Mermaid keybindings are:
@@ -448,6 +446,17 @@ Set `emacs-hypervisor-markdown-mermaid-render-style` to `:svg`, `:ascii`, or
 request, and the Elle `mmdflux` plugin uses that width as a fit hint for ASCII
 output.
 
+When window configurations change (such as during window splits or frame
+resizing), the Mermaid overlays automatically re-render (debounced) to fit the
+new viewport column width dynamically.
+
+Customize the text/ASCII diagram styling using the variable:
+
+* `emacs-hypervisor-markdown-mermaid-ascii-style`: Choose the text layout style:
+  - `unicode` (default): Uses elegant box-drawing Unicode characters (e.g. `┌`, `┐`, `─`, `│`) for clean vector-like drawing in plain text.
+  - `ansi`: Employs Unicode box-drawing characters alongside terminal-style ANSI escape colorization.
+  - `ascii`: Falls back to standard plain old ASCII (`+`, `-`, `|`).
+
 SVG rendering uses `mermaid-layered` layout and `lossless` path simplification
 by default, while theme and theme mode are left to mmdflux unless configured.
 Tune the renderer with:
@@ -459,6 +468,7 @@ Tune the renderer with:
 | `emacs-hypervisor-markdown-mermaid-path-simplification` | `"lossless"` | Controls routed SVG path simplification. |
 | `emacs-hypervisor-markdown-mermaid-theme` | `nil` | Optional mmdflux SVG theme override. |
 | `emacs-hypervisor-markdown-mermaid-theme-mode` | `nil` | Optional mmdflux SVG theme output mode override. |
+| `emacs-hypervisor-markdown-mermaid-ascii-style` | `'unicode` | Style for text renders: `unicode`, `ansi`, or `ascii`. |
 
 The Emacs option names mirror mmdflux render controls. See the
 [`mmdflux` docs](https://github.com/kevinswiber/mmdflux#readme) for accepted

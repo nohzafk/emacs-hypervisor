@@ -26,7 +26,9 @@
   (defn render-ascii [mmdflux source args]
     (let* [viewport (extensions:extension-call-field args :viewport)
            max-width (extensions:extension-call-field viewport :width)
-           [ok? ascii] (protect (mmdflux:render-ascii-fit source {:max-width max-width}))]
+           opts (render-options args)
+           fit-opts (put (put opts :max-width max-width) :padding 1)
+           [ok? ascii] (protect (mmdflux:render-ascii-fit source fit-opts))]
       (if ok?
         {:ok true :kind :text :mime "text/plain" :text ascii :renderer :mmdflux}
         (extension-error-payload :render-failed (protect-message ascii "mmdflux ASCII render failed") :renderer :mmdflux))))

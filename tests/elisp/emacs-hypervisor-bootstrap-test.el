@@ -1730,7 +1730,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq (plist-get args :style) :ascii))
                    (should (equal (plist-get args :options)
                                   '(:layout-engine "mermaid-layered"
-                                    :path-simplification "lossless")))
+                                    :path-simplification "lossless"
+                                    :unicode true
+                                    :ansi false)))
                    (should (integerp (plist-get (plist-get args :viewport) :width)))
                    '(:ok t :kind :text :mime "text/plain" :text "A --> B"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
@@ -1754,7 +1756,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq (plist-get args :style) :svg))
                    (should (equal (plist-get args :options)
                                   '(:layout-engine "mermaid-layered"
-                                    :path-simplification "lossless")))
+                                    :path-simplification "lossless"
+                                    :unicode true
+                                    :ansi false)))
                    '(:ok t :kind :image :mime "image/svg+xml"
                          :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\"/></svg>"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
@@ -1891,7 +1895,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                    '(:layout-engine "flux-layered"
                      :edge-preset "basis"
                      :path-simplification "minimal"
-                     :theme-mode "dynamic")))))
+                     :theme-mode "dynamic"
+                     :unicode true
+                     :ansi false)))))
 
 (ert-deftest emacs-hypervisor-markdown-mermaid-viewer-zoom-keys-find-image ()
   (with-temp-buffer
@@ -1973,7 +1979,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                            (setq source-seen (plist-get args :source))
                            (should (equal (plist-get args :options)
                                           '(:layout-engine "mermaid-layered"
-                                            :path-simplification "lossless")))
+                                            :path-simplification "lossless"
+                                            :unicode true
+                                            :ansi false)))
                            '(:ok t :kind :image :mime "image/svg+xml"
                                  :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"9\" height=\"9\"></svg>"))))
                 (setq viewer (emacs-hypervisor-markdown-mermaid--viewer-buffer
@@ -2011,71 +2019,6 @@ Return a cons cell of (STATUS . OUTPUT)."
     (let ((emacs-hypervisor-markdown-mermaid-render-style style))
       (should (eq (emacs-hypervisor-markdown-mermaid--render-style) :ascii)))))
 
-(ert-deftest emacs-hypervisor-markdown-mermaid-renders-png-overlay-with-resvg ()
-  (let ((temporary-file-directory (make-temp-file "hv-mermaid-test-" t)))
-    (unwind-protect
-        (with-temp-buffer
-          (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-          (let ((emacs-hypervisor-extensions "mermaid")
-                (emacs-hypervisor-markdown-mermaid-render-style :auto)
-                (emacs-hypervisor-markdown-mermaid-image-format :png)
-                call-process-args
-                create-image-args)
-            (cl-letf (((symbol-function 'image-type-available-p)
-                       (lambda (type)
-                         (eq type 'png)))
-                      ((symbol-function 'executable-find)
-                       (lambda (command)
-                         (and (equal command "resvg") "/mock/resvg")))
-                      ((symbol-function 'call-process)
-                       (lambda (program &optional _infile _buffer _display
-                                        &rest args)
-                         (setq call-process-args (cons program args))
-                         (write-region "PNGDATA" nil (cadr args) nil 'silent)
-                         0))
-                      ((symbol-function 'create-image)
-                       (lambda (&rest args)
-                         (setq create-image-args args)
-                         (append (list 'image :type (nth 1 args)
-                                       :file (car args)
-                                       :data-p (nth 2 args))
-                                 (nthcdr 3 args))))
-                      ((symbol-function 'emacs-hypervisor-extension-call)
-                       (lambda (_extension _method args &optional _timeout)
-                         (should (eq (plist-get args :style) :svg))
-                         '(:ok t :kind :image :mime "image/svg+xml"
-                               :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"></svg>"))))
-              (emacs-hypervisor-markdown-mermaid-render-buffer)
-              (let* ((overlay (car emacs-hypervisor-markdown-mermaid--overlays))
-                     (render (overlay-get
-                              overlay
-                              'emacs-hypervisor-markdown-mermaid-render))
-                     (display (overlay-get overlay 'after-string)))
-                (should (eq (plist-get render :image-type) 'png))
-                (should (string-suffix-p ".png" (plist-get render :cache-file)))
-                (should (file-exists-p (plist-get render :cache-file)))
-                (should (string-suffix-p ".svg"
-                                         (plist-get render :svg-cache-file)))
-                (should (equal (car call-process-args) "resvg"))
-                (should (equal (nth 1 call-process-args)
-                               (plist-get render :svg-cache-file)))
-                (should (equal (nth 2 call-process-args)
-                               (plist-get render :cache-file)))
-                (should (eq (nth 1 create-image-args) 'png))
-                (should-not (nth 2 create-image-args))
-                (should (eq (get-text-property 1 'display display)
-                            (plist-get render :preview-image)))))))
-      (delete-directory temporary-file-directory t))))
-
-(ert-deftest emacs-hypervisor-markdown-mermaid-auto-falls-back-to-svg-without-png ()
-  (let ((emacs-hypervisor-markdown-mermaid-render-style :auto))
-    (cl-letf (((symbol-function 'image-type-available-p)
-               (lambda (type)
-                 (eq type 'svg)))
-              ((symbol-function 'executable-find)
-               (lambda (&rest _args) nil)))
-      (should (eq (emacs-hypervisor-markdown-mermaid--render-style) :svg)))))
-
 (ert-deftest emacs-hypervisor-markdown-mermaid-auto-falls-back-to-ascii-without-svg ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
@@ -2083,7 +2026,7 @@ Return a cons cell of (STATUS . OUTPUT)."
           (emacs-hypervisor-markdown-mermaid-render-style :auto))
       (cl-letf (((symbol-function 'image-type-available-p)
                  (lambda (type)
-                   (should (memq type '(png svg)))
+                   (should (eq type 'svg))
                    nil))
                 ((symbol-function 'executable-find)
                  (lambda (&rest _args) nil))
@@ -2190,7 +2133,7 @@ Return a cons cell of (STATUS . OUTPUT)."
              "               (= (get payload :kind) :image)"
              "               (= (get payload :mime) \"image/svg+xml\")"
              "               (string/contains? (get payload :svg) \"<svg\")"
-             "               (string/contains? (get payload :svg) \"marker-end\"))"
+             "               (string/contains? (get payload :svg) \"transform=\\\"translate(\"))"
              "        (println \"OK\")"
              "        (begin"
              "          (println (string \"FAIL \" payload))"

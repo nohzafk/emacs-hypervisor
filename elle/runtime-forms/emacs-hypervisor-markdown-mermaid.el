@@ -18,32 +18,20 @@ Set to nil to disable automatic refresh while editing."
 (defcustom emacs-hypervisor-markdown-mermaid-render-style :auto
   "Preferred Mermaid render style.
 When set to `:auto', request SVG when this Emacs can display Mermaid as an
-image, either directly as SVG or through PNG rasterization, and fall back to
-ASCII text otherwise."
+image natively, and fall back to ASCII text otherwise."
   :type '(choice (const :tag "Auto" :auto)
                  (const :tag "SVG" :svg)
                  (const :tag "ASCII" :ascii))
   :group 'emacs-hypervisor-markdown-mermaid)
 
-(defcustom emacs-hypervisor-markdown-mermaid-image-format :svg
-  "Image format used to display Mermaid image renders.
-The Mermaid extension always requests SVG from the renderer. This option only
-controls the Emacs display step.
-
-The `:svg' format displays the returned SVG directly with Emacs' SVG image
-backend. The `:png' format writes the SVG to a cache file, runs `resvg' to
-rasterize that SVG to a PNG cache file, and displays the PNG. If `:png' is
-selected but `resvg' or PNG image support is unavailable, display falls back to
-direct SVG when Emacs supports SVG."
-  :type '(choice (const :tag "SVG" :svg)
-                 (const :tag "PNG via resvg" :png))
-  :group 'emacs-hypervisor-markdown-mermaid)
-
-(defcustom emacs-hypervisor-markdown-mermaid-resvg-command "resvg"
-  "Command used to rasterize Mermaid SVG renders to PNG.
-This command is only used when `emacs-hypervisor-markdown-mermaid-image-format'
-is `:png'."
-  :type 'string
+(defcustom emacs-hypervisor-markdown-mermaid-ascii-style 'unicode
+  "Style used for text Mermaid renders.
+Can be `unicode' (Unicode box-drawing characters), `ansi' (Unicode
+box-drawing characters with ANSI color codes), or `ascii' (plain ASCII
+characters)."
+  :type '(choice (const :tag "Unicode box-drawing" unicode)
+                 (const :tag "ANSI colorized Unicode" ansi)
+                 (const :tag "Plain ASCII" ascii))
   :group 'emacs-hypervisor-markdown-mermaid)
 
 (defcustom emacs-hypervisor-markdown-mermaid-layout-engine "mermaid-layered"
@@ -267,7 +255,7 @@ width rather than the source position's current column."
    (t (format "%s" value))))
 
 (defun emacs-hypervisor-markdown-mermaid--render-options ()
-  "Return mmdflux render options for SVG Mermaid requests."
+  "Return mmdflux render options for Mermaid requests."
   (let (options)
     (dolist (entry `((:layout-engine
                       . ,emacs-hypervisor-markdown-mermaid-layout-engine)
@@ -282,6 +270,11 @@ width rather than the source position's current column."
       (when-let ((value (emacs-hypervisor-markdown-mermaid--render-option
                          (cdr entry))))
         (setq options (plist-put options (car entry) value))))
+    (let ((style emacs-hypervisor-markdown-mermaid-ascii-style))
+      (setq options (plist-put options :unicode
+                               (if (memq style '(unicode ansi :unicode :ansi)) 'true 'false)))
+      (setq options (plist-put options :ansi
+                               (if (memq style '(ansi :ansi)) 'true 'false))))
     options))
 
 (defun emacs-hypervisor-markdown-mermaid--plist-delete (plist property)
@@ -318,33 +311,9 @@ raw image data instead of a file name."
                properties
                :max-height))))))
 
-(defun emacs-hypervisor-markdown-mermaid--display-format ()
-  "Return the configured Mermaid image display format."
-  (let ((format emacs-hypervisor-markdown-mermaid-image-format))
-    (cond
-     ((or (eq format :png) (eq format 'png) (equal format "png"))
-      :png)
-     (t
-      :svg))))
-
-(defun emacs-hypervisor-markdown-mermaid--png-requested-p ()
-  "Return non-nil when PNG display is requested."
-  (eq (emacs-hypervisor-markdown-mermaid--display-format) :png))
-
-(defun emacs-hypervisor-markdown-mermaid--png-supported-p ()
-  "Return non-nil when the configured PNG display path is usable.
-PNG display is opt-in. It requires both Emacs PNG image support and an
-executable `emacs-hypervisor-markdown-mermaid-resvg-command'."
-  (and (emacs-hypervisor-markdown-mermaid--png-requested-p)
-       (image-type-available-p 'png)
-       (executable-find emacs-hypervisor-markdown-mermaid-resvg-command)))
-
 (defun emacs-hypervisor-markdown-mermaid--image-display-supported-p ()
-  "Return non-nil when Mermaid SVG responses can be displayed as images.
-If PNG display is requested but unavailable, direct SVG display is still an
-acceptable fallback."
-  (or (emacs-hypervisor-markdown-mermaid--png-supported-p)
-      (image-type-available-p 'svg)))
+  "Return non-nil when Mermaid SVG responses can be displayed as images."
+  (image-type-available-p 'svg))
 
 (defun emacs-hypervisor-markdown-mermaid--cache-file-name (render &optional extension content)
   "Return a cache file path for RENDER.
@@ -358,8 +327,8 @@ name."
                  (line-number-at-pos (plist-get render :block-start))))
          (hash-source (secure-hash 'sha1 source-name))
          (hash-content (secure-hash 'sha1 (or content
-                                              (plist-get render :svg)
-                                              "")))
+                                               (plist-get render :svg)
+                                               "")))
          (extension (or extension "svg"))
          (name (format "%s-line-%d-%s-%s.%s"
                        (emacs-hypervisor-markdown-mermaid--safe-cache-part
@@ -384,75 +353,24 @@ name."
     (plist-put render :svg-cache-file cache-file)
     cache-file))
 
-(defun emacs-hypervisor-markdown-mermaid--rasterize-to-png (render)
-  "Rasterize RENDER SVG to a PNG cache file and return the file path.
-Return nil when PNG rasterization is unavailable or fails. Callers should then
-fall back to direct SVG display when possible."
-  (when (emacs-hypervisor-markdown-mermaid--png-supported-p)
-    (let* ((svg-file
-            (emacs-hypervisor-markdown-mermaid--write-svg-cache-file render))
-           (png-file
-            (emacs-hypervisor-markdown-mermaid--cache-file-name
-             render
-             "png"
-             (concat (plist-get render :svg)
-                     "\0"
-                     emacs-hypervisor-markdown-mermaid-resvg-command))))
-      (unless (and (file-exists-p png-file)
-                   (< 0 (file-attribute-size (file-attributes png-file))))
-        (let ((exit-code
-               (call-process
-                emacs-hypervisor-markdown-mermaid-resvg-command
-                nil
-                nil
-                nil
-                svg-file
-                png-file)))
-          (unless (and (integerp exit-code)
-                       (zerop exit-code)
-                       (file-exists-p png-file)
-                       (< 0 (file-attribute-size
-                             (file-attributes png-file))))
-            (when (file-exists-p png-file)
-              (delete-file png-file))
-            (setq png-file nil))))
-      (when png-file
-        (plist-put render :png-cache-file png-file)
-        png-file))))
-
 (defun emacs-hypervisor-markdown-mermaid--prepare-image-cache (render)
   "Populate display cache fields for RENDER and return RENDER.
 The renderer response is always SVG. This function turns that SVG into the
-configured display artifact: a PNG file when requested and available, otherwise
-an SVG image when Emacs can display SVG."
-  (let ((png-file (emacs-hypervisor-markdown-mermaid--rasterize-to-png render)))
-    (if png-file
-        (progn
-          (setq render (plist-put render :image-cache-file png-file))
-          (setq render (plist-put render :image-type 'png))
-          (setq render (plist-put render :cache-file png-file))
-          (setq render
-                (plist-put
-                 render
-                 :preview-image
-                 (emacs-hypervisor-markdown-mermaid--create-preview-image
-                  png-file
-                  'png
-                  nil))))
-      (when (image-type-available-p 'svg)
-        (when-let ((svg-file (plist-get render :svg-cache-file)))
-          (setq render (plist-put render :image-cache-file svg-file))
-          (setq render (plist-put render :cache-file svg-file)))
-        (setq render
-              (plist-put
-               render
-               :preview-image
-               (emacs-hypervisor-markdown-mermaid--create-preview-image
-                (plist-get render :svg)
-                'svg
-                t)))
-        (setq render (plist-put render :image-type 'svg))))
-    render))
+configured display SVG image when Emacs can display SVG."
+  (when (image-type-available-p 'svg)
+    (let ((svg-file (emacs-hypervisor-markdown-mermaid--write-svg-cache-file render)))
+      (setq render (plist-put render :image-cache-file svg-file))
+      (setq render (plist-put render :cache-file svg-file))
+      (setq render
+            (plist-put
+             render
+             :preview-image
+             (emacs-hypervisor-markdown-mermaid--create-preview-image
+              (plist-get render :svg)
+              'svg
+              t)))
+      (setq render (plist-put render :image-type 'svg))))
+  render)
 
 (defun emacs-hypervisor-markdown-mermaid--render-object (response block)
   "Normalize a successful image RESPONSE for Mermaid BLOCK."
@@ -477,7 +395,6 @@ an SVG image when Emacs can display SVG."
            :rendered-at (float-time)
            :preview-image nil
            :svg-cache-file nil
-           :png-cache-file nil
            :image-cache-file nil
            :image-type nil
            :cache-file nil))))
@@ -934,9 +851,16 @@ When RENDER is non-nil, attach it as preview metadata."
                   #'emacs-hypervisor-markdown-mermaid--schedule-refresh
                   nil
                   t)
+        (add-hook 'window-configuration-change-hook
+                  #'emacs-hypervisor-markdown-mermaid--schedule-refresh
+                  nil
+                  t)
         (when (emacs-hypervisor-extension-enabled-p "mermaid")
           (emacs-hypervisor-markdown-mermaid-render-buffer)))
     (remove-hook 'after-change-functions
+                 #'emacs-hypervisor-markdown-mermaid--schedule-refresh
+                 t)
+    (remove-hook 'window-configuration-change-hook
                  #'emacs-hypervisor-markdown-mermaid--schedule-refresh
                  t)
     (emacs-hypervisor-markdown-mermaid-clear-buffer)))
