@@ -403,26 +403,28 @@ Enable it from `config.org` or `config.el`:
 
 When enabled, Hypervisor installs `emacs-hypervisor-markdown-mermaid-mode` for
 `markdown-mode`, `markdown-ts-mode`, and `gfm-mode`. The mode renders a bounded
-preview below fenced Mermaid blocks as an SVG image when Emacs supports SVG,
-falling back to ASCII art otherwise. The inline SVG preview is capped by
+preview below fenced Mermaid blocks as an image, falling back to ASCII art
+otherwise. By default previews display the SVG returned by mmdflux directly.
+Set `emacs-hypervisor-markdown-mermaid-image-format` to `:png` to rasterize the
+SVG through `resvg` before display. The inline image preview is capped by
 `emacs-hypervisor-markdown-mermaid-preview-max-width` and
 `emacs-hypervisor-markdown-mermaid-preview-max-height`, which default to the
 current `fill-column` width and 30% of the current window height. This mirrors
 Org's inline-image posture: previews stay inside the editing context, and full
 inspection happens in an image viewer.
 
-Click an SVG preview with mouse-1 to open the full diagram in a dedicated image
+Click an image preview with mouse-1 to open the full diagram in a dedicated image
 viewer buffer. The viewer uses standard Emacs image-mode navigation and adds
 visible header-line hints for zoom, fit, refresh, source jump, and quit.
-Viewer buffers are backed by SVG cache files under the Hypervisor temporary
-cache directory and are cleaned up automatically when Emacs exits.
+Viewer buffers are backed by SVG or PNG cache files under the Hypervisor
+temporary cache directory and are cleaned up automatically when Emacs exits.
 
 The Mermaid keybindings are:
 
 | Context | Key | Action |
 |---|---|---|
 | Markdown source buffer | `C-c C-r` | Refresh Mermaid previews in the current buffer. |
-| Inline SVG preview | mouse-1 | Open the full diagram viewer. |
+| Inline image preview | mouse-1 | Open the full diagram viewer. |
 | Mermaid viewer | `+` or `=` / `-` | Enlarge or shrink the image. |
 | Mermaid viewer | `0` | Show the image at original size. |
 | Mermaid viewer | `w` | Fit the image to the window width. |
@@ -435,8 +437,8 @@ The Mermaid display commands are:
 
 | Command | Purpose |
 |---|---|
-| `emacs-hypervisor-markdown-mermaid-open-viewer` | Open the full SVG viewer for the inline preview at point. |
-| `emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse` | Open the viewer from the clicked SVG preview. |
+| `emacs-hypervisor-markdown-mermaid-open-viewer` | Open the full image viewer for the inline preview at point. |
+| `emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse` | Open the viewer from the clicked image preview. |
 | `emacs-hypervisor-markdown-mermaid-refresh-viewer` | Re-render the viewer from the original source block. |
 | `emacs-hypervisor-markdown-mermaid-close-viewer` | Close the current Mermaid viewer window. |
 | `emacs-hypervisor-markdown-mermaid-jump-to-source` | Return from the viewer to the original Markdown block. |
