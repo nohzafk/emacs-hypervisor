@@ -372,7 +372,7 @@ startup session.
 | `emacs-hypervisor-default-host` | `"github"` | Host assumed for `:repo` shorthand when no `:host` is given. |
 | `emacs-hypervisor-extensions` | `nil` | Comma-separated extension features to enable, for example `"mermaid"` or `"mermaid,egui"`; `nil` disables extensions. |
 
-## Extensions
+## Extension Design
 
 Extensions keep the Elle control plane alive after startup so Emacs can send
 typed requests over the existing `sexp-rpc` pipe. They are local-only: no
@@ -386,8 +386,16 @@ The extension layer is intentionally separate from individual plugin features:
 - `elle/extensions.lisp` owns extension request dispatch and handler lookup.
 - Each plugin feature adds its own Emacs runtime module and Elle handler module.
 
+Future extensions should follow the same shape: compile the needed Elle plugin,
+add one feature-specific runtime module that registers its settings, then add
+one Elle handler module that registers its extension methods with the generic
+dispatcher.
+
+### Mermaid Extension
+
 The first plugin feature renders Mermaid diagrams in Markdown buffers through
-the Elle `mmdflux` plugin. Enable it from `config.org` or `config.el`:
+the Elle [`mmdflux`](https://github.com/kevinswiber/mmdflux#readme) plugin.
+Enable it from `config.org` or `config.el`:
 
 ```elisp
 (setq emacs-hypervisor-extensions "mermaid")
@@ -403,9 +411,9 @@ current `fill-column` width and 30% of the current window height. This mirrors
 Org's inline-image posture: previews stay inside the editing context, and full
 inspection happens in an image viewer.
 
-Use `RET` or mouse-1 on an SVG preview to open the full diagram in a dedicated
-image viewer buffer. The viewer uses standard Emacs image-mode navigation and
-adds visible header-line hints for zoom, fit, refresh, source jump, and quit.
+Click an SVG preview with mouse-1 to open the full diagram in a dedicated image
+viewer buffer. The viewer uses standard Emacs image-mode navigation and adds
+visible header-line hints for zoom, fit, refresh, source jump, and quit.
 Viewer buffers are backed by SVG cache files under the Hypervisor temporary
 cache directory and are cleaned up automatically when Emacs exits.
 
@@ -414,7 +422,7 @@ The Mermaid keybindings are:
 | Context | Key | Action |
 |---|---|---|
 | Markdown source buffer | `C-c C-r` | Refresh Mermaid previews in the current buffer. |
-| Inline SVG preview | `RET` or mouse-1 | Open the full diagram viewer. |
+| Inline SVG preview | mouse-1 | Open the full diagram viewer. |
 | Mermaid viewer | `+` or `=` / `-` | Enlarge or shrink the image. |
 | Mermaid viewer | `0` | Show the image at original size. |
 | Mermaid viewer | `w` | Fit the image to the window width. |
@@ -427,8 +435,8 @@ The Mermaid display commands are:
 
 | Command | Purpose |
 |---|---|
-| `emacs-hypervisor-markdown-mermaid-open-viewer` | Open the full SVG viewer for the nearest inline preview. |
-| `emacs-hypervisor-markdown-mermaid-open-viewer-at-point` | Open the viewer from point or a mouse activation event. |
+| `emacs-hypervisor-markdown-mermaid-open-viewer` | Open the full SVG viewer for the inline preview at point. |
+| `emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse` | Open the viewer from the clicked SVG preview. |
 | `emacs-hypervisor-markdown-mermaid-refresh-viewer` | Re-render the viewer from the original source block. |
 | `emacs-hypervisor-markdown-mermaid-close-viewer` | Close the current Mermaid viewer window. |
 | `emacs-hypervisor-markdown-mermaid-jump-to-source` | Return from the viewer to the original Markdown block. |
@@ -437,6 +445,22 @@ Set `emacs-hypervisor-markdown-mermaid-render-style` to `:svg`, `:ascii`, or
 `:auto` to choose explicitly. Emacs sends the current window width with each
 request, and the Elle `mmdflux` plugin uses that width as a fit hint for ASCII
 output.
+
+SVG rendering uses `mermaid-layered` layout and `lossy` path simplification by
+default, while theme and theme mode are left to mmdflux unless configured.
+Tune the renderer with:
+
+| Option | Default | Purpose |
+|---|---|---|
+| `emacs-hypervisor-markdown-mermaid-layout-engine` | `"mermaid-layered"` | Selects the mmdflux layout engine. |
+| `emacs-hypervisor-markdown-mermaid-edge-preset` | `nil` | Optional mmdflux edge preset override. |
+| `emacs-hypervisor-markdown-mermaid-path-simplification` | `"lossy"` | Controls routed SVG path simplification. |
+| `emacs-hypervisor-markdown-mermaid-theme` | `nil` | Optional mmdflux SVG theme override. |
+| `emacs-hypervisor-markdown-mermaid-theme-mode` | `nil` | Optional mmdflux SVG theme output mode override. |
+
+The Emacs option names mirror mmdflux render controls. See the
+[`mmdflux` docs](https://github.com/kevinswiber/mmdflux#readme) for accepted
+values and renderer-specific behavior.
 
 The binary must be built with the matching Elle plugin available. Project
 defaults live in `.elle-plugins`, so the standard build includes `mmdflux`:
@@ -454,11 +478,6 @@ just install
 
 Set `EMACS_HYPERVISOR_ELLE_PLUGINS` to override the project plugin list for
 ad hoc builds.
-
-Future extensions should follow the same shape: compile the needed Elle plugin,
-add one feature-specific runtime module that registers its settings, then add
-one Elle handler module that registers its extension methods with the generic
-dispatcher.
 
 ## Development
 

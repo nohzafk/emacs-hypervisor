@@ -1728,6 +1728,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq extension :mermaid))
                    (should (eq method :render))
                    (should (eq (plist-get args :style) :ascii))
+                   (should (equal (plist-get args :options)
+                                  '(:layout-engine "mermaid-layered"
+                                    :path-simplification "lossy")))
                    (should (integerp (plist-get (plist-get args :viewport) :width)))
                    '(:ok t :kind :text :mime "text/plain" :text "A --> B"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
@@ -1748,13 +1751,56 @@ Return a cons cell of (STATUS . OUTPUT)."
                    (should (eq extension :mermaid))
                    (should (eq method :render))
                    (should (eq (plist-get args :style) :svg))
+                   (should (equal (plist-get args :options)
+                                  '(:layout-engine "mermaid-layered"
+                                    :path-simplification "lossy")))
                    '(:ok t :kind :image :mime "image/svg+xml"
                          :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"><rect width=\"8\" height=\"8\"/></svg>"))))
         (emacs-hypervisor-markdown-mermaid-render-buffer)
         (let ((display (overlay-get (car emacs-hypervisor-markdown-mermaid--overlays)
                                     'after-string)))
           (should (stringp display))
-          (should (get-text-property 1 'display display)))))))
+          (should (get-text-property 1 'display display))
+          (should (plist-get
+                   (get-text-property
+                    1
+                    'emacs-hypervisor-markdown-mermaid-render
+                    display)
+                   :svg)))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-click-opens-selected-preview ()
+  (skip-unless (image-type-available-p 'svg))
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  First-->A\n```\n\n")
+    (insert "```mermaid\nflowchart LR\n  Second-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :svg)
+          (count 0)
+          opened-render)
+      (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (_extension _method _args &optional _timeout)
+                   (setq count (1+ count))
+                   (list :ok t
+                         :kind :image
+                         :mime "image/svg+xml"
+                         :svg (format "<svg id=\"diagram-%d\"/>" count))))
+                ((symbol-function 'emacs-hypervisor-markdown-mermaid--open-render)
+                 (lambda (render)
+                   (setq opened-render render))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)
+        (should (= (length emacs-hypervisor-markdown-mermaid--overlays) 2))
+        (let* ((first-overlay (car (last emacs-hypervisor-markdown-mermaid--overlays)))
+               (display (overlay-get first-overlay 'after-string))
+               (event '(mouse-1 fake-position)))
+          (cl-letf (((symbol-function 'event-end)
+                     (lambda (_event) 'fake-position))
+                    ((symbol-function 'posn-string)
+                     (lambda (_position) (cons display 1)))
+                    ((symbol-function 'posn-point)
+                     (lambda (_position) (overlay-start first-overlay))))
+            (emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse event))
+          (should (string-match-p "diagram-1"
+                                  (plist-get opened-render :svg))))))))
 
 (ert-deftest emacs-hypervisor-markdown-mermaid-svg-preview-is-bounded ()
   (with-temp-buffer
@@ -1788,6 +1834,13 @@ Return a cons cell of (STATUS . OUTPUT)."
                       emacs-hypervisor-markdown-mermaid-preview-map))
           (should (eq (plist-get properties :keymap)
                       emacs-hypervisor-markdown-mermaid-preview-map))
+          (should-not (keymap-lookup
+                       emacs-hypervisor-markdown-mermaid-preview-map
+                       "RET"))
+          (should (eq (keymap-lookup
+                       emacs-hypervisor-markdown-mermaid-preview-map
+                       "<mouse-1>")
+                      #'emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse))
           (should (= (plist-get properties :max-width) 320))
           (should (= (plist-get properties :max-height) 180))
           (should (= (plist-get properties :scale) 1))
@@ -1822,6 +1875,18 @@ Return a cons cell of (STATUS . OUTPUT)."
                (lambda () 900)))
       (should (= (emacs-hypervisor-markdown-mermaid--preview-max-width) 720))
       (should (= (emacs-hypervisor-markdown-mermaid--preview-max-height) 270)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-render-options-are-configurable ()
+  (let ((emacs-hypervisor-markdown-mermaid-layout-engine "flux-layered")
+        (emacs-hypervisor-markdown-mermaid-edge-preset "basis")
+        (emacs-hypervisor-markdown-mermaid-path-simplification "minimal")
+        (emacs-hypervisor-markdown-mermaid-theme nil)
+        (emacs-hypervisor-markdown-mermaid-theme-mode :dynamic))
+    (should (equal (emacs-hypervisor-markdown-mermaid--render-options)
+                   '(:layout-engine "flux-layered"
+                     :edge-preset "basis"
+                     :path-simplification "minimal"
+                     :theme-mode "dynamic")))))
 
 (ert-deftest emacs-hypervisor-markdown-mermaid-viewer-zoom-keys-find-image ()
   (with-temp-buffer
@@ -1899,6 +1964,9 @@ Return a cons cell of (STATUS . OUTPUT)."
                         ((symbol-function 'emacs-hypervisor-extension-call)
                          (lambda (_extension _method args &optional _timeout)
                            (setq source-seen (plist-get args :source))
+                           (should (equal (plist-get args :options)
+                                          '(:layout-engine "mermaid-layered"
+                                            :path-simplification "lossy")))
                            '(:ok t :kind :image :mime "image/svg+xml"
                                  :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"9\" height=\"9\"></svg>"))))
                 (setq viewer (emacs-hypervisor-markdown-mermaid--viewer-buffer

@@ -688,7 +688,9 @@
 
 (def fake-mmdflux
   {:render-ascii-fit (fn [source opts] (string "+-- width=" (get opts :max-width) " " source " --+"))
-   :render-svg (fn [source] (string "<svg><text>" source "</text></svg>"))})
+   :render-svg (fn [source opts]
+                 (string "<svg data-layout=\"" (get opts :layout-engine) "\" data-simplify=\""
+                         (get opts :path-simplification) "\"><text>" source "</text></svg>"))})
 
 (defn extension-request [id extension method args]
   {:kind :request :id id :op :extension-call :payload {:extension extension :method method :args args}})
@@ -758,11 +760,16 @@
 (reset-stub-state)
 (extensions:dispatch-extension-call (extensions:make-registry {}
                                     {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 95 :mermaid :render {:source "flowchart TD; A-->B" :style :svg}))
+                                    (extension-request 95 :mermaid
+                                                       :render {:source "flowchart TD; A-->B"
+                                                       :style :svg
+                                                       :options {:layout-engine "mermaid-layered"
+                                                       :path-simplification "lossy"}}))
 (let* [payload (wire-protocol:from-wire (get (get stub-sent-responses 0) :payload))]
   (assert (= (get payload :kind) :image) "extension SVG payload kind")
   (assert (= (get payload :mime) "image/svg+xml") "extension SVG payload mime")
-  (assert (string/contains? (get payload :svg) "<svg>") "extension SVG payload includes svg")
+  (assert (string/contains? (get payload :svg) "<svg") "extension SVG payload includes svg")
+  (assert (string/contains? (get payload :svg) "mermaid-layered") "extension SVG forwards render options")
   (assert (= (get payload :renderer) :mmdflux) "extension SVG payload renderer"))
 
 (defn assert-mermaid-style-kind [style kind]

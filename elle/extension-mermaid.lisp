@@ -31,8 +31,11 @@
         {:ok true :kind :text :mime "text/plain" :text ascii :renderer :mmdflux}
         (extension-error-payload :render-failed (protect-message ascii "mmdflux ASCII render failed") :renderer :mmdflux))))
 
-  (defn render-svg [mmdflux source _args]
-    (let [[ok? svg] (protect (mmdflux:render-svg source))]
+  (defn render-options [args]
+    (or (extensions:extension-call-field args :options) {}))
+
+  (defn render-svg [mmdflux source args]
+    (let [[ok? svg] (protect (mmdflux:render-svg source (render-options args)))]
       (if ok?
         {:ok true :kind :image :mime "image/svg+xml" :svg svg :renderer :mmdflux}
         (extension-error-payload :render-failed (protect-message svg "mmdflux SVG render failed") :renderer :mmdflux))))

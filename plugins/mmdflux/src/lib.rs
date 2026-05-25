@@ -1,7 +1,12 @@
 //! Elle mmdflux plugin -- Mermaid ASCII rendering via the `mmdflux` crate.
 
 use elle_plugin::{EllePrimDef, ElleResult, ElleValue, SIG_ERROR};
-use mmdflux::{render_diagram, OutputFormat, RenderConfig, TextColorMode};
+use mmdflux::format::EdgePreset;
+use mmdflux::simplification::PathSimplification;
+use mmdflux::{
+    render_diagram, EngineAlgorithmId, OutputFormat, RenderConfig, SvgThemeConfig, SvgThemeMode,
+    TextColorMode,
+};
 use unicode_width::UnicodeWidthStr;
 
 elle_plugin::define_plugin!("mmdflux/", &PRIMITIVES);
@@ -55,10 +60,10 @@ extern "C" fn prim_mmdflux_render_ascii_fit(args: *const ElleValue, nargs: usize
 
 extern "C" fn prim_mmdflux_render_svg(args: *const ElleValue, nargs: usize) -> ElleResult {
     let a = api();
-    if nargs != 1 {
+    if nargs != 2 {
         return a.err(
             "arity-error",
-            &format!("mmdflux/render-svg: expected 1 argument, got {}", nargs),
+            &format!("mmdflux/render-svg: expected 2 arguments, got {}", nargs),
         );
     }
 
@@ -67,7 +72,13 @@ extern "C" fn prim_mmdflux_render_svg(args: *const ElleValue, nargs: usize) -> E
         Err(result) => return result,
     };
 
-    match render_svg_with_config(&source, RenderConfig::default(), "mmdflux/render-svg") {
+    let opts = unsafe { a.arg(args, nargs, 1) };
+    let config = match svg_config(opts) {
+        Ok(config) => config,
+        Err(result) => return result,
+    };
+
+    match render_svg_with_config(&source, config, "mmdflux/render-svg") {
         Ok(svg) => a.ok(a.string(&svg)),
         Err(result) => result,
     }
@@ -110,10 +121,112 @@ fn requested_max_width(opts: ElleValue) -> Option<usize> {
     positive_int_field(opts, "max-width").map(|value| value as usize)
 }
 
+fn svg_config(opts: ElleValue) -> Result<RenderConfig, ElleResult> {
+    let mut config = RenderConfig::default();
+
+    config.layout_engine = optional_engine_field(opts, "layout-engine")?;
+    config.edge_preset = optional_edge_preset_field(opts, "edge-preset")?;
+    config.path_simplification =
+        optional_path_simplification_field(opts, "path-simplification")?.unwrap_or_default();
+    config.svg_theme = optional_svg_theme_config(opts)?;
+
+    Ok(config)
+}
+
 fn positive_int_field(opts: ElleValue, key: &str) -> Option<i64> {
     let a = api();
     a.get_int(a.get_struct_field(opts, key))
         .filter(|value| *value > 0)
+}
+
+fn string_field(opts: ElleValue, key: &str) -> Option<String> {
+    let a = api();
+    a.get_string(a.get_struct_field(opts, key))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn optional_engine_field(
+    opts: ElleValue,
+    key: &str,
+) -> Result<Option<EngineAlgorithmId>, ElleResult> {
+    match string_field(opts, key) {
+        Some(value) => EngineAlgorithmId::parse(&value).map(Some).map_err(|error| {
+            api().err(
+                "mmdflux-option-error",
+                &format!("mmdflux/render-svg: {key}: {error}"),
+            )
+        }),
+        None => Ok(None),
+    }
+}
+
+fn optional_edge_preset_field(
+    opts: ElleValue,
+    key: &str,
+) -> Result<Option<EdgePreset>, ElleResult> {
+    match string_field(opts, key) {
+        Some(value) => EdgePreset::parse(&value).map(Some).map_err(|error| {
+            api().err(
+                "mmdflux-option-error",
+                &format!("mmdflux/render-svg: {key}: {error}"),
+            )
+        }),
+        None => Ok(None),
+    }
+}
+
+fn optional_path_simplification_field(
+    opts: ElleValue,
+    key: &str,
+) -> Result<Option<PathSimplification>, ElleResult> {
+    match string_field(opts, key) {
+        Some(value) => PathSimplification::parse(&value)
+            .map(Some)
+            .map_err(|error| {
+                api().err(
+                    "mmdflux-option-error",
+                    &format!("mmdflux/render-svg: {key}: {error}"),
+                )
+            }),
+        None => Ok(None),
+    }
+}
+
+fn optional_svg_theme_config(opts: ElleValue) -> Result<Option<SvgThemeConfig>, ElleResult> {
+    let theme_name = string_field(opts, "theme");
+    let theme_mode = optional_svg_theme_mode_field(opts, "theme-mode")?;
+
+    if theme_name.is_none() && theme_mode.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(SvgThemeConfig {
+        name: theme_name,
+        mode: theme_mode.unwrap_or_default(),
+        ..SvgThemeConfig::default()
+    }))
+}
+
+fn optional_svg_theme_mode_field(
+    opts: ElleValue,
+    key: &str,
+) -> Result<Option<SvgThemeMode>, ElleResult> {
+    match string_field(opts, key) {
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "static" => Ok(Some(SvgThemeMode::Static)),
+            "dynamic" => Ok(Some(SvgThemeMode::Dynamic)),
+            _ => Err(api().err(
+                "mmdflux-option-error",
+                &format!(
+                    "mmdflux/render-svg: {key}: unknown SVG theme mode {value:?} \
+                     (expected one of: static, dynamic)"
+                ),
+            )),
+        },
+        None => Ok(None),
+    }
 }
 
 fn render_ascii_fit(
@@ -221,10 +334,10 @@ static PRIMITIVES: &[EllePrimDef] = &[
         "mmdflux/render-svg",
         prim_mmdflux_render_svg,
         SIG_ERROR,
-        1,
-        "Render a Mermaid diagram to SVG.",
+        2,
+        "Render a Mermaid diagram to SVG with options.",
         "mmdflux",
-        r#"(mmdflux/render-svg "flowchart LR; A-->B-->C")"#,
+        r#"(mmdflux/render-svg "flowchart LR; A-->B-->C" {:layout-engine "mermaid-layered"})"#,
     ),
 ];
 

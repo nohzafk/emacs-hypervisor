@@ -24,6 +24,56 @@ fall back to ASCII text otherwise."
                  (const :tag "ASCII" :ascii))
   :group 'emacs-hypervisor-markdown-mermaid)
 
+(defcustom emacs-hypervisor-markdown-mermaid-layout-engine "mermaid-layered"
+  "mmdflux layout engine used for SVG Mermaid renders."
+  :type '(choice (const :tag "Mermaid layered" "mermaid-layered")
+                 (const :tag "Flux layered" "flux-layered")
+                 (string :tag "Custom engine"))
+  :group 'emacs-hypervisor-markdown-mermaid)
+
+(defcustom emacs-hypervisor-markdown-mermaid-edge-preset nil
+  "mmdflux SVG edge preset used for Mermaid renders.
+Set to nil to use mmdflux's engine-specific edge default."
+  :type '(choice (const :tag "Auto" nil)
+                 (const :tag "Straight" "straight")
+                 (const :tag "Polyline" "polyline")
+                 (const :tag "Step" "step")
+                 (const :tag "Smooth step" "smooth-step")
+                 (const :tag "Curved step" "curved-step")
+                 (const :tag "Basis" "basis")
+                 (string :tag "Custom preset"))
+  :group 'emacs-hypervisor-markdown-mermaid)
+
+(defcustom emacs-hypervisor-markdown-mermaid-path-simplification "lossy"
+  "mmdflux path simplification level used for SVG Mermaid renders."
+  :type '(choice (const :tag "None" "none")
+                 (const :tag "Lossless" "lossless")
+                 (const :tag "Lossy" "lossy")
+                 (const :tag "Minimal" "minimal")
+                 (string :tag "Custom level"))
+  :group 'emacs-hypervisor-markdown-mermaid)
+
+(defcustom emacs-hypervisor-markdown-mermaid-theme nil
+  "mmdflux named SVG theme used for Mermaid renders.
+Set to nil to let mmdflux use the diagram/default theme."
+  :type '(choice (const :tag "Default mmdflux theme" nil)
+                 (const :tag "Zinc light" "zinc-light")
+                 (const :tag "Zinc dark" "zinc-dark")
+                 (const :tag "Default Mermaid" "default")
+                 (const :tag "Dark Mermaid" "dark")
+                 (const :tag "Forest Mermaid" "forest")
+                 (const :tag "Neutral Mermaid" "neutral")
+                 (string :tag "Custom theme"))
+  :group 'emacs-hypervisor-markdown-mermaid)
+
+(defcustom emacs-hypervisor-markdown-mermaid-theme-mode nil
+  "mmdflux SVG theme output mode.
+Set to nil to let mmdflux use its default theme mode."
+  :type '(choice (const :tag "Default mmdflux mode" nil)
+                 (const :tag "Static" "static")
+                 (const :tag "Dynamic CSS variables" "dynamic"))
+  :group 'emacs-hypervisor-markdown-mermaid)
+
 (defcustom emacs-hypervisor-markdown-mermaid-preview-max-width 'fill-column
   "Maximum inline SVG preview width.
 Allowed values are `fill-column', `window', an integer pixel width, or nil for
@@ -79,10 +129,8 @@ flickers during manual verification."
 (defvar emacs-hypervisor-markdown-mermaid-preview-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map image-map)
-    (define-key map (kbd "RET")
-                #'emacs-hypervisor-markdown-mermaid-open-viewer-at-point)
     (define-key map [mouse-1]
-                #'emacs-hypervisor-markdown-mermaid-open-viewer-at-point)
+                #'emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse)
     map)
   "Keymap for inline Mermaid preview images.")
 
@@ -189,6 +237,33 @@ AXIS is either `width' or `height'."
 The rendered overlay starts on a fresh line, so use the visible text area
 width rather than the source position's current column."
   (emacs-hypervisor-markdown-mermaid--visible-width))
+
+(defun emacs-hypervisor-markdown-mermaid--render-option (value)
+  "Normalize Mermaid render option VALUE for the extension payload."
+  (cond
+   ((null value) nil)
+   ((keywordp value) (substring (symbol-name value) 1))
+   ((symbolp value) (symbol-name value))
+   ((stringp value) value)
+   (t (format "%s" value))))
+
+(defun emacs-hypervisor-markdown-mermaid--render-options ()
+  "Return mmdflux render options for SVG Mermaid requests."
+  (let (options)
+    (dolist (entry `((:layout-engine
+                      . ,emacs-hypervisor-markdown-mermaid-layout-engine)
+                     (:edge-preset
+                      . ,emacs-hypervisor-markdown-mermaid-edge-preset)
+                     (:path-simplification
+                      . ,emacs-hypervisor-markdown-mermaid-path-simplification)
+                     (:theme
+                      . ,emacs-hypervisor-markdown-mermaid-theme)
+                     (:theme-mode
+                      . ,emacs-hypervisor-markdown-mermaid-theme-mode)))
+      (when-let ((value (emacs-hypervisor-markdown-mermaid--render-option
+                         (cdr entry))))
+        (setq options (plist-put options (car entry) value))))
+    options))
 
 (defun emacs-hypervisor-markdown-mermaid--plist-delete (plist property)
   "Return PLIST without PROPERTY and its value."
@@ -409,36 +484,63 @@ width rather than the source position's current column."
      (overlay-get overlay 'emacs-hypervisor-markdown-mermaid-render))
    (overlays-at position)))
 
+(defun emacs-hypervisor-markdown-mermaid--render-in-string (string-position)
+  "Return Mermaid render metadata from STRING-POSITION.
+STRING-POSITION has the shape returned by `posn-string'."
+  (when (consp string-position)
+    (let ((string (car string-position))
+          (position (cdr string-position)))
+      (when (and (stringp string)
+                 (integerp position)
+                 (< 0 (length string)))
+        (let ((position (min position (1- (length string)))))
+          (get-text-property
+           (max 0 position)
+           'emacs-hypervisor-markdown-mermaid-render
+           string))))))
+
+(defun emacs-hypervisor-markdown-mermaid--render-from-event (event)
+  "Return Mermaid render metadata from mouse EVENT, or nil."
+  (when (and event (consp event))
+    (let* ((position (event-end event))
+           (string-render
+            (emacs-hypervisor-markdown-mermaid--render-in-string
+             (posn-string position)))
+           (point (posn-point position))
+           (overlay (and point
+                         (emacs-hypervisor-markdown-mermaid--overlay-at
+                          point))))
+      (or string-render
+          (and overlay
+               (overlay-get overlay
+                            'emacs-hypervisor-markdown-mermaid-render))))))
+
+(defun emacs-hypervisor-markdown-mermaid--open-render (render)
+  "Open a Mermaid viewer for RENDER."
+  (unless render
+    (user-error "No Mermaid preview at point"))
+  (let ((buffer (emacs-hypervisor-markdown-mermaid--viewer-buffer render)))
+    (emacs-hypervisor-markdown-mermaid--display-viewer-buffer buffer)
+    (when emacs-hypervisor-markdown-mermaid-viewer-fit-on-open
+      (ignore-errors
+        (image-transform-fit-to-width)))))
+
 (defun emacs-hypervisor-markdown-mermaid-open-viewer (&optional position)
-  "Open the Mermaid diagram viewer for the preview near POSITION."
+  "Open the Mermaid diagram viewer for the preview at POSITION."
   (interactive "d")
   (let* ((overlay
-          (or (emacs-hypervisor-markdown-mermaid--overlay-at
-               (or position (point)))
-              (cl-find-if
-               (lambda (candidate)
-                 (overlay-get candidate
-                              'emacs-hypervisor-markdown-mermaid-render))
-               emacs-hypervisor-markdown-mermaid--overlays)))
+          (emacs-hypervisor-markdown-mermaid--overlay-at
+           (or position (point))))
          (render (and overlay
                       (overlay-get overlay
                                    'emacs-hypervisor-markdown-mermaid-render))))
-    (unless render
-      (user-error "No Mermaid preview at point"))
-    (let ((buffer (emacs-hypervisor-markdown-mermaid--viewer-buffer render)))
-      (emacs-hypervisor-markdown-mermaid--display-viewer-buffer buffer)
-      (when emacs-hypervisor-markdown-mermaid-viewer-fit-on-open
-        (ignore-errors
-          (image-transform-fit-to-width))))))
+    (emacs-hypervisor-markdown-mermaid--open-render render)))
 
-(defun emacs-hypervisor-markdown-mermaid-open-viewer-at-point (&optional event)
-  "Open the Mermaid diagram viewer at point or mouse EVENT."
+(defun emacs-hypervisor-markdown-mermaid-open-viewer-at-mouse (event)
+  "Open the Mermaid diagram viewer for the preview clicked by mouse EVENT."
   (interactive (list last-nonmenu-event))
-  (let ((position
-         (if (and event (consp event))
-             (posn-point (event-end event))
-           (point))))
-    (emacs-hypervisor-markdown-mermaid-open-viewer position)))
+  (emacs-hypervisor-markdown-mermaid--open-render
+   (emacs-hypervisor-markdown-mermaid--render-from-event event)))
 
 (defun emacs-hypervisor-markdown-mermaid--render-source (source)
   "Render Mermaid SOURCE as SVG and return the extension response."
@@ -447,6 +549,7 @@ width rather than the source position's current column."
    :render
    (list :source source
          :style :svg
+         :options (emacs-hypervisor-markdown-mermaid--render-options)
          :viewport (list :width
                          (emacs-hypervisor-markdown-mermaid--visible-width)))
    10))
@@ -577,7 +680,7 @@ When RENDER is non-nil, attach it as preview metadata."
       (overlay-put overlay 'emacs-hypervisor-markdown-mermaid-render render)
       (overlay-put overlay
                    'help-echo
-                   "RET or mouse-1: open diagram viewer; C-c C-r: refresh")
+                   "mouse-1: open diagram viewer; C-c C-r: refresh")
       (overlay-put overlay
                    'keymap
                    emacs-hypervisor-markdown-mermaid-preview-map))
@@ -603,8 +706,10 @@ When RENDER is non-nil, attach it as preview metadata."
                       (propertize " "
                                   'display image
                                   'keymap emacs-hypervisor-markdown-mermaid-preview-map
+                                  'emacs-hypervisor-markdown-mermaid-render
+                                  render
                                   'help-echo
-                                  "RET or mouse-1: open diagram viewer; C-c C-r: refresh")
+                                  "mouse-1: open diagram viewer; C-c C-r: refresh")
                       "\n")
               :render render))
          "\n[Hypervisor Mermaid] unsupported image response\n")))
@@ -623,6 +728,7 @@ When RENDER is non-nil, attach it as preview metadata."
            :render
            (list :source source
                  :style (emacs-hypervisor-markdown-mermaid--render-style)
+                 :options (emacs-hypervisor-markdown-mermaid--render-options)
                  :viewport (list :width
                                  (emacs-hypervisor-markdown-mermaid--viewport-width block-end)))
            10)))
