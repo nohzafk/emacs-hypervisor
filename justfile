@@ -27,6 +27,9 @@ install bin_dir="$HOME/.local/bin": build
         plugin="${plugin//[[:space:]]/}"; \
         [ -n "$plugin" ] || continue; \
         cp "{{justfile_directory()}}/.elle/target/release/libelle_${plugin}.${ext}" "{{bin_dir}}/libelle_${plugin}.${ext}"; \
+        if [ "$(uname)" = "Darwin" ]; then \
+          codesign --force --sign - "{{bin_dir}}/libelle_${plugin}.${ext}"; \
+        fi; \
       done; \
     fi
     if [ "$(uname)" = "Darwin" ]; then \
