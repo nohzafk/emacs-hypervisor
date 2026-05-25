@@ -1756,6 +1756,173 @@ Return a cons cell of (STATUS . OUTPUT)."
           (should (stringp display))
           (should (get-text-property 1 'display display)))))))
 
+(ert-deftest emacs-hypervisor-markdown-mermaid-svg-preview-is-bounded ()
+  (with-temp-buffer
+    (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+    (let ((emacs-hypervisor-extensions "mermaid")
+          (emacs-hypervisor-markdown-mermaid-render-style :svg)
+          (emacs-hypervisor-markdown-mermaid-preview-max-width 320)
+          (emacs-hypervisor-markdown-mermaid-preview-max-height 180)
+          create-image-args)
+      (cl-letf (((symbol-function 'image-type-available-p)
+                 (lambda (type)
+                   (should (eq type 'svg))
+                   t))
+                ((symbol-function 'create-image)
+                 (lambda (&rest args)
+                   (setq create-image-args args)
+                   (append '(image :type svg) (nthcdr 3 args))))
+                ((symbol-function 'emacs-hypervisor-extension-call)
+                 (lambda (_extension _method args &optional _timeout)
+                   (should (eq (plist-get args :style) :svg))
+                   '(:ok t :kind :image :mime "image/svg+xml"
+                         :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"></svg>"))))
+        (emacs-hypervisor-markdown-mermaid-render-buffer)
+        (let* ((overlay (car emacs-hypervisor-markdown-mermaid--overlays))
+               (render (overlay-get overlay
+                                    'emacs-hypervisor-markdown-mermaid-render))
+               (image (plist-get render :preview-image))
+               (properties (nthcdr 3 create-image-args)))
+          (should (eq (plist-get render :kind) 'image))
+          (should (eq (overlay-get overlay 'keymap)
+                      emacs-hypervisor-markdown-mermaid-preview-map))
+          (should (eq (plist-get properties :keymap)
+                      emacs-hypervisor-markdown-mermaid-preview-map))
+          (should (= (plist-get properties :max-width) 320))
+          (should (= (plist-get properties :max-height) 180))
+          (should (= (plist-get properties :scale) 1))
+          (should (eq image (get-text-property
+                             1
+                             'display
+                             (overlay-get overlay 'after-string)))))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-preview-retries-without-max-height ()
+  (let ((emacs-hypervisor-markdown-mermaid-preview-max-width 320)
+        (emacs-hypervisor-markdown-mermaid-preview-max-height 180)
+        calls)
+    (cl-letf (((symbol-function 'create-image)
+               (lambda (&rest args)
+                 (push args calls)
+                 (if (= (length calls) 1)
+                     (error "backend rejected :max-height")
+                   (append '(image :type svg) (nthcdr 3 args))))))
+      (let ((image (emacs-hypervisor-markdown-mermaid--create-preview-image
+                    "<svg/>")))
+        (should image)
+        (should (= (length calls) 2))
+        (should-not (plist-member (nthcdr 3 (car calls)) :max-height))))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-preview-defaults-to-fill-column ()
+  (let ((emacs-hypervisor-markdown-mermaid-preview-max-width 'fill-column)
+        (emacs-hypervisor-markdown-mermaid-preview-max-height 0.30)
+        (fill-column 72))
+    (cl-letf (((symbol-function 'frame-char-width)
+               (lambda (&rest _args) 10))
+              ((symbol-function 'emacs-hypervisor-markdown-mermaid--window-pixel-height)
+               (lambda () 900)))
+      (should (= (emacs-hypervisor-markdown-mermaid--preview-max-width) 720))
+      (should (= (emacs-hypervisor-markdown-mermaid--preview-max-height) 270)))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-viewer-zoom-keys-find-image ()
+  (with-temp-buffer
+    (let (zoom-position)
+      (insert (propertize " " 'display '(image :type svg)))
+      (insert "\n")
+      (goto-char (point-max))
+      (cl-letf (((symbol-function 'image-increase-size)
+                 (lambda (_n position)
+                   (setq zoom-position position))))
+        (emacs-hypervisor-markdown-mermaid-viewer-zoom-in)
+        (should (= zoom-position (point-min)))
+        (should (= (point) (point-min)))))
+    (should (eq (keymap-lookup
+                 emacs-hypervisor-markdown-mermaid-viewer-mode-map
+                 "=")
+                #'emacs-hypervisor-markdown-mermaid-viewer-zoom-in))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-open-viewer-writes-cache ()
+  (skip-unless (image-type-available-p 'svg))
+  (let ((temporary-file-directory (make-temp-file "hv-mermaid-test-" t)))
+    (unwind-protect
+        (with-temp-buffer
+          (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+          (let* ((block (car (emacs-hypervisor-markdown-mermaid--source-blocks)))
+                 (render (emacs-hypervisor-markdown-mermaid--render-object
+                          '(:ok t :kind :image :mime "image/svg+xml"
+                                :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"></svg>")
+                          block))
+                 viewer)
+            (cl-letf (((symbol-function
+                        'emacs-hypervisor-markdown-mermaid-viewer-mode)
+                       (lambda ()
+                         (setq major-mode
+                               'emacs-hypervisor-markdown-mermaid-viewer-mode))))
+              (setq viewer (emacs-hypervisor-markdown-mermaid--viewer-buffer
+                            render))
+              (with-current-buffer viewer
+                (should (eq major-mode
+                            'emacs-hypervisor-markdown-mermaid-viewer-mode))
+                (should buffer-read-only)
+                (should-not (buffer-modified-p))
+                (should (string-match-p "\\+/= zoom in"
+                                        (format "%s" header-line-format)))
+                (should (eq emacs-hypervisor-markdown-mermaid-viewer-source-buffer
+                            (plist-get render :source-buffer)))
+                (should (file-exists-p
+                         emacs-hypervisor-markdown-mermaid-viewer-cache-file))
+                (should (string-prefix-p
+                         (expand-file-name "emacs-hypervisor/mermaid/"
+                                           temporary-file-directory)
+                         emacs-hypervisor-markdown-mermaid-viewer-cache-file)))
+              (kill-buffer viewer))))
+      (delete-directory temporary-file-directory t))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-refresh-viewer-rerenders-source ()
+  (skip-unless (image-type-available-p 'svg))
+  (let ((temporary-file-directory (make-temp-file "hv-mermaid-test-" t)))
+    (unwind-protect
+        (let (source-seen)
+          (with-temp-buffer
+            (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
+            (let* ((block (car (emacs-hypervisor-markdown-mermaid--source-blocks)))
+                   (render (emacs-hypervisor-markdown-mermaid--write-cache-file
+                            (emacs-hypervisor-markdown-mermaid--render-object
+                             '(:ok t :kind :image :mime "image/svg+xml"
+                                   :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"></svg>")
+                             block)))
+                   viewer)
+              (cl-letf (((symbol-function
+                          'emacs-hypervisor-markdown-mermaid-viewer-mode)
+                         (lambda ()
+                           (setq major-mode
+                                 'emacs-hypervisor-markdown-mermaid-viewer-mode)))
+                        ((symbol-function 'emacs-hypervisor-extension-call)
+                         (lambda (_extension _method args &optional _timeout)
+                           (setq source-seen (plist-get args :source))
+                           '(:ok t :kind :image :mime "image/svg+xml"
+                                 :svg "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"9\" height=\"9\"></svg>"))))
+                (setq viewer (emacs-hypervisor-markdown-mermaid--viewer-buffer
+                              render))
+                (with-current-buffer viewer
+                  (emacs-hypervisor-markdown-mermaid-refresh-viewer)
+                  (should (string-match-p "flowchart LR" source-seen))
+                  (should-not (string-match-p "```" source-seen))))
+              (kill-buffer viewer))))
+      (delete-directory temporary-file-directory t))))
+
+(ert-deftest emacs-hypervisor-markdown-mermaid-cleanup-removes-cache-directory ()
+  (let ((temporary-file-directory (make-temp-file "hv-mermaid-test-" t)))
+    (unwind-protect
+        (let ((directory (emacs-hypervisor-markdown-mermaid--cache-directory)))
+          (write-region "<svg/>" nil (expand-file-name "one.svg" directory)
+                        nil
+                        'silent)
+          (should (file-directory-p directory))
+          (emacs-hypervisor-markdown-mermaid--cleanup-cache)
+          (should-not (file-exists-p directory)))
+      (when (file-directory-p temporary-file-directory)
+        (delete-directory temporary-file-directory t)))))
+
 (ert-deftest emacs-hypervisor-markdown-mermaid-render-style-accepts-common-forms ()
   (cl-letf (((symbol-function 'image-type-available-p)
              (lambda (type)
