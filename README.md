@@ -379,21 +379,21 @@ typed requests over the existing `sexp-rpc` pipe. They are local-only: no
 network listener is opened, and Emacs sends data payloads rather than remote
 `:eval` forms.
 
-The extension layer is intentionally separate from individual plugin features:
+The extension layer is intentionally separate from individual extension features:
 
 - `emacs-hypervisor-extensions.el` owns the generic extension list option and
   feature settings registration.
 - `elle/extensions.lisp` owns extension request dispatch and handler lookup.
-- Each plugin feature adds its own Emacs runtime module and Elle handler module.
+- Each extension feature adds its own Emacs runtime module and Elle handler module.
 
-Future extensions should follow the same shape: compile the needed Elle plugin,
+Future extensions should follow the same shape: add any required Elle plugin,
 add one feature-specific runtime module that registers its settings, then add
 one Elle handler module that registers its extension methods with the generic
 dispatcher.
 
 ### Mermaid Extension
 
-The first plugin feature renders Mermaid diagrams in Markdown buffers through
+The first extension feature renders Mermaid diagrams in Markdown buffers through
 the Elle [`mmdflux`](https://github.com/kevinswiber/mmdflux#readme) plugin.
 Enable it from `config.org` or `config.el`:
 
@@ -474,15 +474,15 @@ The Emacs option names mirror mmdflux render controls. See the
 [`mmdflux` docs](https://github.com/kevinswiber/mmdflux#readme) for accepted
 values and renderer-specific behavior.
 
-The binary must be built with the matching Elle extension plugin available.
-Project defaults live in `.elle-plugins`, so the standard build includes
-`mmdflux` without building the local-development MCP plugins:
+The binary must be built with the matching runtime Elle plugin available.
+Runtime Elle plugin defaults live in `.elle-plugins`, so the standard build
+includes `mmdflux` without building the local-development MCP Elle plugins:
 
 ```bash
 just build
 ```
 
-For local development that also needs Elle MCP plugin artifacts, build through
+For local development that also needs MCP Elle plugin artifacts, build through
 the developer recipe:
 
 ```bash
@@ -490,17 +490,17 @@ just dev
 ```
 
 `just dev` keeps the normal Hypervisor build path and also builds Elle's local
-MCP plugin artifacts. `just install` depends on `just dev`, so local Emacs
+MCP Elle plugin artifacts. `just install` depends on `just dev`, so local Emacs
 testing leaves Codex MCP support ready too.
 
-For a local install, the requested plugin libraries are copied next to the
-installed binary:
+For a local install, the requested runtime Elle plugin libraries are copied next
+to the installed binary:
 
 ```bash
 just install
 ```
 
-Set `EMACS_HYPERVISOR_ELLE_PLUGINS` to override the project plugin list for
+Set `EMACS_HYPERVISOR_ELLE_PLUGINS` to override the runtime Elle plugin list for
 ad hoc builds.
 
 ## Development
@@ -508,8 +508,8 @@ ad hoc builds.
 For working on Hypervisor itself, not normal user configuration.
 
 ```bash
-just build                   # bootstrap Elle, build .elle-plugins, build binary
-just dev                     # same build, plus local MCP plugin artifacts
+just build                   # build runtime Elle plugins and binary
+just dev                     # same build, plus MCP Elle plugin artifacts
 just fmt                     # format Elle Lisp files at 120 columns
 just install-hooks           # enable repo Git hooks
 just test                    # run tests

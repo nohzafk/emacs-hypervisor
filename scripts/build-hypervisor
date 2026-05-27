@@ -40,14 +40,14 @@ Artifacts:
 - $target_dir/debug/emacs-hypervisor (with --debug)
 
 Notes:
-- builds requested Elle extension plugins into .elle/target/release first
+- builds requested runtime Elle plugins into .elle/target/release first
 - builds the host binary offline against the checked-in host lockfile
 - if host/Cargo.lock is missing, it is seeded from .elle/Cargo.lock
 
 Environment overrides:
 - CARGO_TARGET_DIR  cargo target directory (default: $repo_dir/target)
-- EMACS_HYPERVISOR_ELLE_PLUGINS  comma-separated Elle plugins required by
-  extensions. Defaults to project plugins from .elle-plugins.
+- EMACS_HYPERVISOR_ELLE_PLUGINS  comma-separated Elle plugins required at
+  runtime. Defaults to runtime Elle plugins from .elle-plugins.
 USAGE
 }
 
@@ -74,7 +74,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 if [ -n "$elle_plugins" ] && ! command -v git >/dev/null 2>&1; then
-  echo "git is required to initialize Elle submodules for extension plugins" >&2
+  echo "git is required to initialize Elle submodules for runtime Elle plugins" >&2
   exit 1
 fi
 
@@ -101,7 +101,7 @@ EOF2
 fi
 
 if [ -n "$elle_plugins" ]; then
-  echo "Initializing Elle submodules (needed for extension plugins)"
+  echo "Initializing Elle submodules (needed for runtime Elle plugins)"
   git -C "$repo_dir/.elle" submodule update --init --recursive
 
   IFS=',' read -r -a plugin_names <<< "$elle_plugins"
@@ -109,7 +109,7 @@ if [ -n "$elle_plugins" ]; then
     plugin_name=${plugin_name//[[:space:]]/}
     [ -n "$plugin_name" ] || continue
     plugin_manifest=$(plugin_manifest_path "$plugin_name")
-    echo "Building Elle extension plugin: $plugin_name"
+    echo "Building runtime Elle plugin: $plugin_name"
     (
       cd "$repo_dir/.elle"
       cargo build --release --manifest-path "$plugin_manifest" --target-dir target -p "elle-$plugin_name"
@@ -120,7 +120,7 @@ if [ -n "$elle_plugins" ]; then
     esac
     plugin_path="$repo_dir/.elle/target/release/libelle_${plugin_name}.${plugin_ext}"
     if [ ! -f "$plugin_path" ]; then
-      echo "Missing Elle plugin artifact: $plugin_path" >&2
+      echo "Missing runtime Elle plugin artifact: $plugin_path" >&2
       echo "Check .elle-plugins or EMACS_HYPERVISOR_ELLE_PLUGINS, then rerun scripts/build-hypervisor." >&2
       exit 1
     fi

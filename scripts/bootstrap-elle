@@ -26,16 +26,16 @@ usage() {
 usage: scripts/bootstrap-elle [--checkout-only] [--mcp-plugins]
 
 Clone Elle into the repo-local .elle checkout if needed, build the release
-binary.  With --mcp-plugins, also initialize submodules and build the MCP
+binary.  With --mcp-plugins, also initialize submodules and build the MCP Elle
 plugins (oxigraph, syn) for development use.
 
 With --checkout-only, stop after cloning/fetching the repo-local Elle checkout
 and checking out the configured ref.  This is useful before restoring cargo
 target caches that live below .elle.
 
-Hypervisor extension plugins are built by scripts/build-hypervisor from the
-project plugin list in .elle-plugins.  MCP plugins are local development
-support and are not part of the normal Hypervisor build.
+Runtime Elle plugins from .elle-plugins are built by scripts/build-hypervisor.
+MCP Elle plugins are local development tooling and are not part of the normal
+Hypervisor runtime build.
 
 Artifacts (always):
 - .elle/target/release/elle
@@ -50,9 +50,9 @@ Environment overrides:
 - ELLE_REF  pin to a specific commit/branch/tag
             (default: project pin from $default_elle_ref_file; set ELLE_REF= to keep
             the checkout at its current ref)
-- ELLE_BUILD_MCP_PLUGINS  when set to a non-empty value, build the MCP plugins
+- ELLE_BUILD_MCP_PLUGINS  when set to a non-empty value, build the MCP Elle plugins
   (oxigraph, syn) in addition to the elle binary.  Equivalent to --mcp-plugins.
-- LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script
+- LIBCLANG_PATH  passed through to the MCP Elle plugin build; on macOS this script
   auto-detects Xcode, Command Line Tools, and common package-manager libclang
   installs when available
 EOF
@@ -206,10 +206,10 @@ echo "Building Elle release binary"
 )
 
 if [ -n "$elle_build_mcp_plugins" ]; then
-  echo "Initializing Elle submodules (needed for MCP plugins)"
+  echo "Initializing Elle submodules (needed for MCP Elle plugins)"
   git -C "$elle_dir" submodule update --init --recursive
 
-  echo "Building Elle MCP plugins"
+  echo "Building MCP Elle plugins"
   if libclang_path=$(detect_libclang_path); then
     echo "Using LIBCLANG_PATH=$libclang_path"
     (
@@ -223,7 +223,7 @@ if [ -n "$elle_build_mcp_plugins" ]; then
     )
   fi
 else
-  echo "Skipping MCP plugins (pass --mcp-plugins or ELLE_BUILD_MCP_PLUGINS=1 to build)"
+  echo "Skipping MCP Elle plugins (pass --mcp-plugins or ELLE_BUILD_MCP_PLUGINS=1 to build)"
 fi
 
 cat <<EOF

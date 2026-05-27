@@ -12,7 +12,7 @@ usage() {
   cat <<USAGE
 usage: scripts/install-hypervisor [BIN_DIR]
 
-Install the built emacs-hypervisor binary and requested Elle extension plugin
+Install the built emacs-hypervisor binary and requested runtime Elle plugin
 libraries into BIN_DIR.
 
 Default BIN_DIR: $HOME/.local/bin

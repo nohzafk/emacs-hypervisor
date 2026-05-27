@@ -166,10 +166,10 @@ just dev
 These recipes:
 
 - `just build` bootstraps the repo-local Elle checkout, builds the Elle release
-  binary, builds Hypervisor extension plugins from `.elle-plugins`, and builds
-  the host binary without building MCP plugins
+  binary, builds runtime Elle plugins from `.elle-plugins`, and builds the host
+  binary without building MCP Elle plugins
 - `just dev` runs the same build and also produces the local-development MCP
-  plugin artifacts needed by the MCP server
+  Elle plugin artifacts needed by the MCP server
 - `just install` depends on `just dev`, so local Emacs testing keeps MCP
   support ready for Codex
 - the MCP server is launched by MCP configuration, not by a Just recipe; it uses
@@ -179,10 +179,10 @@ Current practical setup for this machine:
 
 1. build the repo-local Elle checkout and Hypervisor binary:
    - `just build`
-2. include MCP plugin artifacts when local MCP tooling is needed:
+2. include MCP Elle plugin artifacts when local MCP tooling is needed:
    - `just dev`
 
-`just dev` auto-detects `LIBCLANG_PATH` for the MCP plugin build.
+`just dev` auto-detects `LIBCLANG_PATH` for the MCP Elle plugin build.
 Override it manually if detection misses the local `libclang.dylib`.
 
 Verified on this machine:
