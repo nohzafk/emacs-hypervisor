@@ -156,34 +156,34 @@ make mcp
 elle tools/mcp-server.lisp
 ```
 
-Repo-local wrapper:
+Repo-local recipes:
 
 ```bash
-just bootstrap-elle
-just start-elle-mcp
+just build
+just dev
 ```
 
-This wrapper:
+These recipes:
 
-- expects the repo-local Elle checkout at `.elle` by default
-- uses the repo-local release binary at `.elle/target/release/elle` by default
-- uses a repo-local graph store at `.elle-mcp/store`
-- accepts `ELLE_MCP_SERVER` when the MCP server lives outside this repo
-- checks common local locations such as:
-  - `.elle/mcp/mcp-server.lisp`
-  - `.elle/mcp/tools/mcp-server.lisp`
+- `just build` bootstraps the repo-local Elle checkout, builds the Elle release
+  binary, builds Hypervisor extension plugins from `.elle-plugins`, and builds
+  the host binary without building MCP plugins
+- `just dev` runs the same build and also produces the local-development MCP
+  plugin artifacts needed by the MCP server
+- `just install` depends on `just dev`, so local Emacs testing keeps MCP
+  support ready for Codex
+- the MCP server is launched by MCP configuration, not by a Just recipe; it uses
+  `.elle-mcp/store` as the repo-local graph store by default
 
 Current practical setup for this machine:
 
-1. bootstrap the repo-local Elle checkout:
-   - `just bootstrap-elle`
-2. build the MCP plugins when needed:
-   - `env LIBCLANG_PATH=/Applications/Xcode.app/Contents/Frameworks make -C .elle mcp`
-3. start the repo wrapper:
-   - `just start-elle-mcp`
+1. build the repo-local Elle checkout and Hypervisor binary:
+   - `just build`
+2. include MCP plugin artifacts when local MCP tooling is needed:
+   - `just dev`
 
-The `LIBCLANG_PATH` detail matters here because the `elle-oxigraph` plugin
-build goes through `bindgen` and needs `libclang.dylib`.
+`just dev` auto-detects `LIBCLANG_PATH` for the MCP plugin build.
+Override it manually if detection misses the local `libclang.dylib`.
 
 Verified on this machine:
 

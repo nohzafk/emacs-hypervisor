@@ -73,6 +73,11 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+if [ -n "$elle_plugins" ] && ! command -v git >/dev/null 2>&1; then
+  echo "git is required to initialize Elle submodules for extension plugins" >&2
+  exit 1
+fi
+
 if [ ! -f "$repo_dir/.elle/Cargo.toml" ]; then
   cat >&2 <<EOF2
 Missing repo-local Elle checkout at:
@@ -96,6 +101,9 @@ EOF2
 fi
 
 if [ -n "$elle_plugins" ]; then
+  echo "Initializing Elle submodules (needed for extension plugins)"
+  git -C "$repo_dir/.elle" submodule update --init --recursive
+
   IFS=',' read -r -a plugin_names <<< "$elle_plugins"
   for plugin_name in "${plugin_names[@]}"; do
     plugin_name=${plugin_name//[[:space:]]/}
@@ -113,7 +121,7 @@ if [ -n "$elle_plugins" ]; then
     plugin_path="$repo_dir/.elle/target/release/libelle_${plugin_name}.${plugin_ext}"
     if [ ! -f "$plugin_path" ]; then
       echo "Missing Elle plugin artifact: $plugin_path" >&2
-      echo "Run: EMACS_HYPERVISOR_ELLE_PLUGINS=$elle_plugins scripts/bootstrap-elle" >&2
+      echo "Check .elle-plugins or EMACS_HYPERVISOR_ELLE_PLUGINS, then rerun scripts/build-hypervisor." >&2
       exit 1
     fi
   done

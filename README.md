@@ -474,12 +474,24 @@ The Emacs option names mirror mmdflux render controls. See the
 [`mmdflux` docs](https://github.com/kevinswiber/mmdflux#readme) for accepted
 values and renderer-specific behavior.
 
-The binary must be built with the matching Elle plugin available. Project
-defaults live in `.elle-plugins`, so the standard build includes `mmdflux`:
+The binary must be built with the matching Elle extension plugin available.
+Project defaults live in `.elle-plugins`, so the standard build includes
+`mmdflux` without building the local-development MCP plugins:
 
 ```bash
 just build
 ```
+
+For local development that also needs Elle MCP plugin artifacts, build through
+the developer recipe:
+
+```bash
+just dev
+```
+
+`just dev` keeps the normal Hypervisor build path and also builds Elle's local
+MCP plugin artifacts. `just install` depends on `just dev`, so local Emacs
+testing leaves Codex MCP support ready too.
 
 For a local install, the requested plugin libraries are copied next to the
 installed binary:
@@ -496,16 +508,16 @@ ad hoc builds.
 For working on Hypervisor itself, not normal user configuration.
 
 ```bash
-just bootstrap-elle          # use repo-local Elle checkout
+just build                   # bootstrap Elle, build .elle-plugins, build binary
+just dev                     # same build, plus local MCP plugin artifacts
 just fmt                     # format Elle Lisp files at 120 columns
 just install-hooks           # enable repo Git hooks
-just build                   # build the binary
 just test                    # run tests
 just analyze-runtime         # compile-aware analysis after Elle changes
-just emacs-home-live-test    # full live Emacs home test
+just emacs-home-e2e-reset    # full live Emacs home test from a clean home
 ```
 
-Step-by-step live testing: `just build && just emacs-home-reset && just emacs-home-run`
+Step-by-step live testing: `just emacs-home-e2e-reset`
 
 ## Further Reading
 

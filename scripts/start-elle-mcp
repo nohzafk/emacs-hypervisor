@@ -1,11 +1,12 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-script_dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 store_dir=${ELLE_MCP_STORE:-"$repo_dir/.elle-mcp/store"}
+elle_bin="$elle_dir/target/release/elle"
 
 usage() {
     cat <<EOF
@@ -13,7 +14,9 @@ usage: scripts/start-elle-mcp
 
 Starts the repo-local Elle MCP server:
   cd "$elle_dir"
-  target/release/elle mcp/mcp-server.lisp -- "$store_dir"
+  "$elle_bin" mcp/mcp-server.lisp -- "$store_dir"
+
+Run "just dev" first to build the Elle binary and MCP plugin artifacts.
 EOF
 }
 
@@ -32,5 +35,25 @@ esac
 
 mkdir -p "$(dirname "$store_dir")"
 
+if [ ! -x "$elle_bin" ]; then
+    echo "missing Elle binary: $elle_bin" >&2
+    echo "run: just dev" >&2
+    exit 1
+fi
+
+case "$(uname -s)" in
+    Darwin) plugin_ext=dylib ;;
+    *) plugin_ext=so ;;
+esac
+
+for plugin in oxigraph syn; do
+    plugin_path="$elle_dir/target/release/libelle_${plugin}.${plugin_ext}"
+    if [ ! -f "$plugin_path" ]; then
+        echo "missing Elle MCP plugin: $plugin_path" >&2
+        echo "run: just dev" >&2
+        exit 1
+    fi
+done
+
 cd "$elle_dir"
-exec target/release/elle mcp/mcp-server.lisp -- "$store_dir"
+exec "$elle_bin" mcp/mcp-server.lisp -- "$store_dir"

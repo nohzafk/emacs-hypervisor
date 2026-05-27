@@ -7,7 +7,6 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 elle_repo=${ELLE_REPO:-https://github.com/elle-lisp/elle.git}
 default_elle_ref_file="$repo_dir/.elle-ref"
-default_elle_plugins_file="$repo_dir/.elle-plugins"
 if [ -f "$default_elle_ref_file" ]; then
   IFS= read -r default_elle_ref < "$default_elle_ref_file" || default_elle_ref=""
 else
@@ -18,43 +17,30 @@ if [ -z "$default_elle_ref" ]; then
   exit 1
 fi
 elle_ref=${ELLE_REF-$default_elle_ref}
-if [ -f "$default_elle_plugins_file" ]; then
-  default_elle_plugins=$(tr '\n' ',' < "$default_elle_plugins_file" | sed 's/,$//')
-else
-  default_elle_plugins=""
-fi
-elle_build_plugins=${ELLE_BUILD_PLUGINS:-}
-elle_extra_plugins=${EMACS_HYPERVISOR_ELLE_PLUGINS:-$default_elle_plugins}
+elle_build_mcp_plugins=${ELLE_BUILD_MCP_PLUGINS:-}
 elle_checkout_only=0
 elle_bin="$elle_dir/target/release/elle"
 
-plugin_manifest_path() {
-  local plugin_name=$1
-  local local_manifest="$repo_dir/plugins/$plugin_name/Cargo.toml"
-
-  if [ -f "$local_manifest" ]; then
-    printf '%s\n' "$local_manifest"
-  else
-    printf '%s\n' "$elle_dir/plugins/Cargo.toml"
-  fi
-}
-
 usage() {
   cat <<EOF
-usage: scripts/bootstrap-elle [--checkout-only] [--plugins]
+usage: scripts/bootstrap-elle [--checkout-only] [--mcp-plugins]
 
 Clone Elle into the repo-local .elle checkout if needed, build the release
-binary.  With --plugins, also initialize submodules and build the MCP
+binary.  With --mcp-plugins, also initialize submodules and build the MCP
 plugins (oxigraph, syn) for development use.
 
 With --checkout-only, stop after cloning/fetching the repo-local Elle checkout
 and checking out the configured ref.  This is useful before restoring cargo
 target caches that live below .elle.
 
+Hypervisor extension plugins are built by scripts/build-hypervisor from the
+project plugin list in .elle-plugins.  MCP plugins are local development
+support and are not part of the normal Hypervisor build.
+
 Artifacts (always):
 - .elle/target/release/elle
 
-Artifacts (--plugins / ELLE_BUILD_PLUGINS=1):
+Artifacts (--mcp-plugins / ELLE_BUILD_MCP_PLUGINS=1):
 - .elle/target/release/libelle_oxigraph.{dylib,so}
 - .elle/target/release/libelle_syn.{dylib,so}
 
@@ -64,11 +50,8 @@ Environment overrides:
 - ELLE_REF  pin to a specific commit/branch/tag
             (default: project pin from $default_elle_ref_file; set ELLE_REF= to keep
             the checkout at its current ref)
-- ELLE_BUILD_PLUGINS  when set to a non-empty value, build the MCP plugins
-  (oxigraph, syn) in addition to the elle binary.  Equivalent to --plugins.
-- EMACS_HYPERVISOR_ELLE_PLUGINS  comma-separated plugin names to build into
-  .elle/target/release for Hypervisor extensions. Defaults to project plugins
-  from $default_elle_plugins_file.
+- ELLE_BUILD_MCP_PLUGINS  when set to a non-empty value, build the MCP plugins
+  (oxigraph, syn) in addition to the elle binary.  Equivalent to --mcp-plugins.
 - LIBCLANG_PATH  passed through to the MCP plugin build; on macOS this script
   auto-detects Xcode, Command Line Tools, and common package-manager libclang
   installs when available
@@ -165,8 +148,8 @@ while [ "$#" -gt 0 ]; do
     --checkout-only)
       elle_checkout_only=1
       ;;
-    --plugins)
-      elle_build_plugins=1
+    --mcp-plugins)
+      elle_build_mcp_plugins=1
       ;;
     -h|--help)
       usage
@@ -222,8 +205,8 @@ echo "Building Elle release binary"
   cargo build --release -p elle
 )
 
-if [ -n "$elle_build_plugins" ]; then
-  echo "Initializing Elle submodules (needed for plugins)"
+if [ -n "$elle_build_mcp_plugins" ]; then
+  echo "Initializing Elle submodules (needed for MCP plugins)"
   git -C "$elle_dir" submodule update --init --recursive
 
   echo "Building Elle MCP plugins"
@@ -240,30 +223,12 @@ if [ -n "$elle_build_plugins" ]; then
     )
   fi
 else
-  echo "Skipping MCP plugins (pass --plugins or ELLE_BUILD_PLUGINS=1 to build)"
-fi
-
-if [ -n "$elle_extra_plugins" ]; then
-  echo "Initializing Elle submodules (needed for extension plugins)"
-  git -C "$elle_dir" submodule update --init --recursive
-
-  IFS=',' read -r -a plugin_names <<< "$elle_extra_plugins"
-  for plugin_name in "${plugin_names[@]}"; do
-    plugin_name=${plugin_name//[[:space:]]/}
-    [ -n "$plugin_name" ] || continue
-    plugin_manifest=$(plugin_manifest_path "$plugin_name")
-    echo "Building Elle extension plugin: $plugin_name"
-    (
-      cd "$elle_dir"
-      cargo build --release --manifest-path "$plugin_manifest" --target-dir target -p "elle-$plugin_name"
-    )
-  done
+  echo "Skipping MCP plugins (pass --mcp-plugins or ELLE_BUILD_MCP_PLUGINS=1 to build)"
 fi
 
 cat <<EOF
 Elle bootstrap complete.
 
 Artifacts:
-- $elle_bin$(if [ -n "$elle_build_plugins" ]; then printf '\n- %s/target/release/libelle_oxigraph\n- %s/target/release/libelle_syn' "$elle_dir" "$elle_dir"; fi)
-$(if [ -n "$elle_build_plugins" ]; then printf '\nStart the MCP server with:\n\n  just start-elle-mcp\n'; fi)
+- $elle_bin$(if [ -n "$elle_build_mcp_plugins" ]; then printf '\n- %s/target/release/libelle_oxigraph\n- %s/target/release/libelle_syn' "$elle_dir" "$elle_dir"; fi)
 EOF

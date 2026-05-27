@@ -1,10 +1,5 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-hypervisor_binary := justfile_directory() + "/target/release/emacs-hypervisor"
-e2e_emacs_home := "/tmp/emacs-hypervisor-e2e-home"
-e2e_config_home := "/tmp/emacs-hypervisor-e2e-config"
-emacs_binary := env_var_or_default("EMACS", "emacs")
-
 [group('Default')]
 default:
     @just --list
@@ -15,47 +10,17 @@ build:
     ./scripts/build-hypervisor
 
 [group('Build')]
-install bin_dir="$HOME/.local/bin": build
-    mkdir -p "{{bin_dir}}"
-    rm -f "{{bin_dir}}/emacs-hypervisor"
-    cp "{{hypervisor_binary}}" "{{bin_dir}}/emacs-hypervisor"
-    elle_plugins="${EMACS_HYPERVISOR_ELLE_PLUGINS:-$(tr '\n' ',' < "{{justfile_directory()}}/.elle-plugins" 2>/dev/null | sed 's/,$//')}"; \
-    if [ -n "$elle_plugins" ]; then \
-      ext="$(case "$(uname -s)" in Darwin) printf dylib ;; *) printf so ;; esac)"; \
-      IFS=',' read -r -a plugins <<< "$elle_plugins"; \
-      for plugin in "${plugins[@]}"; do \
-        plugin="${plugin//[[:space:]]/}"; \
-        [ -n "$plugin" ] || continue; \
-        cp "{{justfile_directory()}}/.elle/target/release/libelle_${plugin}.${ext}" "{{bin_dir}}/libelle_${plugin}.${ext}"; \
-        if [ "$(uname)" = "Darwin" ]; then \
-          codesign --force --sign - "{{bin_dir}}/libelle_${plugin}.${ext}"; \
-        fi; \
-      done; \
-    fi
-    if [ "$(uname)" = "Darwin" ]; then \
-      codesign --force --sign - "{{bin_dir}}/emacs-hypervisor"; \
-    fi
+dev:
+    ./scripts/bootstrap-elle --mcp-plugins
+    ./scripts/build-hypervisor
 
 [group('Build')]
-build-debug:
-    ./scripts/build-hypervisor --debug
+install bin_dir="$HOME/.local/bin": dev
+    ./scripts/install-hypervisor "{{bin_dir}}"
 
 [group('Build')]
 clean:
     rm -rf target host/target host/elisp_pack/target
-
-[group('Build')]
-verify:
-    just test
-    just build
-
-[group('Elle')]
-bootstrap-elle:
-    ./scripts/bootstrap-elle --plugins
-
-[group('Elle')]
-start-elle-mcp:
-    ./scripts/start-elle-mcp
 
 [group('Elle')]
 fmt:
@@ -70,7 +35,7 @@ install-hooks:
     git config core.hooksPath .githooks
 
 [group('Test')]
-test:
+test: build
     cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
     ./.elle/target/release/elle tests/elle/hypervisor-runtime.lisp
     emacs --batch -Q \
@@ -81,41 +46,9 @@ test:
       -f ert-run-tests-batch-and-exit
 
 [group('Emacs')]
-emacs-home-e2e path=e2e_emacs_home config_home=e2e_config_home binary=hypervisor_binary emacs_bin=emacs_binary timeout="120" config_source="": build
-    if [ -n "{{config_source}}" ]; then \
-      ./scripts/emacs-home-e2e \
-        --home "{{path}}" \
-        --config-home "{{config_home}}" \
-        --binary "{{binary}}" \
-        --emacs "{{emacs_bin}}" \
-        --timeout "{{timeout}}" \
-        --config-source "{{config_source}}"; \
-    else \
-      ./scripts/emacs-home-e2e \
-        --home "{{path}}" \
-        --config-home "{{config_home}}" \
-        --binary "{{binary}}" \
-        --emacs "{{emacs_bin}}" \
-        --timeout "{{timeout}}"; \
-    fi
+emacs-home-e2e: build
+    ./scripts/emacs-home-e2e
 
 [group('Emacs')]
-emacs-home-e2e-reset path=e2e_emacs_home config_home=e2e_config_home binary=hypervisor_binary emacs_bin=emacs_binary timeout="120" config_source="": build
-    if [ -n "{{config_source}}" ]; then \
-      ./scripts/emacs-home-e2e \
-        --reset \
-        --home "{{path}}" \
-        --config-home "{{config_home}}" \
-        --binary "{{binary}}" \
-        --emacs "{{emacs_bin}}" \
-        --timeout "{{timeout}}" \
-        --config-source "{{config_source}}"; \
-    else \
-      ./scripts/emacs-home-e2e \
-        --reset \
-        --home "{{path}}" \
-        --config-home "{{config_home}}" \
-        --binary "{{binary}}" \
-        --emacs "{{emacs_bin}}" \
-        --timeout "{{timeout}}"; \
-    fi
+emacs-home-e2e-reset: build
+    ./scripts/emacs-home-e2e --reset

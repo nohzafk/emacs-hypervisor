@@ -62,9 +62,6 @@ jobs:
           shared-key: hypervisor-ci
           key: ${{ hashFiles('.elle-ref', 'host/Cargo.lock', 'host/elisp_pack/Cargo.toml', '.github/workflows/ci.yml') }}
 
-      - name: Bootstrap Elle
-        run: ./scripts/bootstrap-elle
-
       # scripts/build-hypervisor uses `cargo build --offline --locked`, so the
       # crate registry must be populated before it runs. Network-fetch the
       # host workspace deps; rust-cache stores them for subsequent runs.
@@ -76,8 +73,5 @@ jobs:
           cargo fetch --manifest-path host/Cargo.toml
           cargo fetch --manifest-path host/elisp_pack/Cargo.toml
 
-      - name: Build hypervisor
-        run: ./scripts/build-hypervisor
-
-      - name: Run tests
+      - name: Build and test
         run: just test
