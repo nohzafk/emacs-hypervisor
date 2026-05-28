@@ -310,4 +310,31 @@ fn main() {
         .expect("should write embedded elisp");
     fs::write(out_dir.join("embedded_plugins.rs"), embedded_plugins)
         .expect("should write embedded plugins");
+
+    // Embed the HUD WASM+HTML assets
+    let hud_dir = repo_dir.join("hud-wasm");
+    let hud_index = fs::read(hud_dir.join("index.html")).expect("should read hud index.html");
+    let hud_wasm = fs::read(hud_dir.join("pkg/hud_wasm_bg.wasm")).expect("should read hud_wasm_bg.wasm");
+    let hud_js = fs::read(hud_dir.join("pkg/hud_wasm.js")).expect("should read hud_wasm.js");
+
+    println!("cargo:rerun-if-changed={}", hud_dir.join("index.html").display());
+    println!("cargo:rerun-if-changed={}", hud_dir.join("pkg/hud_wasm_bg.wasm").display());
+    println!("cargo:rerun-if-changed={}", hud_dir.join("pkg/hud_wasm.js").display());
+
+    let mut hud_output = String::new();
+    hud_output.push_str(&format!(
+        "pub const HUD_INDEX_HTML_BYTES: &[u8] = &{:?};\n",
+        hud_index
+    ));
+    hud_output.push_str(&format!(
+        "pub const HUD_WASM_BG_BYTES: &[u8] = &{:?};\n",
+        hud_wasm
+    ));
+    hud_output.push_str(&format!(
+        "pub const HUD_WASM_JS_BYTES: &[u8] = &{:?};\n",
+        hud_js
+    ));
+
+    fs::write(out_dir.join("embedded_hud.rs"), hud_output)
+        .expect("should write embedded HUD assets");
 }

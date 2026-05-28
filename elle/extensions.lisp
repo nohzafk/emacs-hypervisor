@@ -11,12 +11,6 @@
   (defn make-registry [settings handlers]
     {:settings settings :handlers handlers})
 
-  (defn extension-names [settings]
-    (filter (fn [name] (not (= name ""))) (map string/trim (string/split (or (get settings :extensions) "") ","))))
-
-  (defn unsupported-extensions [settings handlers]
-    (filter (fn [name] (nil? (get handlers (keyword name)))) (extension-names settings)))
-
   (defn extension-unavailable [id name]
     (protocol:send-error-response id (string "extension unavailable: " name)))
 
@@ -56,8 +50,6 @@
     (while true (handle-extension-message registry (protocol:read-message mailbox "extension actor message"))))
 
   {:make-registry make-registry
-   :extension-names extension-names
-   :unsupported-extensions unsupported-extensions
    :dispatch-extension-call dispatch-extension-call
    :extension-call-field extension-call-field
    :handle-extension-message handle-extension-message

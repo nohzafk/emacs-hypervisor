@@ -19,3 +19,4 @@ SESSION_BASE|elle/runtime-forms/emacs-hypervisor-session-base.el|:emacs-hypervis
 PACKAGE_BRIDGE|elle/runtime-forms/emacs-hypervisor-package-bridge.el|:emacs-hypervisor-package-bridge-ready
 PACKAGE_RUNTIME|elle/runtime-forms/emacs-hypervisor-package-runtime.el|:emacs-hypervisor-package-runtime-ready
 UNIT_RUNTIME|elle/runtime-forms/emacs-hypervisor-unit-runtime.el|:emacs-hypervisor-unit-runtime-ready
+HUD|elle/runtime-forms/emacs-hypervisor-hud.el|:emacs-hypervisor-hud-ready

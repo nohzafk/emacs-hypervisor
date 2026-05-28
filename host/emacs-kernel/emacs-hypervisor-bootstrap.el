@@ -52,6 +52,12 @@ unreadable. Returns the names of envvars that were changed."
       (setq emacs-hypervisor--shutdown-reason :process-exited))
     (emacs-hypervisor--notify-session-finished proc event)))
 
+;; NOTE: We no longer set DYLD_LIBRARY_PATH here to make libgit2 discoverable.
+;; Elle's std/git (lib/git.lisp) now probes the common install directories
+;; (Homebrew, MacPorts, multiarch Linux) directly, so the hypervisor binary is
+;; self-contained and works without environment manipulation — which also avoids
+;; the macOS SIP behavior of stripping DYLD_* from hardened/signed processes.
+
 (defun emacs-hypervisor-start (command &optional process-name)
   (let ((buffer (get-buffer-create emacs-hypervisor--buffer-name)))
     (with-current-buffer buffer

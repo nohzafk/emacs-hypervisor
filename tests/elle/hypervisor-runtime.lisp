@@ -18,6 +18,7 @@
 (include-file "../../elle/execution.lisp")
 (include-file "../../elle/extensions.lisp")
 (include-file "../../elle/extension-mermaid.lisp")
+(include-file "../../elle/extension-hud.lisp")
 (include-file "../../elle/runtime-forms/module-loader.lisp")
 
 (def graph (emacs-hypervisor-graph-module))
@@ -90,6 +91,7 @@
 (def execution (emacs-hypervisor-execution-module protocol graph mailbox benchmark))
 (def extensions (emacs-hypervisor-extensions-module protocol))
 (def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
+(def hud-extension (emacs-hypervisor-hud-extension-module extensions protocol))
 (def runtime-module-loader (emacs-hypervisor-runtime-forms-module-loader-module))
 
 (def packages
@@ -242,8 +244,7 @@
                                                             :env () :executable ()
                                                             :body (progn (setq x (quote (:a 1 :b 2))) t)))
                                                             :env ((:name "PATH" :value "/usr/bin"))
-                                                            :extensions (:extensions-enabled t :extensions "mermaid"
-                                                            :mermaid-enabled t))))
+                                                            :extensions (:mermaid-enabled t))))
        unit (first (get decoded :units))
        package (first (get decoded :packages))
        env-entry (first (get decoded :env))

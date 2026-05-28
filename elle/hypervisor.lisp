@@ -18,6 +18,7 @@
 (include-file "execution.lisp")
 (include-file "extensions.lisp")
 (include-file "extension-mermaid.lisp")
+(include-file "extension-hud.lisp")
 (include-file "runtime-forms.lisp")
 
 (def protocol (emacs-hypervisor-protocol-module))
@@ -26,12 +27,10 @@
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
 (def extensions (emacs-hypervisor-extensions-module protocol))
 (def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
+(def hud-extension (emacs-hypervisor-hud-extension-module extensions protocol))
 
 (defn emacs-hypervisor-extension-registry [settings]
-  (let* [handlers (mermaid-extension:register settings {})
-         unsupported (extensions:unsupported-extensions settings handlers)]
-    (when (not (empty? unsupported))
-      (error (string "unsupported Hypervisor extension(s): " (string/join unsupported ", "))))
+  (let [handlers (hud-extension:register settings (mermaid-extension:register settings {}))]
     (extensions:make-registry settings handlers)))
 
 (defn emacs-hypervisor-runtime-module-manifest []
@@ -252,13 +251,9 @@
                                             :done 9 :total 10))
                                             (protocol:send-event :progress '(:phase :shutdown :step :ready :done 10
                                             :total 10))
-                                            (if (and (not (nil? (get extension-settings :extensions-enabled)))
-                                                     (not (= (get extension-settings :extensions-enabled) false)))
-                                              (begin
-                                                (emacs-hypervisor-send-startup-complete '(:reason :startup-complete
-                                                :status :ready))
-                                                (extensions:run-extension-actor mailbox
-                                                (emacs-hypervisor-extension-registry extension-settings)))
-                                              (emacs-hypervisor-send-shutdown '(:reason :hypervisor-session-complete))))))
+                                            (emacs-hypervisor-send-startup-complete '(:reason :startup-complete :status
+                                            :ready))
+                                            (extensions:run-extension-actor mailbox
+                                            (emacs-hypervisor-extension-registry extension-settings)))))
                                       (emacs-hypervisor-handle-config-load-failure config-load-result config-file
                                       config-org-file))))))

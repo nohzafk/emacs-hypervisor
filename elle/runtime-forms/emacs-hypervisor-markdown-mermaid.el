@@ -689,7 +689,7 @@ STRING-POSITION has the shape returned by `posn-string'."
 (defun emacs-hypervisor-markdown-mermaid-extension-settings ()
   "Return Markdown Mermaid settings for Elle startup."
   (list
-   :mermaid-enabled (emacs-hypervisor-extension-enabled-p "mermaid")))
+   :mermaid-enabled t))
 
 (emacs-hypervisor-register-extension-settings
  #'emacs-hypervisor-markdown-mermaid-extension-settings)
@@ -823,8 +823,6 @@ When RENDER is non-nil, attach it as preview metadata."
 (defun emacs-hypervisor-markdown-mermaid-render-buffer ()
   "Render Mermaid fences in the current Markdown buffer."
   (interactive)
-  (unless (emacs-hypervisor-extension-enabled-p "mermaid")
-    (user-error "Mermaid extension is disabled"))
   (emacs-hypervisor-markdown-mermaid--cancel-refresh-timer)
   (emacs-hypervisor-markdown-mermaid-clear-buffer)
   (dolist (block (emacs-hypervisor-markdown-mermaid--source-blocks))
@@ -869,8 +867,7 @@ When RENDER is non-nil, attach it as preview metadata."
                   #'emacs-hypervisor-markdown-mermaid--schedule-refresh
                   nil
                   t)
-        (when (emacs-hypervisor-extension-enabled-p "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-buffer)))
+        (emacs-hypervisor-markdown-mermaid-render-buffer))
     (remove-hook 'after-change-functions
                  #'emacs-hypervisor-markdown-mermaid--schedule-refresh
                  t)
@@ -880,9 +877,8 @@ When RENDER is non-nil, attach it as preview metadata."
     (emacs-hypervisor-markdown-mermaid-clear-buffer)))
 
 (defun emacs-hypervisor-markdown-mermaid-maybe-enable ()
-  "Enable Mermaid rendering in Markdown buffers when configured."
-  (when (emacs-hypervisor-extension-enabled-p "mermaid")
-    (emacs-hypervisor-markdown-mermaid-mode 1)))
+  "Enable Mermaid rendering in Markdown buffers."
+  (emacs-hypervisor-markdown-mermaid-mode 1))
 
 (defun emacs-hypervisor-markdown-mermaid-install-hooks ()
   "Install autoload-safe Markdown Mermaid hooks."

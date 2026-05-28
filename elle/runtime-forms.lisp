@@ -64,9 +64,11 @@
                       (load-module-by-name manifest "COMPOSE") '(:emacs-hypervisor-config-surface-ready))))
 
   (defn install-session-helpers-form [manifest]
-    (append-all (list '(progn) (load-module-by-name manifest "SESSION_BASE")
-                      (load-module-by-name manifest "PACKAGE_BRIDGE") (load-module-by-name manifest "PACKAGE_RUNTIME")
-                      (load-module-by-name manifest "UNIT_RUNTIME")
-                      '((emacs-hypervisor-bridge-activate) :emacs-hypervisor-session-helpers-ready))))
+    (let [hud-url (or (sys/env "EMACS_HYPERVISOR_EMBEDDED_HUD_URL") "")]
+      (append-all (list '(progn) (load-module-by-name manifest "SESSION_BASE")
+                        (load-module-by-name manifest "PACKAGE_BRIDGE") (load-module-by-name manifest "PACKAGE_RUNTIME")
+                        (load-module-by-name manifest "UNIT_RUNTIME") (load-module-by-name manifest "HUD")
+                        `((setq emacs-hypervisor-hud--url ,(if (empty? hud-url) nil hud-url)))
+                        '((emacs-hypervisor-bridge-activate) :emacs-hypervisor-session-helpers-ready)))))
 
   {:install-config-surface-form install-config-surface-form :install-session-helpers-form install-session-helpers-form})

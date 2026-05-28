@@ -1721,8 +1721,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-renders-ascii-overlay ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :ascii))
       (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
                  (lambda (extension method args &optional _timeout)
                    (should (eq extension :mermaid))
@@ -1746,8 +1745,7 @@ Return a cons cell of (STATUS . OUTPUT)."
   (skip-unless (image-type-available-p 'svg))
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :svg)
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :svg)
           (emacs-hypervisor-markdown-mermaid-image-format :svg))
       (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
                  (lambda (extension method args &optional _timeout)
@@ -1778,8 +1776,7 @@ Return a cons cell of (STATUS . OUTPUT)."
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  First-->A\n```\n\n")
     (insert "```mermaid\nflowchart LR\n  Second-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :svg)
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :svg)
           (emacs-hypervisor-markdown-mermaid-image-format :svg)
           (count 0)
           opened-render)
@@ -1811,8 +1808,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-svg-preview-is-bounded ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :svg)
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :svg)
           (emacs-hypervisor-markdown-mermaid-image-format :svg)
           (emacs-hypervisor-markdown-mermaid-preview-max-width 320)
           (emacs-hypervisor-markdown-mermaid-preview-max-height 180)
@@ -2022,8 +2018,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-auto-falls-back-to-ascii-without-svg ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :auto))
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :auto))
       (cl-letf (((symbol-function 'image-type-available-p)
                  (lambda (type)
                    (should (eq type 'svg))
@@ -2039,8 +2034,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-viewport-uses-visible-width ()
   (with-temp-buffer
     (insert "    ```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :ascii))
       (cl-letf (((symbol-function 'get-buffer-window)
                  (lambda (&rest _args) 'visible-window))
                 ((symbol-function 'window-text-width)
@@ -2058,8 +2052,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-renders-error-payload ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-render-style :ascii))
+    (let ((emacs-hypervisor-markdown-mermaid-render-style :ascii))
       (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
                  (lambda (_extension _method args &optional _timeout)
                    (should (eq (plist-get args :style) :ascii))
@@ -2073,8 +2066,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-refresh-command-rerenders-buffer ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (render-count 0))
+    (let ((render-count 0))
       (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)
                  (lambda (&rest _args)
                    (setq render-count (1+ render-count))
@@ -2090,8 +2082,7 @@ Return a cons cell of (STATUS . OUTPUT)."
 (ert-deftest emacs-hypervisor-markdown-mermaid-edits-schedule-refresh ()
   (with-temp-buffer
     (insert "```mermaid\nflowchart LR\n  A-->B\n```\n")
-    (let ((emacs-hypervisor-extensions "mermaid")
-          (emacs-hypervisor-markdown-mermaid-auto-refresh-delay 0.2)
+    (let ((emacs-hypervisor-markdown-mermaid-auto-refresh-delay 0.2)
           scheduled-delay
           scheduled-buffer)
       (cl-letf (((symbol-function 'emacs-hypervisor-extension-call)

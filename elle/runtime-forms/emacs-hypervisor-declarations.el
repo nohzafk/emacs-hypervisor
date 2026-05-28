@@ -168,7 +168,7 @@ feature preloading, not whether the unit itself is lazy or deferred."
                     (list :extensions
                           (if (fboundp 'emacs-hypervisor-export-extension-settings)
                               (emacs-hypervisor-export-extension-settings)
-                            '(:extensions-enabled nil :extensions nil))))))
+                            nil)))))
     payload))
 
 (provide 'emacs-hypervisor-declarations)

@@ -2,6 +2,7 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
     include!(concat!(env!("OUT_DIR"), "/embedded_elisp.rs"));
     include!(concat!(env!("OUT_DIR"), "/embedded_plugins.rs"));
+    include!(concat!(env!("OUT_DIR"), "/embedded_hud.rs"));
 
     pub const EMBEDDED_BOOTSTRAP_ELISP: &str =
         include_str!("../emacs-kernel/emacs-hypervisor-bootstrap.el");
@@ -244,6 +245,48 @@ fn prepend_elle_path(path: Option<String>, dir: &Path) -> String {
     }
 }
 
+fn start_hud_server() -> Result<u16, String> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("failed to bind HUD server: {}", error))?;
+    let port = listener.local_addr().unwrap().port();
+    
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(mut stream) = stream {
+                thread::spawn(move || {
+                    let mut buffer = [0; 1024];
+                    if let Ok(_) = stream.read(&mut buffer) {
+                        let req = String::from_utf8_lossy(&buffer);
+                        let mut response = Vec::new();
+                        
+                        if req.contains("GET /index.html") || req.contains("GET / HTTP") {
+                            response.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+                            response.extend_from_slice(embedded::HUD_INDEX_HTML_BYTES);
+                        } else if req.contains("GET /pkg/hud_wasm.js") {
+                            response.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+                            response.extend_from_slice(embedded::HUD_WASM_JS_BYTES);
+                        } else if req.contains("GET /pkg/hud_wasm_bg.wasm") {
+                            response.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/wasm\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n");
+                            response.extend_from_slice(embedded::HUD_WASM_BG_BYTES);
+                        } else {
+                            response.extend_from_slice(b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+                        }
+                        
+                        let _ = stream.write_all(&response);
+                        let _ = stream.flush();
+                    }
+                });
+            }
+        }
+    });
+    
+    Ok(port)
+}
+
 fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
     if let Some(start) = error.find("SymbolId(") {
         if let Some(end) = error[start..].find(')') {
@@ -271,6 +314,11 @@ fn fail(message: impl AsRef<str>) -> ! {
 fn run_serve() {
     let backend_display = "elle/hypervisor.lisp";
     install_elisp_modules().unwrap_or_else(|error| fail(error));
+    let hud_port = start_hud_server().unwrap_or_else(|error| fail(error));
+    env::set_var(
+        "EMACS_HYPERVISOR_EMBEDDED_HUD_URL",
+        format!("http://127.0.0.1:{}/index.html", hud_port),
+    );
     let embedded_plugin_dir = install_embedded_elle_plugins().unwrap_or_else(|error| fail(error));
 
     let mut config = Config::default();
