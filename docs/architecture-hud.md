@@ -2,21 +2,27 @@
 
 ## Overview
 
-The HUD is a translucent corner overlay rendered inside Emacs that shows live
-workspace status: current git branch, working-tree change summary, MCP server
-availability, and the status of active config units.
+The HUD is a corner overlay rendered inside Emacs that shows live workspace
+status for the active buffer's project: resolved project root, current git
+branch, working-tree change count, last commit, MCP server availability, and
+GitHub CLI availability.
 
 It is implemented as a four-layer stack:
 
 1. An egui/eframe application compiled to WebAssembly — the rendering surface.
 2. A bare HTTP server embedded in the host binary that serves the WASM assets.
-3. An Elle extension actor (`extension-hud.lisp`) that owns authoritative state.
+3. An Elle extension actor (`extension-hud.lisp`) that owns authoritative state
+   and collects git data natively via libgit2.
 4. An Elisp module (`emacs-hypervisor-hud.el`) that manages the Emacs child
-   frame and bridges events to the WASM renderer.
+   frame, drives event-driven data collection, and bridges events to the WASM
+   renderer.
 
-The key architectural principle is **actor-mediated state**. All state lives in
-the Elle actor. Emacs and the WASM renderer are pure output surfaces. Neither
-the Elisp module nor the WASM canvas stores authoritative data.
+The key architectural principle is **actor-mediated state**. All authoritative
+state lives in the Elle actor. Emacs and the WASM renderer are output surfaces:
+Emacs gathers per-buffer *context* (which repo, is MCP up, is `gh` present) and
+sends it to the actor; the actor collects git data and emits authoritative
+state back. Neither the Elisp module nor the WASM canvas stores authoritative
+data.
 
 ---
 
@@ -31,8 +37,9 @@ the Elisp module nor the WASM canvas stores authoritative data.
 │  │                          │   │  (bare TcpListener, port 0)   │  │
 │  │  extension-hud actor     │   │                               │  │
 │  │  @*hud-state*            │   │  GET /index.html              │  │
-│  │                          │   │  GET /pkg/hud_wasm.js         │  │
-│  │  protocol:send-event     │   │  GET /pkg/hud_wasm_bg.wasm    │  │
+│  │  std/git (libgit2 FFI)   │   │  GET /pkg/hud_wasm.js         │  │
+│  │                          │   │  GET /pkg/hud_wasm_bg.wasm    │  │
+│  │  protocol:send-event     │   │                               │  │
 │  │    :hud-state-changed ───┼───┼──→ EMACS_HYPERVISOR_           │  │
 │  │                          │   │     EMBEDDED_HUD_URL env var  │  │
 │  └────────────┬─────────────┘   └───────────────────────────────┘  │
@@ -50,9 +57,13 @@ the Elisp module nor the WASM canvas stores authoritative data.
 │       │       ↓                                                     │
 │       │  emacs-hypervisor-hud--on-state-changed                     │
 │       │       ↓                                                     │
-│       │  emacs-hypervisor-hud-push-state  ─────────────────────┐   │
+│       │  emacs-hypervisor-hud--push-state-to-wasm  ─────────────┐   │
 │       │                                                         │   │
-│       └─ :request :extension-call :hud                          │   │
+│       ├─ :request :extension-call :hud :collect  (context)     │   │
+│       │       ↑                                                 │   │
+│       │  buffer-switch / save / toggle  → debounced trigger     │   │
+│       │                                                         │   │
+│       └─ :request :extension-call :hud :action                 │   │
 │                 ↑                                               │   │
 │  xwidget-webkit-pre-navigation-functions hook                   │   │
 │       (intercepts emacs-hud:// URIs)                            │   │
@@ -61,15 +72,13 @@ the Elisp module nor the WASM canvas stores authoritative data.
 │  │  Child frame (undecorated, no-accept-focus)              │   │   │
 │  │  ┌────────────────────────────────────────────────────┐  │   │   │
 │  │  │  xwidget-webkit session                            │  │   │   │
-│  │  │  http://127.0.0.1:<port>/index.html                │  │   │   │
+│  │  │  http://127.0.0.1:<port>/index.html#bg=..&fg=..    │  │   │   │
 │  │  │                                                    │  │   │   │
 │  │  │  ┌──────────────────────────────────────────────┐  │  │   │   │
 │  │  │  │  egui WASM canvas (WebGL)                    │  │  │   │   │
 │  │  │  │                                              │  │  │   │   │
 │  │  │  │  window.hudPushState(json) ←────────────────┼──┼──┘   │   │
-│  │  │  │                                              │  │      │   │
-│  │  │  │  button click → location.href =              │  │      │   │
-│  │  │  │    "emacs-hud://command/<action>" ──────────►│  │      │   │
+│  │  │  │  window.hudPushTheme(json) ←────────────────┼──┼──────┘   │
 │  │  │  └──────────────────────────────────────────────┘  │      │   │
 │  │  └────────────────────────────────────────────────────┘      │   │
 │  └──────────────────────────────────────────────────────────────┘   │
@@ -82,21 +91,27 @@ the Elisp module nor the WASM canvas stores authoritative data.
 
 ### 1. WASM Front-end (`hud-wasm/`)
 
-**Source:** `hud-wasm/src/lib.rs`  
+**Source:** `hud-wasm/src/lib.rs`, `hud-wasm/index.html`
 **Build target:** `wasm32-unknown-unknown` via `wasm-pack`
 
 The WASM module is an `eframe` application that renders using egui's
-immediate-mode UI toolkit over a WebGL canvas. It has no network access and
-no side effects beyond drawing pixels and emitting navigation events.
+immediate-mode UI toolkit over a WebGL canvas. It has no network access and no
+side effects beyond drawing pixels. It is purely a renderer: it does not emit
+navigation events (there are currently no interactive buttons).
 
 **State schema (`HudState`):**
 
 ```rust
 pub struct HudState {
-    pub branch: String,       // current git branch
-    pub changes: String,      // diff summary, e.g. "+3 -1"
-    pub mcp_online: bool,     // MCP server reachability
-    pub units: Vec<UnitInfo>, // config unit name + status
+    pub branch: String,         // current git branch (serde default "main")
+    pub changes: String,        // e.g. "1 file", "30 files"
+    #[serde(rename = "mcp-online")]   pub mcp_online: bool,
+    pub units: Vec<UnitInfo>,   // config unit name + status (optional)
+    pub location: String,       // e.g. "Local"
+    #[serde(rename = "last-commit")]  pub last_commit: String,   // short oid
+    #[serde(rename = "gh-available")] pub gh_available: bool,
+    #[serde(rename = "project-name")] pub project_name: String,
+    #[serde(rename = "project-root")] pub project_root: String,  // full path
 }
 
 pub struct UnitInfo {
@@ -105,32 +120,50 @@ pub struct UnitInfo {
 }
 ```
 
-A `GLOBAL_STATE: Mutex<HudState>` holds the current state. A
-`REPAINT_SIGNAL: Mutex<Option<egui::Context>>` holds a cloned egui context
-used to trigger a repaint when state is pushed from outside the render loop.
+The `project-root` row renders at the top of the card as a debugging aid so the
+resolved repo path is always visible.
 
-**Receiving state from Emacs:**
-
-The `push_state(json: &str)` function is exported via `wasm_bindgen`. The HTML
-shell exposes it as `window.hudPushState`:
-
-```javascript
-window.hudPushState = (jsonStr) => { push_state(jsonStr); };
-```
-
-Emacs calls this via `xwidget-webkit-execute-script`.
-
-**Emitting click-back events:**
-
-When a button is clicked inside egui, the WASM code navigates to an
-`emacs-hud://` URI:
+**Theme schema (`ThemeColors`):**
 
 ```rust
-win.location().set_href("emacs-hud://command/rerun-diagnostics")
+pub struct ThemeColors {
+    pub bg: String,  // hex, e.g. "#1e1e2e" (default dark "#0c0c10")
+    pub fg: String,  // hex (default "#e6ebff")
+}
 ```
 
-This is intercepted by the Elisp pre-navigation hook before any real navigation
-occurs (see section 4).
+The renderer derives a light/dark presentation from the background luminance:
+card fill, muted text, and stroke colors are computed from `bg`/`fg`. The egui
+panels themselves are transparent so only the rounded card shows.
+
+**Globals:**
+
+- `GLOBAL_STATE: Mutex<HudState>` — current state.
+- `GLOBAL_THEME: Mutex<ThemeColors>` — current theme.
+- `REPAINT_SIGNAL: Mutex<Option<egui::Context>>` — a cloned egui context used
+  to trigger a repaint when state or theme is pushed from outside the loop.
+
+**Receiving state and theme from Emacs:**
+
+Two functions are exported via `wasm_bindgen` and exposed by the HTML shell:
+
+```javascript
+window.hudPushState = (jsonStr) => push_state(jsonStr);
+window.hudPushTheme = (jsonStr) => push_theme(jsonStr);
+```
+
+Emacs calls these via `xwidget-webkit-execute-script`. Each push replaces the
+corresponding global and requests a repaint.
+
+**Type fix-up (`fixup_sexp_rpc_json`):** Emacs's `json-encode` of sexp-rpc
+values can emit booleans as the strings `"true"`/`"false"` and empty lists as
+`null`. Before deserializing into `HudState`, `push_state` coerces the
+`mcp-online`/`gh-available` string-booleans to JSON booleans and `null` `units`
+to `[]`. (Emacs also normalizes most of this on its side; see §4.)
+
+**Theme bootstrap (first paint):** `index.html` reads `#bg=..&fg=..` from the
+URL fragment on load and calls `push_theme` before any state arrives, so the
+first frame paints in the Emacs theme instead of flashing the dark default.
 
 ---
 
@@ -138,29 +171,34 @@ occurs (see section 4).
 
 **Build-time (`host/build.rs`):**
 
-During `cargo build`, `build.rs` reads the three compiled WASM assets and
-encodes them as byte array literals into `$OUT_DIR/embedded_hud.rs`:
+During `cargo build`, `build.rs` reads the three compiled WASM assets and writes
+them as byte-array literals into an embedded Rust source file:
 
 ```
-hud-wasm/index.html          → HUD_INDEX_HTML_BYTES: &[u8]
-hud-wasm/pkg/hud_wasm_bg.wasm → HUD_WASM_BG_BYTES:   &[u8]
-hud-wasm/pkg/hud_wasm.js      → HUD_WASM_JS_BYTES:   &[u8]
+hud-wasm/index.html           → HUD_INDEX_HTML_BYTES: &[u8]
+hud-wasm/pkg/hud_wasm_bg.wasm → HUD_WASM_BG_BYTES:    &[u8]
+hud-wasm/pkg/hud_wasm.js      → HUD_WASM_JS_BYTES:    &[u8]
 ```
 
-The WASM assets must be built by `wasm-pack` before `cargo build` runs. The
-`just build` recipe handles this ordering.
+(These are written as `pub const ... = &[..];` literals, not `include_bytes!`.)
+The WASM assets must be built by `wasm-pack` before `cargo build` runs; the
+build scripts (`scripts/build-hypervisor`) enforce that ordering.
+`cargo:rerun-if-changed` directives refresh the embedded bytes when
+`index.html`, `hud_wasm_bg.wasm`, or `hud_wasm.js` change.
 
 **Runtime (`host/src/main.rs` — `start_hud_server`):**
 
 At process startup, before the Elle VM is initialized, `start_hud_server()`
-binds a `TcpListener` on `127.0.0.1:0` (OS-assigned ephemeral port). A
-dedicated thread services incoming HTTP/1.1 requests, routing by path:
+binds a `TcpListener` on `127.0.0.1:0` (OS-assigned ephemeral port). A dedicated
+thread services incoming HTTP/1.1 requests, routing by path:
 
-| Path                       | Served bytes             | Content-Type         |
-|----------------------------|--------------------------|----------------------|
-| `/` or `/index.html`       | `HUD_INDEX_HTML_BYTES`   | `text/html`          |
-| `/pkg/hud_wasm.js`         | `HUD_WASM_JS_BYTES`      | `application/javascript` |
-| `/pkg/hud_wasm_bg.wasm`    | `HUD_WASM_BG_BYTES`      | `application/wasm`   |
+| Path                    | Served bytes           | Content-Type             |
+|-------------------------|------------------------|--------------------------|
+| `/` or `/index.html`    | `HUD_INDEX_HTML_BYTES` | `text/html`              |
+| `/pkg/hud_wasm.js`      | `HUD_WASM_JS_BYTES`    | `application/javascript` |
+| `/pkg/hud_wasm_bg.wasm` | `HUD_WASM_BG_BYTES`    | `application/wasm`       |
+
+Responses include `Access-Control-Allow-Origin: *` and `Connection: close`.
 
 The assigned port is published to Emacs via an environment variable before the
 Elle VM starts:
@@ -172,191 +210,281 @@ env::set_var(
 );
 ```
 
-The Elisp bootstrap reads this variable and sets `emacs-hypervisor-hud--url`
-before any HUD frame is created.
+The Elle runtime-forms module (`runtime-forms.lisp`) reads this variable and
+emits `(setq emacs-hypervisor-hud--url ...)` into the Emacs bootstrap, so the
+URL is set before any HUD frame is created.
 
 ---
 
 ### 3. Elle Extension Actor (`elle/extension-hud.lisp`)
 
 The Elle actor is the single source of truth for HUD state. It runs inside the
-extension actor loop (`extensions:run-extension-actor`) which is a cooperative
-message-dispatch loop over the sexp-rpc mailbox.
+extension actor loop (`extensions:run-extension-actor`), a cooperative
+message-dispatch loop over the sexp-rpc mailbox. The module is constructed with
+both the extensions helper and the protocol module:
+
+```lisp
+(def hud-extension (emacs-hypervisor-hud-extension-module extensions protocol))
+```
 
 **Authoritative state:**
 
 ```lisp
-(def @*hud-state* {:branch "main" :changes "+0 -0" :mcp-online false :units ()})
+(def @*hud-state*
+  {:branch "main" :changes "0 files" :mcp-online false :units ()
+   :location "Local" :last-commit "" :gh-available false
+   :project-name "" :project-root ""})
 ```
 
-The `@` sigil marks this as a mutable cell (`@struct`). All writes go through
-`assign`.
+The `@` sigil marks this as a mutable cell. All writes go through `assign`/`put`.
 
-**Handler dispatch table:**
+**Native git collection (`collect-git-data`):**
 
-| Method    | Handler function  | Effect                                      |
-|-----------|-------------------|---------------------------------------------|
-| `:open`   | `open-hud`        | Returns `{:action :show}` — Elisp shows the frame |
-| `:close`  | `close-hud`       | Returns `{:action :hide}` — Elisp hides the frame |
-| `:update` | `update-state`    | Merges partial fields into `@*hud-state*`   |
-| `:state`  | `get-state`       | Returns current `@*hud-state*`              |
-| `:action` | (target arch)     | Routes click-back commands from Emacs       |
+Git data is collected natively in-process via `std/git`, an FFI binding to
+libgit2. `ensure-git` lazy-loads the module on first use (logging a warning if
+libgit2 is unavailable). For a given repo path the actor:
 
-**State change events (target architecture):**
+- opens the repo (`git:open`),
+- reads `git:head` and strips a leading `refs/heads/` to get the branch,
+- reads `git:status` and counts changed entries,
+- reads `git:log {:limit 1}` for the short last-commit oid,
+- closes the repo.
 
-After any mutation of `@*hud-state*`, the actor emits a `:hud-state-changed`
-event carrying the new state as the payload:
+**Ignored-file handling:** libgit2's default status options include ignored
+files, which the git CLI excludes. Ignored entries decode to `:index nil
+:workdir nil`, so the change count includes only entries with a real index or
+workdir status:
 
 ```lisp
-(protocol:send-event :hud-state-changed *hud-state*)
+(count (fn [e] (or (get e :index) (get e :workdir))) status-list)
 ```
 
-Emacs receives this event via the sexp-rpc dispatch loop and calls
-`emacs-hypervisor-hud--on-state-changed`, which pushes the state as JSON into
-the WASM renderer.
+Each step is wrapped in `protect`; failures are surfaced via `log-debug`
+(`:log` events) rather than silently collapsing to "0 files", so a missing
+libgit2 or an open/status error is observable in the hypervisor log stream.
 
-**Actor registration:**
+> libgit2 itself is loaded cross-platform by a repo-local patch to `std/git`
+> (`patches/elle/*.patch`, applied during `scripts/bootstrap-elle`). It probes
+> `libgit2.dylib`/`libgit2.so` and the common Homebrew/MacPorts/multiarch
+> install dirs directly, so no `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH` is needed.
 
-`extension-hud.lisp` exports a `register` function. In `hypervisor.lisp`:
+**Handler dispatch table (`make-handler`):**
+
+| Method     | Handler           | Effect                                                        |
+|------------|-------------------|---------------------------------------------------------------|
+| `:open`    | `open-hud`        | Emits current state, returns `{:action :show}`                |
+| `:close`   | `close-hud`       | Returns `{:action :hide}`                                     |
+| `:collect` | `collect`         | Collects git data natively + merges Emacs-provided context, then emits state |
+| `:state`   | `get-state`       | Returns `{:ok true :state @*hud-state*}`                      |
+| `:action`  | `handle-action`   | Routes click-back commands (e.g. `rerun-diagnostics`)         |
+
+`:collect` is the canonical data-collection entry point (it replaced an older
+`:update` method). Its arguments carry context Emacs computes per-buffer:
+`:repo_path`, `:mcp_online`, `:gh_available`, `:location`. The actor records
+`:project-root` from the path, derives `:project-name` from its last segment,
+fills git fields from `collect-git-data` (or the `"—"` / `"0 files"` fallback
+when the path is not a git repo or collection fails), and merges the non-git
+fields.
+
+**State change events:**
+
+After mutating `@*hud-state*`, the actor emits a `:hud-state-changed` event with
+the wire-encoded state as the payload:
 
 ```lisp
-(def hud-extension (emacs-hypervisor-hud-extension-module extensions))
-;; ...
-(let* [handlers (hud-extension:register settings
+(defn emit-state-changed []
+  (protocol:send-event :hud-state-changed (protocol:to-wire *hud-state*)))
+```
+
+Emacs receives this via the sexp-rpc dispatch loop (see
+`host/emacs-kernel/emacs-hypervisor-sexp-rpc.el`, which routes
+`:hud-state-changed` to `emacs-hypervisor-hud--on-state-changed`).
+
+**Actor registration (`hypervisor.lisp`):**
+
+```lisp
+(defn emacs-hypervisor-extension-registry [settings]
+  (let [handlers (hud-extension:register settings
                   (mermaid-extension:register settings {}))]
-  ...)
+    (extensions:make-registry settings handlers)))
 ```
 
-The `:hud` key is added to the shared handlers map, making the actor
-addressable via `extension-call :hud <method>` requests from Emacs.
+`register` adds the `:hud` key to the shared handlers map, making the actor
+addressable via `extension-call :hud <method>`. Extensions are always
+registered — there is no opt-in/enabled gate.
 
 ---
 
 ### 4. Elisp Rendering Surface (`elle/runtime-forms/emacs-hypervisor-hud.el`)
 
-The Elisp module is a thin surface — it manages frames, hooks, and the
-xwidget session. It does not own state and does not make policy decisions.
+The Elisp module manages frames, hooks, the xwidget session, and per-buffer
+context collection. It does not own authoritative state.
 
 **Frame management:**
 
-`emacs-hypervisor-hud--make-frame` creates an undecorated child frame
-attached to the current parent frame with these key parameters:
+`emacs-hypervisor-hud--make-frame` creates an undecorated child frame anchored
+to the parent frame: `no-accept-focus`/`no-focus-on-map` (never steals focus),
+`undecorated`, `unsplittable`, no scroll bars/fringe/mode line, and
+`background-color`/`foreground-color` taken from the `default` face so the frame
+matches the theme before the canvas paints. The new frame is immediately pointed
+at a private placeholder buffer (`" *emacs-hypervisor-hud-placeholder*"`) so
+session setup never captures and kills one of the user's real buffers.
 
-- `parent-frame` — anchors the child to the Emacs frame
-- `no-accept-focus t`, `no-focus-on-map t` — overlay never steals focus
-- `undecorated t` — no title bar or window chrome
-- `unsplittable t`, no scroll bars, no fringe, no mode line
-
-The frame is positioned in the top-right corner via
-`emacs-hypervisor-hud--reposition-frame`, which is called on
-`window-size-change-functions` and `focus-in-hook` to keep the HUD locked
-in place as the parent frame resizes.
+`emacs-hypervisor-hud--reposition-frame` locks the frame to the top-right corner
+and runs on `window-size-change-functions` and `focus-in-hook`.
 
 **xwidget session lifecycle:**
 
 `emacs-hypervisor-hud--initialize-session` loads
-`emacs-hypervisor-hud--url` (the `http://127.0.0.1:<port>/index.html` URL
-set from the env var) into a new xwidget-webkit session inside the child frame.
-The xwidget buffer's mode line, header line, fringe, and line numbers are all
-suppressed.
+`(emacs-hypervisor-hud--url-with-theme)` — the asset URL plus a `#bg=..&fg=..`
+fragment carrying the current theme — into a new xwidget-webkit session, saving
+and restoring window configurations so the parent layout is undisturbed. The
+xwidget buffer's mode line, header line, fringe, and line numbers are
+suppressed. The placeholder buffer is only killed if its name begins with a
+space (i.e. our own). After a short delay it pushes the theme again and starts
+the initial collect retry loop.
 
 **State push path:**
 
 ```elisp
-(defun emacs-hypervisor-hud-push-state (state-plist)
-  (let* ((json-str (json-encode state-plist))
+(defun emacs-hypervisor-hud--push-state-to-wasm (state-plist)
+  (let* ((sanitized (emacs-hypervisor-hud--fixup-sexp-rpc-plist state-plist))
+         (json-str (json-encode sanitized))
          (script (format "if (window.hudPushState) { window.hudPushState(%S); }" json-str)))
     (xwidget-webkit-execute-script emacs-hypervisor-hud--session script)))
 ```
 
-Called by the sexp-rpc event handler when a `:hud-state-changed` event arrives.
+`--fixup-sexp-rpc-plist` converts Elle `true`/`false` symbols to `t`/
+`:json-false` and `nil` array fields (e.g. `:units`) to empty vectors so
+`json-encode` produces valid JSON. `--on-state-changed` calls this when a
+`:hud-state-changed` event arrives.
+
+**Theme push:** `--push-theme` sends `{:bg .. :fg ..}` (from the `default` face)
+to `window.hudPushTheme`. Theme bypasses the actor — it is a presentation
+concern — and is pushed on session init and on every collect trigger.
+
+**Event-driven data collection:**
+
+```
+[buffer switch / selection change / save / toggle]
+   → debounced idle timer (0.5s; saves use 0.1s, no debounce)
+   → emacs-hypervisor-hud--trigger-collect
+   → push theme + resolve context
+   → emacs-hypervisor-extension-call :hud :collect
+        {:repo_path .. :mcp_online .. :gh_available .. :location "Local"}
+```
+
+`--resolve-repo-path` deliberately resolves the repo from the buffer shown in
+the **parent frame's selected window**, not `current-buffer` — collection runs
+from idle timers where `current-buffer` is unpredictable (often the xwidget
+buffer or the minibuffer). It uses `vc-root-dir`, falling back to a `.git`
+sentinel search. Context also includes whether the hypervisor is live
+(`mcp_online`) and whether `gh` is on PATH (`gh_available`).
+
+Triggers are registered by `--setup-trigger-hooks` on
+`window-buffer-change-functions`, `window-selection-change-functions`, and
+`after-save-hook`. `--retry-initial-collect` retries the first collect up to 5
+times (1s backoff) because the actor may not be ready during Emacs startup.
+
+A `emacs-hypervisor-hud-debug` defcustom (currently `t`) logs the resolved repo,
+the received state payload, and the pushed JSON to `*Messages*`, making it easy
+to distinguish a backend collection issue (payload already wrong) from a
+frontend display issue (payload correct, render wrong).
 
 **Click-back routing:**
 
-The `xwidget-webkit-pre-navigation-functions` hook intercepts all navigation
-events on the HUD session. When the URL starts with `emacs-hud://`:
+`emacs-hypervisor-hud--pre-navigation-hook` is registered on
+`xwidget-webkit-pre-navigation-functions`. When a navigation URL on the HUD
+session starts with `emacs-hud://`, it extracts the command, calls
+`emacs-hypervisor-extension-call :hud :action {:command ..}`, dispatches the
+returned `:action` (e.g. `:rerun-diagnostics` → `emacs-hypervisor-run-diagnostics`),
+and returns `'block` to suppress navigation.
 
-1. The hook extracts the command name from the path.
-2. It dispatches to the appropriate action (currently `rerun-diagnostics`).
-3. In the target architecture, it calls
-   `emacs-hypervisor-extension-call :hud :action` with the command as an arg,
-   routing the action through the Elle actor.
-4. It returns `'block` to prevent actual navigation.
+> The click-back path is fully wired on the Emacs and actor sides, but the
+> current WASM renderer emits no `emacs-hud://` navigations (it has no
+> interactive buttons). The hook is dormant until the renderer adds them.
+
+**Public API:**
+
+| Command                          | Effect                                                |
+|----------------------------------|-------------------------------------------------------|
+| `emacs-hypervisor-hud-toggle`    | Show if hidden, hide if visible                       |
+| `emacs-hypervisor-hud-show`      | Re-show + collect, or initialize the session          |
+| `emacs-hypervisor-hud-hide`      | Make the child frame invisible                        |
+| `emacs-hypervisor-hud-push-state`| Trigger a collect cycle (legacy name)                 |
+| `emacs-hypervisor-hud-refresh`   | Pull `:state` from the actor and push it to the WASM  |
+| `emacs-hypervisor-hud-cleanup`   | Tear down hooks, frame, and xwidget buffer            |
+
+Note: `show` initializes the session directly on the Emacs side rather than
+routing through the actor's `:open` method; `:open`/`open-hud` remain available
+for actor-driven shows.
 
 ---
 
 ## Data Flow Diagrams
 
-### State Push Flow
+### Collect / State Push Flow
 
 ```
-[Something changes workspace state]
+[buffer switch / save / toggle / re-show]
           │
           ▼
-  Elle actor receives :update request
-  (emacs-hypervisor-extension-call :hud :update {:branch "feat/x" ...})
+  emacs-hypervisor-hud--trigger-collect
+   → emacs-hypervisor-hud--push-theme  (window.hudPushTheme)
+   → resolve repo path from parent frame's selected window
+   → mcp_online = (emacs-hypervisor-live-p), gh_available = (executable-find "gh")
           │
           ▼
-  update-state merges fields into @*hud-state*
+  emacs-hypervisor-extension-call :hud :collect
+    {:repo_path .. :mcp_online .. :gh_available .. :location "Local"}
+          │  (sexp-rpc :extension-call request over stdio)
+          ▼
+  Elle actor: collect
+   → record :project-root / :project-name from path
+   → collect-git-data via std/git (libgit2): branch, change count
+     (excluding ignored), short last-commit
+   → merge mcp/gh/location
           │
           ▼
-  protocol:send-event :hud-state-changed *hud-state*
+  emit-state-changed
+   → protocol:send-event :hud-state-changed (to-wire @*hud-state*)
           │  (sexp-rpc event over stdio)
           ▼
-  Emacs sexp-rpc dispatch router
+  Emacs sexp-rpc dispatch → emacs-hypervisor-hud--on-state-changed
           │
           ▼
-  emacs-hypervisor-hud--on-state-changed (event handler)
+  emacs-hypervisor-hud--push-state-to-wasm
+   → --fixup-sexp-rpc-plist → json-encode → xwidget-webkit-execute-script
           │
-          ▼
-  emacs-hypervisor-hud-push-state (plist)
-          │  json-encode → xwidget-webkit-execute-script
           ▼
   window.hudPushState("{...json...}")   [inside WebKit process]
           │
           ▼
   push_state(json) [Rust/WASM]
-  → serde_json::from_str::<HudState>
-  → GLOBAL_STATE.lock() = new_state
-  → ctx.request_repaint()
+   → fixup_sexp_rpc_json → serde_json::from_value::<HudState>
+   → GLOBAL_STATE.lock() = new_state → ctx.request_repaint()
           │
           ▼
-  egui update() runs next frame
-  → reads GLOBAL_STATE
-  → renders new pixels via WebGL
+  egui update() runs next frame → reads GLOBAL_STATE/GLOBAL_THEME → WebGL
 ```
 
-### Click-Back Flow
+### Click-Back Flow (dormant — no WASM emitter yet)
 
 ```
-[User clicks "Re-run Diagnostics" button in egui UI]
+[WASM renderer navigates to emacs-hud://command/<cmd>]   (not currently emitted)
           │
           ▼
-  btn.clicked() → true
-  window.location.set_href("emacs-hud://command/rerun-diagnostics")
-          │  (navigation event inside WebKit)
-          ▼
-  xwidget-webkit-pre-navigation-functions hook fires
+  xwidget-webkit-pre-navigation-functions → --pre-navigation-hook
+   checks xwidget == session AND url prefix "emacs-hud://"
           │
           ▼
-  emacs-hypervisor-hud--pre-navigation-hook
-  checks: xwidget == emacs-hypervisor-hud--session
-          AND url starts with "emacs-hud://"
+  emacs-hypervisor-extension-call :hud :action {:command "<cmd>"}
+          │  (sexp-rpc :extension-call over stdio)
+          ▼
+  actor handle-action → e.g. {:action :rerun-diagnostics}
           │
           ▼
-  extract cmd = "rerun-diagnostics"
-          │
-          ▼
-  [target architecture]
-  emacs-hypervisor-extension-call :hud :action {:cmd "rerun-diagnostics"}
-          │  (sexp-rpc :extension-call request over stdio)
-          ▼
-  extensions:dispatch-extension-call
-  → hud handler :action method
-  → actor executes the action
-          │
-          ▼
-  return 'block  (navigation suppressed)
+  Emacs dispatches the action; returns 'block (navigation suppressed)
 ```
 
 ### Initial Load Flow
@@ -366,51 +494,47 @@ events on the HUD session. When the URL starts with `emacs-hud://`:
           │
           ▼
   start_hud_server() → binds TcpListener on 127.0.0.1:0
-  env::set_var("EMACS_HYPERVISOR_EMBEDDED_HUD_URL", "http://127.0.0.1:<port>/index.html")
+  env::set_var("EMACS_HYPERVISOR_EMBEDDED_HUD_URL",
+               "http://127.0.0.1:<port>/index.html")
           │
           ▼
-  Elle VM starts, install_elisp_modules() sets env vars for runtime modules
+  Elle VM starts; runtime-forms emits
+    (setq emacs-hypervisor-hud--url "http://127.0.0.1:<port>/index.html")
           │
           ▼
-  Emacs bootstrap loads sexp-rpc + session-state modules
-  Elisp reads EMACS_HYPERVISOR_EMBEDDED_HUD_URL
-  → (setq emacs-hypervisor-hud--url "http://127.0.0.1:<port>/index.html")
+  [User calls emacs-hypervisor-hud-toggle / -show]
           │
           ▼
-  [User or boot sequence calls (emacs-hypervisor-extension-call :hud :open)]
+  emacs-hypervisor-hud--initialize-session
+   → make child frame (placeholder buffer)
+   → xwidget-webkit-new-session  ".../index.html#bg=..&fg=.."
           │
           ▼
-  Elle actor: open-hud → returns {:action :show}
-  Emacs: emacs-hypervisor-hud-show
-  → emacs-hypervisor-hud--initialize-session
-  → xwidget-webkit-new-session "http://127.0.0.1:<port>/index.html"
+  WebKit fetches /index.html, /pkg/hud_wasm.js, /pkg/hud_wasm_bg.wasm
+   → init() → start("hud-canvas")
+   → index.html applies theme from URL fragment (push_theme)
+   → window.hudPushState / window.hudPushTheme exposed
           │
           ▼
-  WebKit fetches /index.html from embedded HTTP server
-  → parses HTML, fetches /pkg/hud_wasm.js
-  → fetches /pkg/hud_wasm_bg.wasm
-  → init() → start("hud-canvas") → window.hudPushState exposed
-          │
-          ▼
-  Elle actor calls :state → returns @*hud-state*
-  Emacs calls emacs-hypervisor-hud-push-state with initial state
-  → egui renders first frame with live data
+  --retry-initial-collect → --trigger-collect (retries until actor ready)
+   → :collect → actor emits :hud-state-changed → first real frame
 ```
 
 ---
 
 ## Tech Stack
 
-| Layer           | Technology                                      |
-|-----------------|-------------------------------------------------|
-| WASM renderer   | Rust, eframe 0.31, egui, WebGL                 |
-| WASM build      | wasm-pack, wasm-bindgen, serde_json, lazy_static |
+| Layer           | Technology                                               |
+|-----------------|----------------------------------------------------------|
+| WASM renderer   | Rust, eframe 0.31, egui, WebGL                           |
+| WASM build      | wasm-pack, wasm-bindgen, serde_json, lazy_static         |
 | WASM runtime    | xwidget-webkit (WebKit2GTK on Linux, WKWebView on macOS) |
-| Asset embedding | Rust build.rs, `include_bytes!`, byte array literals |
-| Asset serving   | Bare `TcpListener` HTTP/1.1 in a Rust thread    |
-| Extension actor | Elle (custom Lisp dialect), mutable `@struct` cells |
-| IPC protocol    | sexp-rpc over stdio (newline-delimited S-expressions) |
-| Elisp surface   | Emacs Lisp, xwidget-webkit API, child-frame API |
+| Asset embedding | Rust build.rs, byte-array literals                       |
+| Asset serving   | Bare `TcpListener` HTTP/1.1 in a Rust thread             |
+| Extension actor | Elle (custom Lisp dialect), mutable `@struct` cells      |
+| Git data        | std/git → libgit2 via FFI (`ffi/native`)                 |
+| IPC protocol    | sexp-rpc over stdio (newline-delimited S-expressions)    |
+| Elisp surface   | Emacs Lisp, xwidget-webkit API, child-frame API          |
 
 ---
 
@@ -424,14 +548,14 @@ hud-wasm/src/lib.rs
 hud-wasm/pkg/
   hud_wasm.js          ← JS glue generated by wasm-bindgen
   hud_wasm_bg.wasm     ← compiled WASM binary
-hud-wasm/index.html    ← hand-written HTML shell with <canvas>
+hud-wasm/index.html    ← hand-written HTML shell with <canvas> + theme bootstrap
        │
        │  cargo build (host/build.rs reads these files)
        ▼
-$OUT_DIR/embedded_hud.rs
-  HUD_INDEX_HTML_BYTES: &[u8]  = include_bytes!("...index.html")
-  HUD_WASM_BG_BYTES:   &[u8]  = include_bytes!("...hud_wasm_bg.wasm")
-  HUD_WASM_JS_BYTES:   &[u8]  = include_bytes!("...hud_wasm.js")
+embedded HUD source (byte-array literals)
+  HUD_INDEX_HTML_BYTES: &[u8]
+  HUD_WASM_BG_BYTES:    &[u8]
+  HUD_WASM_JS_BYTES:    &[u8]
        │
        │  compiled into emacs-hypervisor binary
        ▼
@@ -440,12 +564,12 @@ emacs-hypervisor  (single self-contained binary)
   — no npm, no CDN, no file system access for HUD assets
 ```
 
-The `just build` recipe enforces this ordering: WASM is built before `cargo
+`scripts/build-hypervisor` enforces this ordering: WASM is built before `cargo
 build` runs, so `build.rs` always finds the compiled artifacts.
 
-`cargo:rerun-if-changed` directives in `build.rs` ensure the embedded bytes
-are refreshed whenever `index.html`, `hud_wasm_bg.wasm`, or `hud_wasm.js`
-changes.
+Note on libgit2: `scripts/bootstrap-elle` clones upstream Elle at the pinned
+ref and applies `patches/elle/*.patch` (cross-platform libgit2 loading) before
+building, so the runtime resolves libgit2 without any environment setup.
 
 ---
 
@@ -456,45 +580,42 @@ changes.
 The xwidget-webkit session holds an open HTTP connection to the embedded server.
 If the `emacs-hypervisor` process exits:
 
-- The TCP connections are dropped; WebKit may show an error page or go blank.
+- The TCP connections drop; WebKit may show an error page or go blank.
 - The Elle actor and all extension state are gone.
-- `emacs-hypervisor-hud-cleanup` should be called on session teardown to
-  destroy the child frame and release the xwidget buffer.
-- The `kill-emacs-hook` registration ensures cleanup runs when Emacs exits, but
-  if Emacs outlives the hypervisor process the frame will persist in a broken
-  state until toggled.
+- `emacs-hypervisor-hud-cleanup` (registered on `kill-emacs-hook`) destroys the
+  child frame and releases the xwidget buffer on Emacs exit. If Emacs outlives
+  the hypervisor, the frame persists in a broken state until toggled.
 
-**Mitigation:** The bootstrap layer monitors the stdio pipe. When the
-hypervisor process exits, the sexp-rpc reader loop should detect EOF and
-trigger a cleanup event.
+### libgit2 unavailable
 
-### Extension misconfigured or absent
+If `std/git` cannot load libgit2, `ensure-git` logs a warning and
+`collect-git-data` returns nil. `:collect` then falls back to `:branch "—"`,
+`:changes "0 files"`, `:last-commit ""` while still reporting the resolved
+project root and non-git context. No crash; the cause is visible in the
+`:log` event stream (and, with `emacs-hypervisor-hud-debug`, in `*Messages*`).
 
-If `:hud` is not in the extensions list passed via session-data, the extension
-actor is never registered. Calls to `:open` or `:update` return an
-`extension-unavailable` error response. The HUD frame is never created.
-No crash; the session continues without the HUD.
+### Asset URL not set
 
 If `EMACS_HYPERVISOR_EMBEDDED_HUD_URL` is not set when
-`emacs-hypervisor-hud-show` is called, it throws an error:
+`emacs-hypervisor-hud-show` is called, `emacs-hypervisor-hud--url` is nil and the
+command errors:
 
 ```
 HUD Error: HUD HTML assets URL not set. Is the hypervisor session active?
 ```
 
+If the Emacs binary lacks xwidget support, `--initialize-session` errors with a
+clear message and runs cleanup.
+
 ### Actor model resilience properties
 
-The actor model provides several failure-isolation benefits over a
-direct split-brain design:
-
-- **No shared mutable state across process boundaries.** The WASM canvas and
-  the Elisp layer are stateless renderers. A crash or stale state in either
-  does not corrupt the authoritative `@*hud-state*`.
-- **Idempotent state pushes.** `push_state` is a total replacement — if a push
-  is lost, the next push restores correctness.
-- **Click-backs are fire-and-forget requests.** If the hypervisor is busy, the
-  Elisp layer blocks briefly on the response; it does not hold locks or
-  accumulate deferred state.
-- **Extension registration is explicit.** Unsupported extensions cause a
-  startup error with a clear message rather than a silent no-op or a crash
-  mid-session.
+- **No shared mutable state across process boundaries.** The WASM canvas and the
+  Elisp layer are stateless renderers. A crash or stale state in either does not
+  corrupt the authoritative `@*hud-state*`.
+- **Idempotent pushes.** `push_state`/`push_theme` are total replacements — a
+  lost push is corrected by the next one.
+- **Click-backs are fire-and-forget.** The Elisp layer blocks briefly on the
+  response; it holds no locks and accumulates no deferred state.
+- **Context vs. authority split.** Emacs supplies only per-buffer *context*
+  (repo path, MCP/`gh` availability); the actor remains the sole authority over
+  the rendered state.
