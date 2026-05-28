@@ -30,7 +30,9 @@ setup:
     else
       echo "✓ wasm-pack"
     fi
-    # libgit2 — runtime dependency for std/git (HUD extension)
+    # libgit2 — runtime dependency for std/git (HUD extension).
+    # No symlink/DYLD workaround needed: our patched lib/git.lisp loads
+    # libgit2.dylib directly from the Homebrew/MacPorts install dirs.
     if [[ "$(uname -s)" == Darwin ]] && command -v brew >/dev/null 2>&1; then
       if ! brew list libgit2 &>/dev/null; then
         echo "Installing libgit2 via Homebrew"
@@ -38,13 +40,6 @@ setup:
       else
         echo "✓ libgit2"
       fi
-      # Elle ffi/native loads "libgit2.so" — macOS only has .dylib, create symlink
-      brew_prefix=$(brew --prefix)
-      if [ -f "$brew_prefix/lib/libgit2.dylib" ] && [ ! -f "$brew_prefix/lib/libgit2.so" ]; then
-        echo "Creating libgit2.so symlink for Elle FFI"
-        ln -sf "$brew_prefix/lib/libgit2.dylib" "$brew_prefix/lib/libgit2.so"
-      fi
-      echo "✓ libgit2.so symlink"
     fi
     echo "All build dependencies ready."
 
