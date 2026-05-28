@@ -510,6 +510,7 @@ For working on Hypervisor itself, not normal user configuration.
 ```bash
 just build                   # build runtime Elle plugins and binary
 just dev                     # same build, plus MCP Elle plugin artifacts
+just clean                   # remove rebuildable local artifacts and caches
 just fmt                     # format Elle Lisp files at 120 columns
 just install-hooks           # enable repo Git hooks
 just test                    # run tests

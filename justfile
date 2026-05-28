@@ -20,7 +20,15 @@ install bin_dir="$HOME/.local/bin": dev
 
 [group('Build')]
 clean:
-    rm -rf target host/target host/elisp_pack/target
+    rm -rf \
+      target \
+      host/target \
+      host/elisp_pack/target \
+      plugins/mmdflux/target \
+      .elle/target \
+      .elle/plugins/target \
+      .elle/mcp/target \
+      .elle-mcp
 
 [group('Elle')]
 fmt:
