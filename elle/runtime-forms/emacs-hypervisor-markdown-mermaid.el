@@ -162,6 +162,8 @@ flickers during manual verification."
                 #'emacs-hypervisor-markdown-mermaid-viewer-fit-window)
     (define-key map (kbd "RET")
                 #'emacs-hypervisor-markdown-mermaid-jump-to-source)
+    (define-key map (kbd "j") #'emacs-hypervisor-markdown-mermaid-viewer-scroll-down)
+    (define-key map (kbd "k") #'emacs-hypervisor-markdown-mermaid-viewer-scroll-up)
     map)
   "Keymap for Mermaid viewer buffers.")
 
@@ -170,7 +172,7 @@ flickers during manual verification."
   "Major mode for full-size Hypervisor Mermaid image buffers.")
 
 (defconst emacs-hypervisor-markdown-mermaid--viewer-help
-  "Mermaid viewer: +/= zoom in, - zoom out, 0 original, w fit width, f fit window, g refresh, RET source, q quit"
+  "Mermaid viewer: j/k scroll, +/= zoom in, - zoom out, 0 original, w fit width, f fit window, g refresh, RET source, q quit"
   "Header line text for Mermaid viewer buffers.")
 
 (defun emacs-hypervisor-markdown-mermaid--cancel-refresh-timer ()
@@ -518,6 +520,18 @@ configured display SVG image when Emacs can display SVG."
   (interactive)
   (emacs-hypervisor-markdown-mermaid--goto-viewer-image)
   (image-transform-fit-to-window))
+
+(defun emacs-hypervisor-markdown-mermaid-viewer-scroll-down (&optional n)
+  "Scroll the Mermaid viewer image down by N steps."
+  (interactive "p")
+  (emacs-hypervisor-markdown-mermaid--goto-viewer-image)
+  (image-next-line n))
+
+(defun emacs-hypervisor-markdown-mermaid-viewer-scroll-up (&optional n)
+  "Scroll the Mermaid viewer image up by N steps."
+  (interactive "p")
+  (emacs-hypervisor-markdown-mermaid--goto-viewer-image)
+  (image-previous-line n))
 
 (defun emacs-hypervisor-markdown-mermaid--prepare-viewer-buffer ()
   "Prepare the current image viewer buffer for ephemeral Mermaid display."
