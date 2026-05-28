@@ -1,6 +1,7 @@
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
     include!(concat!(env!("OUT_DIR"), "/embedded_elisp.rs"));
+    include!(concat!(env!("OUT_DIR"), "/embedded_plugins.rs"));
 
     pub const EMBEDDED_BOOTSTRAP_ELISP: &str =
         include_str!("../emacs-kernel/emacs-hypervisor-bootstrap.el");
@@ -24,6 +25,7 @@ use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 
 const HOME_STARTUP_ELISP: &str = include_str!("../emacs-kernel/home-startup.el");
 const HOME_EARLY_INIT_ELISP: &str = embedded::EMBEDDED_EARLY_INIT_ELISP;
+const ELLE_PLUGIN_CACHE_ENV: &str = "EMACS_HYPERVISOR_ELLE_PLUGIN_CACHE_DIR";
 
 #[derive(Parser, Debug)]
 #[command(name = "emacs-hypervisor")]
@@ -136,10 +138,7 @@ fn default_elle_home_path() -> PathBuf {
 }
 
 fn install_elisp_modules() -> Result<(), String> {
-    env::set_var(
-        "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH",
-        generated_init_hash(),
-    );
+    env::set_var("EMACS_HYPERVISOR_EMBEDDED_INIT_HASH", generated_init_hash());
     env::set_var(
         "EMACS_HYPERVISOR_EMBEDDED_RUNTIME_MODULES",
         embedded::EMBEDDED_ELISP_MODULE_MANIFEST,
@@ -148,6 +147,101 @@ fn install_elisp_modules() -> Result<(), String> {
         env::set_var(module.env_name, module.embedded_source);
     }
     Ok(())
+}
+
+fn embedded_plugin_cache_root() -> PathBuf {
+    env::var_os(ELLE_PLUGIN_CACHE_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env::temp_dir().join("emacs-hypervisor-elle-plugins"))
+}
+
+fn plugin_cache_digest_dir() -> String {
+    embedded::EMBEDDED_ELLE_PLUGIN_SET_DIGEST.replace(':', "-")
+}
+
+fn plugin_file_matches(path: &Path, bytes: &[u8]) -> bool {
+    fs::read(path)
+        .map(|existing| existing == bytes)
+        .unwrap_or(false)
+}
+
+fn write_embedded_plugin_file(
+    cache_dir: &Path,
+    plugin: &embedded::EmbeddedEllePlugin,
+) -> Result<PathBuf, String> {
+    let target = cache_dir.join(plugin.file_name);
+    if plugin_file_matches(&target, plugin.bytes) {
+        return Ok(target);
+    }
+
+    let temp_name = format!(
+        ".{}.{}.{}.tmp",
+        plugin.file_name,
+        plugin.digest.replace(':', "-"),
+        process::id()
+    );
+    let temp = cache_dir.join(temp_name);
+    fs::write(&temp, plugin.bytes)
+        .map_err(|error| format!("failed to write {}: {}", temp.display(), error))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temp, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("failed to chmod {}: {}", temp.display(), error))?;
+    }
+
+    fs::rename(&temp, &target).map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        format!(
+            "failed to install embedded Elle plugin {} at {}: {}",
+            plugin.name,
+            target.display(),
+            error
+        )
+    })?;
+
+    Ok(target)
+}
+
+fn embedded_plugin_path_env_name(plugin_name: &str) -> String {
+    let mut output = String::from("EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_");
+    for ch in plugin_name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_uppercase());
+        } else {
+            output.push('_');
+        }
+    }
+    output.push_str("_PATH");
+    output
+}
+
+fn install_embedded_elle_plugins() -> Result<Option<PathBuf>, String> {
+    if embedded::EMBEDDED_ELLE_PLUGINS.is_empty() {
+        return Ok(None);
+    }
+
+    let cache_dir = embedded_plugin_cache_root().join(plugin_cache_digest_dir());
+    fs::create_dir_all(&cache_dir)
+        .map_err(|error| format!("failed to create {}: {}", cache_dir.display(), error))?;
+
+    for plugin in embedded::EMBEDDED_ELLE_PLUGINS {
+        let plugin_path = write_embedded_plugin_file(&cache_dir, plugin)?;
+        env::set_var(embedded_plugin_path_env_name(plugin.name), plugin_path);
+    }
+
+    Ok(Some(cache_dir))
+}
+
+fn prepend_elle_path(path: Option<String>, dir: &Path) -> String {
+    let dir = dir.to_string_lossy().into_owned();
+    match path {
+        Some(existing) if existing.split(':').any(|entry| entry == dir) => existing,
+        Some(existing) if !existing.is_empty() => format!("{}:{}", dir, existing),
+        _ => dir,
+    }
 }
 
 fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
@@ -177,10 +271,14 @@ fn fail(message: impl AsRef<str>) -> ! {
 fn run_serve() {
     let backend_display = "elle/hypervisor.lisp";
     install_elisp_modules().unwrap_or_else(|error| fail(error));
+    let embedded_plugin_dir = install_embedded_elle_plugins().unwrap_or_else(|error| fail(error));
 
     let mut config = Config::default();
     if config.home.is_none() {
         config.home = Some(default_elle_home_path().display().to_string());
+    }
+    if let Some(plugin_dir) = embedded_plugin_dir {
+        config.path = Some(prepend_elle_path(config.path.take(), &plugin_dir));
     }
     elle::config::init(config);
 
@@ -534,6 +632,67 @@ mod tests {
             nonce,
             counter
         ))
+    }
+
+    #[test]
+    fn prepend_elle_path_adds_embedded_plugin_dir_first() {
+        let plugin_dir = PathBuf::from("/tmp/emacs-hypervisor-elle-plugins/test");
+
+        assert_eq!(
+            prepend_elle_path(None, &plugin_dir),
+            "/tmp/emacs-hypervisor-elle-plugins/test"
+        );
+        assert_eq!(
+            prepend_elle_path(Some("/existing/path".to_string()), &plugin_dir),
+            "/tmp/emacs-hypervisor-elle-plugins/test:/existing/path"
+        );
+        assert_eq!(
+            prepend_elle_path(
+                Some("/tmp/emacs-hypervisor-elle-plugins/test:/existing/path".to_string()),
+                &plugin_dir
+            ),
+            "/tmp/emacs-hypervisor-elle-plugins/test:/existing/path"
+        );
+    }
+
+    #[test]
+    fn embedded_plugin_path_env_name_is_stable() {
+        assert_eq!(
+            embedded_plugin_path_env_name("mmdflux"),
+            "EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_MMDFLUX_PATH"
+        );
+        assert_eq!(
+            embedded_plugin_path_env_name("foo-bar"),
+            "EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_FOO_BAR_PATH"
+        );
+    }
+
+    #[test]
+    fn write_embedded_plugin_file_materializes_bytes() {
+        let dir = unique_test_home();
+        fs::create_dir_all(&dir).expect("test should create plugin cache");
+        let plugin = embedded::EmbeddedEllePlugin {
+            name: "unit",
+            file_name: "libelle_unit.dylib",
+            digest: "fnv1a64:test",
+            bytes: b"plugin-bytes",
+        };
+        let target = dir.join(plugin.file_name);
+
+        write_embedded_plugin_file(&dir, &plugin).expect("plugin write should succeed");
+        assert_eq!(
+            fs::read(&target).expect("plugin file should be readable"),
+            plugin.bytes
+        );
+
+        fs::write(&target, b"stale").expect("test should write stale plugin");
+        write_embedded_plugin_file(&dir, &plugin).expect("plugin rewrite should succeed");
+        assert_eq!(
+            fs::read(&target).expect("plugin file should be readable"),
+            plugin.bytes
+        );
+
+        fs::remove_dir_all(&dir).expect("test plugin cache cleanup should succeed");
     }
 
     #[test]

@@ -13,8 +13,12 @@
       :string result
       (or fallback (string result))))
 
+  (defn mmdflux-plugin-spec []
+    (or (sys/env "EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_MMDFLUX_PATH") "plugin/mmdflux"))
+
   (defn load-mmdflux []
-    (let [[ok? plugin] (protect (import "plugin/mmdflux"))]
+    (let* [spec (mmdflux-plugin-spec)
+           [ok? plugin] (protect (import spec))]
       (if ok? plugin nil)))
 
   (defn normalize-render-style [style]

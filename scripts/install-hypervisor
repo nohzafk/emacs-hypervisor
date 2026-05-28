@@ -6,14 +6,15 @@ repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
 bin_dir=${1:-"$HOME/.local/bin"}
 hypervisor_binary="$repo_dir/target/release/emacs-hypervisor"
-plugins_file="$repo_dir/.elle-plugins"
 
 usage() {
   cat <<USAGE
 usage: scripts/install-hypervisor [BIN_DIR]
 
-Install the built emacs-hypervisor binary and requested runtime Elle plugin
-libraries into BIN_DIR.
+Install the built emacs-hypervisor binary into BIN_DIR.
+
+Runtime Elle plugins configured at build time are embedded in the binary and
+do not need to be copied next to it.
 
 Default BIN_DIR: $HOME/.local/bin
 USAGE
@@ -40,37 +41,6 @@ fi
 mkdir -p "$bin_dir"
 rm -f "$bin_dir/emacs-hypervisor"
 cp "$hypervisor_binary" "$bin_dir/emacs-hypervisor"
-
-elle_plugins=${EMACS_HYPERVISOR_ELLE_PLUGINS:-}
-if [ -z "$elle_plugins" ] && [ -f "$plugins_file" ]; then
-  elle_plugins=$(tr '\n' ',' < "$plugins_file" | sed 's/,$//')
-fi
-
-if [ -n "$elle_plugins" ]; then
-  case "$(uname -s)" in
-    Darwin) ext=dylib ;;
-    *) ext=so ;;
-  esac
-
-  IFS=',' read -r -a plugins <<< "$elle_plugins"
-  for plugin in "${plugins[@]}"; do
-    plugin=${plugin//[[:space:]]/}
-    [ -n "$plugin" ] || continue
-
-    plugin_source="$repo_dir/.elle/target/release/libelle_${plugin}.${ext}"
-    plugin_target="$bin_dir/libelle_${plugin}.${ext}"
-    if [ ! -f "$plugin_source" ]; then
-      echo "missing Elle plugin library: $plugin_source" >&2
-      echo "run: just dev" >&2
-      exit 1
-    fi
-
-    cp "$plugin_source" "$plugin_target"
-    if [ "$(uname -s)" = "Darwin" ]; then
-      codesign --force --sign - "$plugin_target"
-    fi
-  done
-fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
   codesign --force --sign - "$bin_dir/emacs-hypervisor"

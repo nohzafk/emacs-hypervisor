@@ -476,7 +476,8 @@ values and renderer-specific behavior.
 
 The binary must be built with the matching runtime Elle plugin available.
 Runtime Elle plugin defaults live in `.elle-plugins`, so the standard build
-includes `mmdflux` without building the local-development MCP Elle plugins:
+first builds `mmdflux` and then embeds the plugin library bytes into the
+`emacs-hypervisor` binary:
 
 ```bash
 just build
@@ -493,15 +494,20 @@ just dev
 MCP Elle plugin artifacts. `just install` depends on `just dev`, so local Emacs
 testing leaves Codex MCP support ready too.
 
-For a local install, the requested runtime Elle plugin libraries are copied next
-to the installed binary:
+For a local install, only the host binary is copied:
 
 ```bash
 just install
 ```
 
+At runtime, embedded Elle plugins are written to a private cache directory and
+prepended to Elle's module search path before Hypervisor starts. This keeps
+distribution to one file while still satisfying the operating system dynamic
+loader.
+
 Set `EMACS_HYPERVISOR_ELLE_PLUGINS` to override the runtime Elle plugin list for
-ad hoc builds.
+ad hoc builds. Set `EMACS_HYPERVISOR_ELLE_PLUGIN_CACHE_DIR` to override the
+runtime extraction cache root.
 
 ## Development
 

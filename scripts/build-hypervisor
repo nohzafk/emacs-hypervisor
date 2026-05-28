@@ -40,7 +40,8 @@ Artifacts:
 - $target_dir/debug/emacs-hypervisor (with --debug)
 
 Notes:
-- builds requested runtime Elle plugins into .elle/target/release first
+- builds requested runtime Elle plugins into .elle/target/release first so the
+  host binary can embed them
 - builds the host binary offline against the checked-in host lockfile
 - if host/Cargo.lock is missing, it is seeded from .elle/Cargo.lock
 
