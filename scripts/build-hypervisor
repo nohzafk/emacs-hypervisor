@@ -10,6 +10,11 @@ default_elle_plugins_file="$repo_dir/.elle-plugins"
 target_dir=${CARGO_TARGET_DIR:-"$repo_dir/target"}
 profile=release
 cargo_args=(build --offline --locked --manifest-path "$manifest_path" --release)
+
+# Shell UI helpers do not belong in Cargo's build environment.  Some Rust build
+# scripts panic when non-UTF-8 prompt decoration values are present.
+unset ABBR_TIPS_PROMPT
+
 if [ -f "$default_elle_plugins_file" ]; then
   default_elle_plugins=$(tr '\n' ',' < "$default_elle_plugins_file" | sed 's/,$//')
 else

@@ -44,7 +44,7 @@ install-hooks:
 
 [group('Test')]
 test: build
-    cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
+    ABBR_TIPS_PROMPT= cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
     ./.elle/target/release/elle tests/elle/hypervisor-runtime.lisp
     emacs --batch -Q \
       -L host/emacs-kernel \

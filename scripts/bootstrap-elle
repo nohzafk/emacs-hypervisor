@@ -4,6 +4,10 @@ set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 
+# Shell UI helpers do not belong in Cargo's build environment.  Some Rust build
+# scripts panic when non-UTF-8 prompt decoration values are present.
+unset ABBR_TIPS_PROMPT
+
 elle_dir=${ELLE_DIR:-"$repo_dir/.elle"}
 elle_repo=${ELLE_REPO:-https://github.com/elle-lisp/elle.git}
 default_elle_ref_file="$repo_dir/.elle-ref"
