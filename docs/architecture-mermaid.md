@@ -2,13 +2,13 @@
 
 ## Overview
 
-The Mermaid extension renders Mermaid diagram fences inline in Emacs markdown buffers. It produces either SVG images (displayed as overlays via `create-image`) or ASCII art text (displayed as plain overlays). Rendering is performed by **mmdflux**, a native Rust plugin compiled into the Elle runtime. The extension follows the same actor infrastructure used by all Hypervisor extensions: requests arrive from Emacs over sexp-rpc, are dispatched to the actor, rendered by the plugin, and the response is sent back to Emacs.
+The Mermaid extension renders Mermaid diagram fences inline in Emacs markdown buffers. It produces either SVG images (displayed as overlays via `create-image`) or ASCII art text (displayed as plain overlays). Rendering is performed by **mmdflux**, a native Rust plugin loaded into the Elle runtime through the [stable plugin ABI](architecture.md#extensions). The extension follows the same actor infrastructure used by all Hypervisor extensions: requests arrive from Emacs over sexp-rpc, are dispatched to the actor, rendered by the plugin, and the response is sent back to Emacs.
 
 ---
 
 ## Architecture Diagram
 
-```
+```text
 Emacs markdown buffer
   │
   ├─ after-change-functions / window-configuration-change-hook
@@ -43,7 +43,7 @@ Emacs markdown buffer
 
 ### 1. mmdflux Rust Plugin
 
-mmdflux is a native Rust crate compiled as an Elle plugin (from the `.elle-plugins` workspace). It is statically linked and embedded inside the `emacs-hypervisor` binary, ensuring zero runtime dependencies.
+mmdflux is a native Rust crate compiled as an Elle plugin — a `cdylib` (`libelle_mmdflux`) built against the stable plugin ABI in the `.elle-plugins` workspace. It is **embedded and dlopened at runtime**: `build.rs` bundles the compiled dynamic library as bytes inside the `emacs-hypervisor` binary at build time; at startup the host extracts it to a cache directory and the Elle VM loads it via `(import spec)`. The binary therefore stays self-contained with no external plugin files required at runtime.
 
 Discovery order at startup:
 
@@ -65,7 +65,7 @@ Both functions accept a source string and an options struct. See configuration s
 
 The extension is a pure function module: `emacs-hypervisor-mermaid-extension-module` takes the `extensions` module as its only argument and returns a `{:register register :render render}` struct.
 
-**Handler registration**
+## Handler registration
 
 `register` calls `make-handler`, which calls `load-mmdflux`. If the plugin loaded successfully, it returns a single-method handler map:
 
@@ -75,7 +75,7 @@ The extension is a pure function module: `emacs-hypervisor-mermaid-extension-mod
 
 If the plugin is absent, `make-handler` returns `nil` and the `:mermaid` key is omitted from the registry.
 
-**Render dispatch**
+## Render dispatch
 
 The `:render` method is the only method. It:
 
@@ -83,7 +83,7 @@ The `:render` method is the only method. It:
 2. Normalises `:style` via `normalize-render-style`: accepts `"svg"`, `"ascii"`, or defaults to `ascii` when absent or unrecognised.
 3. Dispatches to `render-svg` or `render-ascii`.
 
-**render-svg**
+## render-svg
 
 Calls `mmdflux:render-svg source (render-options args)`. On success returns:
 
@@ -91,7 +91,7 @@ Calls `mmdflux:render-svg source (render-options args)`. On success returns:
 {:ok true :kind :image :mime "image/svg+xml" :svg "<svg...>" :renderer :mmdflux}
 ```
 
-**render-ascii**
+## render-ascii
 
 Extracts `:viewport {:width N}` from `args`, merges it with `render-options`, then calls `mmdflux:render-ascii-fit source fit-opts` (includes `:max-width` and `:padding 1`). On success returns:
 
@@ -99,7 +99,7 @@ Extracts `:viewport {:width N}` from `args`, merges it with `render-options`, th
 {:ok true :kind :text :mime "text/plain" :text "..." :renderer :mmdflux}
 ```
 
-**Error payloads**
+## Error payloads
 
 All error paths return a structured payload via `extension-error-payload`:
 
@@ -115,36 +115,35 @@ Error kinds: `:invalid-request`, `:render-failed`.
 
 All extensions share a single actor loop and dispatch table.
 
-**Registry**
+## Registry
 
 Built in `hypervisor.lisp` after session startup completes:
 
 ```lisp
 (defn emacs-hypervisor-extension-registry [settings]
-  (let* [handlers (hud-extension:register settings
-                   (mermaid-extension:register settings {}))
-         ...]
+  (let [handlers (mermaid-extension:register settings {})]
     (extensions:make-registry settings handlers)))
 ```
 
-`make-registry` returns `{:settings settings :handlers handlers}` where `handlers` is a map of keywords to handler structs (e.g. `{:mermaid {...} :hud {...}}`).
+`make-registry` returns `{:settings settings :handlers handlers}` where `handlers` is a map of keywords to handler structs (e.g. `{:mermaid {...}}`).
 
-**Dispatch**
+## Dispatch
 
 `dispatch-extension-call` extracts `:extension`, `:method`, and `:args` from the wire payload, looks up the handler in `(get registry :handlers)`, looks up the method function in the handler, and calls it. Errors for unknown extension or unknown method are sent as error responses via `protocol:send-error-response`.
 
-**Actor loop**
+## Actor loop
 
 `run-extension-actor` is a blocking `while true` loop that reads from the shared mailbox (`protocol:read-message`), which in turn calls `await-mailbox-message` → `pop-arrival-message`. Incoming messages routed to the `:other` queue (i.e. requests, not responses or events) are processed here.
 
 `handle-extension-message` checks `message-kind`:
+
 - `:request` with op `:extension-call` → `dispatch-extension-call`
 - `:request` with any other op → error response
 - `:event`, `:response`, other → silently ignored
 
 ### 4. Elisp Rendering Layer (`elle/runtime-forms/emacs-hypervisor-markdown-mermaid.el`)
 
-**Minor mode**
+## Minor mode
 
 `emacs-hypervisor-markdown-mermaid-mode` is a buffer-local minor mode (lighter `" HV-Mermaid"`). On enable it installs two hooks:
 
@@ -157,11 +156,11 @@ On disable it removes the hooks and calls `clear-buffer` to remove all overlays.
 
 Auto-enabling: `emacs-hypervisor-markdown-mermaid-install-hooks` adds `emacs-hypervisor-markdown-mermaid-maybe-enable` to `markdown-mode-hook`, `markdown-ts-mode-hook`, and `gfm-mode-hook`.
 
-**Debounced refresh**
+## Debounced refresh
 
 `--schedule-refresh` cancels any pending idle timer and schedules a new one via `run-with-idle-timer` at the configured delay. The timer fires `--auto-refresh-buffer`, which checks the buffer is live and the mode is still active before calling `render-buffer`.
 
-**Source block scanning**
+## Source block scanning
 
 `--source-blocks` scans the buffer with two successive `re-search-forward` calls:
 
@@ -170,7 +169,7 @@ Auto-enabling: `emacs-hypervisor-markdown-mermaid-install-hooks` adds `emacs-hyp
 
 Each matched block is a list: `(block-start block-end source-start source-end source-text)`.
 
-**RPC call**
+## RPC call
 
 `--render-block` calls `emacs-hypervisor-extension-call :mermaid :render` with:
 
@@ -183,7 +182,7 @@ Each matched block is a list: `(block-start block-end source-start source-end so
 
 Timeout is 10 seconds. `:style` is resolved by `--render-style` from the `emacs-hypervisor-markdown-mermaid-render-style` customisation: `:auto` checks `(image-type-available-p 'svg)` and falls back to `:ascii` if SVG is unsupported.
 
-**SVG display pipeline**
+## SVG display pipeline
 
 On a successful `:image` response with `mime "image/svg+xml"`:
 
@@ -193,22 +192,23 @@ On a successful `:image` response with `mime "image/svg+xml"`:
 4. The image object is stored in the render plist as `:preview-image`.
 5. An overlay is inserted at `block-end` with `after-string` set to `"\n<propertized-space>\n"` where the space carries the `display` property pointing to the image.
 
-**ASCII display**
+## ASCII display
 
 On a successful `:text` response, an overlay is inserted at `block-end` with `after-string` set to `"\n<ascii-text>\n"`.
 
-**Overlay management**
+## Overlay management
 
 All overlays are tracked in the buffer-local `emacs-hypervisor-markdown-mermaid--overlays` list. `clear-buffer` deletes all overlays and resets the list.
 
 Each image overlay also stores:
+
 - `emacs-hypervisor-markdown-mermaid-render` → render plist (for viewer access)
 - `help-echo` → `"mouse-1: open diagram viewer; C-c C-r: refresh"`
 - `keymap` → `emacs-hypervisor-markdown-mermaid-preview-map`
 
 Cache files are deleted on `kill-emacs` via `kill-emacs-hook`.
 
-**Viewer mode**
+## Viewer mode
 
 `emacs-hypervisor-markdown-mermaid-viewer-mode` is a major mode derived from `image-mode`. A viewer buffer is created by inserting the SVG cache file contents, setting the visited filename to the cache file, then activating the mode. The buffer is read-only and `buffer-offer-save` is nil.
 
@@ -232,7 +232,7 @@ Opening a viewer: click `mouse-1` on an inline preview or call `emacs-hypervisor
 
 ## Data Flow: Full Render Round-Trip
 
-```
+```text
 User edits markdown buffer
   │
   ├─ after-change-functions fires → --schedule-refresh
@@ -297,7 +297,7 @@ User edits markdown buffer
 
 ### Plugin Loading
 
-```
+```text
 hypervisor.lisp startup
   └─ emacs-hypervisor-extension-registry settings
        └─ mermaid-extension:register settings {}
@@ -323,7 +323,7 @@ When embedded via `EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_MMDFLUX_PATH`, the host
 |---|---|
 | Lisp runtime | Elle (custom dialect with fibers, monitors, `ev/scope`) |
 | Wire protocol | sexp-rpc: newline-delimited S-expressions over subprocess stdin/stdout |
-| Rendering plugin | mmdflux Rust crate (SVG + ASCII rendering), statically embedded |
+| Rendering plugin | mmdflux Rust crate (SVG + ASCII rendering), embedded `cdylib`, dlopened at runtime |
 | Emacs display | `create-image` with `'svg` type, `after-string` overlays |
 | Viewer | `image-mode`-derived major mode with zoom/scroll |
 | Concurrency | Elle fibers: mailbox reader fiber + extension actor fiber share a monitor |
@@ -349,20 +349,3 @@ All variables belong to the `emacs-hypervisor-markdown-mermaid` customisation gr
 | `emacs-hypervisor-markdown-mermaid-viewer-display-action` | symbol | `other-window` | How to open the full-size viewer: `other-window`, `side-window`, or `frame`. |
 | `emacs-hypervisor-markdown-mermaid-viewer-fit-on-open` | boolean | `t` | When non-nil, fit-to-width is applied when a viewer is first opened. |
 | `emacs-hypervisor-markdown-mermaid-preview-use-slices` | nil or `t` | `nil` | Slice large inline previews to reduce redisplay flicker. Leave nil unless flicker is observed. |
-
----
-
-## Comparison with the HUD Extension
-
-Both extensions share `run-extension-actor`, `dispatch-extension-call`, and the monitor-guarded mailbox. Their interaction models differ fundamentally.
-
-| Aspect | Mermaid | HUD |
-|---|---|---|
-| Interaction model | Request/response | State aggregation + event signalling |
-| Methods | `:render` only | `:open`, `:close`, `:update`, `:state` |
-| Plugin dependency | mmdflux Rust plugin (required) | None — HUD handler always registers |
-| Response content | Rendered SVG or ASCII text | Action signal (`{:action :show/:hide}`) or state struct |
-| Emacs rendering path | `create-image` → overlay in markdown buffer | xwidget-webkit child frame → egui WASM canvas |
-| Data direction | Elle → Emacs (response carries content) | Emacs → Elle (push state updates); Elle → Emacs (show/hide signals) |
-| State | Stateless — each render is independent | Stateful — `@*hud-state*` mutable struct persisted across calls |
-| Buffer coupling | Tight — overlays at specific buffer positions | Loose — child frame floats over Emacs |

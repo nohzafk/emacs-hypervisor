@@ -13,34 +13,6 @@ setup:
       echo "error: cargo/rustup not found — install Rust first: https://rustup.rs" >&2
       exit 1
     fi
-    if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
-      echo "Installing Rust target: wasm32-unknown-unknown"
-      rustup target add wasm32-unknown-unknown
-    else
-      echo "✓ Rust target wasm32-unknown-unknown"
-    fi
-    if ! command -v wasm-pack >/dev/null 2>&1; then
-      if [[ "$(uname -s)" == Darwin ]] && command -v brew >/dev/null 2>&1; then
-        echo "Installing wasm-pack via Homebrew"
-        brew install wasm-pack
-      else
-        echo "Installing wasm-pack via cargo"
-        cargo install wasm-pack
-      fi
-    else
-      echo "✓ wasm-pack"
-    fi
-    # libgit2 — runtime dependency for std/git (HUD extension).
-    # No symlink/DYLD workaround needed: our patched lib/git.lisp loads
-    # libgit2.dylib directly from the Homebrew/MacPorts install dirs.
-    if [[ "$(uname -s)" == Darwin ]] && command -v brew >/dev/null 2>&1; then
-      if ! brew list libgit2 &>/dev/null; then
-        echo "Installing libgit2 via Homebrew"
-        brew install libgit2
-      else
-        echo "✓ libgit2"
-      fi
-    fi
     echo "All build dependencies ready."
 
 [group('Build')]

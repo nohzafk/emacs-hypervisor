@@ -296,11 +296,6 @@ Return the request id."
         emacs-hypervisor--process
         (format "%s\n" emacs-hypervisor--shutdown-reason))
        t)
-      (:hud-state-changed
-       (emacs-hypervisor--report-call
-        'emacs-hypervisor-hud--on-state-changed
-        payload)
-       t)
       (_ nil))))
 
 (defun emacs-hypervisor--dispatch-rpc-response (message)

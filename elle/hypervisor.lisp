@@ -18,7 +18,6 @@
 (include-file "execution.lisp")
 (include-file "extensions.lisp")
 (include-file "extension-mermaid.lisp")
-(include-file "extension-hud.lisp")
 (include-file "runtime-forms.lisp")
 
 (def protocol (emacs-hypervisor-protocol-module))
@@ -27,10 +26,9 @@
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
 (def extensions (emacs-hypervisor-extensions-module protocol))
 (def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
-(def hud-extension (emacs-hypervisor-hud-extension-module extensions protocol))
 
 (defn emacs-hypervisor-extension-registry [settings]
-  (let [handlers (hud-extension:register settings (mermaid-extension:register settings {}))]
+  (let [handlers (mermaid-extension:register settings {})]
     (extensions:make-registry settings handlers)))
 
 (defn emacs-hypervisor-runtime-module-manifest []

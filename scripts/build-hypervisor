@@ -79,18 +79,6 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v wasm-pack >/dev/null 2>&1; then
-  echo "wasm-pack is required but was not found in PATH" >&2
-  echo "Run 'just setup' to install build dependencies." >&2
-  exit 1
-fi
-
-if ! rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
-  echo "Rust target wasm32-unknown-unknown is not installed" >&2
-  echo "Run 'just setup' to install build dependencies." >&2
-  exit 1
-fi
-
 if [ -n "$elle_plugins" ] && ! command -v git >/dev/null 2>&1; then
   echo "git is required to initialize Elle submodules for runtime Elle plugins" >&2
   exit 1
@@ -144,9 +132,6 @@ if [ -n "$elle_plugins" ]; then
     fi
   done
 fi
-
-echo "Building HUD WebAssembly package..."
-wasm-pack build --target web --out-dir pkg "$repo_dir/hud-wasm"
 
 echo "Building emacs-hypervisor ($profile)"
 CARGO_TARGET_DIR="$target_dir" cargo "${cargo_args[@]}"

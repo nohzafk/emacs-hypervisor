@@ -185,6 +185,25 @@ Emacs as quoted forms for direct `eval`.
 - `1+`/`1-` canonicalization is Emacs-side; broader Elle reader support may
   replace it later.
 
+## Extensions
+
+**Extension** has one precise meaning in Hypervisor: *a native plugin loaded
+into the Elle runtime through the stable plugin ABI* (the `elle-plugin` crate),
+together with the thin Elle actor and Elisp surface that integrate that plugin
+into a session. The stable-ABI native plugin is the defining element — a feature
+that ships no such plugin is **not** an extension, regardless of how it renders
+or where its state lives.
+
+The canonical extension is **Mermaid**: the `mmdflux` `cdylib` is loaded via
+`(import spec)`, an Elle actor dispatches `:render` calls to it, and an Elisp
+surface displays the result. See
+[architecture-mermaid.md](architecture-mermaid.md).
+
+Extensions reuse shared infrastructure — the `run-extension-actor` loop, the
+sexp-rpc mailbox, and the `dispatch-extension-call` table — but reusing that
+infrastructure does not by itself make a feature an extension. Loading a
+stable-ABI plugin does.
+
 ## File Guide
 
 ```text

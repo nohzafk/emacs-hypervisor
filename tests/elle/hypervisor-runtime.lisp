@@ -18,7 +18,6 @@
 (include-file "../../elle/execution.lisp")
 (include-file "../../elle/extensions.lisp")
 (include-file "../../elle/extension-mermaid.lisp")
-(include-file "../../elle/extension-hud.lisp")
 (include-file "../../elle/runtime-forms/module-loader.lisp")
 
 (def graph (emacs-hypervisor-graph-module))
@@ -91,7 +90,6 @@
 (def execution (emacs-hypervisor-execution-module protocol graph mailbox benchmark))
 (def extensions (emacs-hypervisor-extensions-module protocol))
 (def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
-(def hud-extension (emacs-hypervisor-hud-extension-module extensions protocol))
 (def runtime-module-loader (emacs-hypervisor-runtime-forms-module-loader-module))
 
 (def packages

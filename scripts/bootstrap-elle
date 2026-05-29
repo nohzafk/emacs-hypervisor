@@ -150,11 +150,11 @@ detect_libclang_path() {
 }
 
 # Repo-local patches applied on top of the upstream Elle checkout.
-# These carry fixes we maintain against the pinned upstream ref (e.g.
-# cross-platform libgit2 loading in lib/git.lisp) so a fresh clone of upstream
-# Elle gains them automatically.  Patches are git-diff format under
-# patches/elle/*.patch and are reverted before checkout and (re)applied after,
-# keeping the operation idempotent across reruns and ref changes.
+# These carry any fixes we maintain against the pinned upstream ref, so a fresh
+# clone of upstream Elle gains them automatically.  Patches are git-diff format
+# under patches/elle/*.patch and are reverted before checkout and (re)applied
+# after, keeping the operation idempotent across reruns and ref changes.
+# (None are currently shipped.)
 revert_elle_patches() {
   [ -d "$elle_patches_dir" ] || return 0
   local patch

@@ -250,20 +250,14 @@ The current implementation direction is:
 5. keep generated `init.el` as thin startup glue and avoid re-growing resident Emacs wrappers
 6. keep using local analysis and MCP before structural changes to shared Elle modules
 
-## HUD & Elle Plugins Architecture
+## Elle Plugins Architecture
 
-When developing graphical extensions (like the immediate-mode HUD) for the Emacs Hypervisor, maintain a unified statically-embedded architecture to ensure a single-binary distribution:
+An *extension* is a native plugin loaded into the Elle runtime through the
+stable plugin ABI (the `elle-plugin` crate); the canonical example is the
+`mmdflux` mermaid renderer. To keep single-binary distribution:
 
 ### Elle Plugins (`.elle-plugins`)
 * **Role:** Compile native Rust crates that extend the Lisp evaluation runtime. By registering new Rust primitives, the Lisp compiler (`elle`) can call native Rust APIs directly.
-* **Static Embedding:** To ensure a zero-dependency distribution, these plugins are statically linked and embedded directly inside the `emacs-hypervisor` executable itself, rather than loaded as separate, fragile `.dylib` or `.so` files.
-* **Build Loop:** Managed statically by the Cargo workspace and the `just build` recipes.
-
-### HUD Front-end (egui WASM inside xwidget-webkit child frames)
-* **Role:** Render the immediate-mode GPU-accelerated graphics canvas (Environment cards, changes, DAG maps).
-* **Runtime:** Compiled as an `eframe` WebAssembly application, loaded inside Emacs's native `xwidget-webkit` engine within an undecorated child frame.
-* **Architecture:** Emacs child frame (undecorated, `no-accept-focus`) → xwidget-webkit buffer → loads `index.html` + egui WASM → renders on HTML5 canvas via WebGL.
-* **Data Bridge:** Emacs pushes state as JSON via `xwidget-webkit-execute-script` targeting `window.hudPushState()`. Interactive clicks route back via `emacs-hud://` URI scheme intercepted by `xwidget-webkit-callback`.
-* **Elle Extension:** The `extension-hud.lisp` module manages state aggregation on the Elle side. It does not render directly — it stores state and signals Emacs to show/hide the child frame.
-* **WASM Assets:** The compiled WASM binary and HTML shell are embedded in the `emacs-hypervisor` binary and extracted to a temp directory at runtime, served via `file://` URL.
+* **Embedding:** For a zero-dependency distribution, each plugin `cdylib` is embedded as bytes inside the `emacs-hypervisor` executable at build time, then extracted to a cache dir and `dlopen`ed at runtime — no separate `.dylib`/`.so` files to ship.
+* **Build Loop:** Managed by the Cargo workspace and the `just build` recipes.
 
