@@ -147,28 +147,56 @@
           (let [result (eval-form current-id (unit-run-form name) :run-unit :unit :units name)]
             (eval-report-state current-id name (executed-unit-report name entry) result)))))
 
+  (defn package-run-form [name]
+    (list 'emacs-hypervisor-runtime-run-package name))
+
+  (defn package-begin-form []
+    (list 'emacs-hypervisor-runtime-begin-package-installation))
+
+  (defn package-finished-form [reason]
+    (list 'emacs-hypervisor-runtime-notify-packages-finished reason))
+
+  (defn package-report-ok? [report]
+    (= (graph:entry-field report :status) :ok))
+
+  (defn package-reports-ok? [reports]
+    (empty? (filter (fn [report] (not (package-report-ok? report))) reports)))
+
+  (defn package-report-installed-names [reports]
+    (map (fn [report] (graph:entry-name report)) (filter package-report-ok? reports)))
+
+  ## Install one package per eval round-trip, like next-unit-plan-report,
+  ## deriving the report from the eval response. Draining events keeps the
+  ## per-package installed/failed events from accumulating in the mailbox.
+  (defn next-package-plan-report [name planned-reports current-id]
+    (let [_request-sent (send-eval-form-request current-id (package-run-form name) :install-package :package
+                                                :packages name)
+          drained (drain-events-until-response current-id)
+          result (get drained :response)]
+      (eval-report-state current-id name (installed-package-report name planned-reports) result)))
+
+  ## Drive package installation one package at a time, like the unit plan, so
+  ## Emacs returns to its event loop between packages and repaints the report.
+  ## The phase begin and finished evals bracket the loop so the report opens
+  ## and the installation metric is recorded exactly once.
   (defn execute-package-entry-plan-tracker [names planned-reports next-id]
     (if (empty? names)
       {:next-id next-id :reports () :installed () :ok true}
-      (let [process-id next-id
-            _ (send-eval-form-request process-id (package-install-batch-form names) :install-packages :package
-                                      :packages nil)
-            drained (drain-events-until-response process-id)
-            result (get drained :response)
-            package-events (get drained :package-events)
-            fallback-error (if (execution-ok? result) nil (execution-error result))]
-        (if (execution-ok? result)
-          (let [reports (package-event-reports names planned-reports package-events nil)
-                installed (package-installed-names package-events)]
-            {:next-id (+ process-id 1)
-             :reports reports
-             :installed installed
-             :ok (empty? (package-failed-events package-events))})
-          {:next-id (+ process-id 1)
-           :reports (let [reports (package-event-reports names planned-reports package-events fallback-error)]
-                      (if (empty? reports) (all-failed-batch-reports names fallback-error) reports))
-           :installed (package-installed-names package-events)
-           :ok false}))))
+      (let [begin-id next-id
+            _begin-sent (send-eval-form-request begin-id (package-begin-form) :begin-packages :package :packages nil)
+            _begin-drained (drain-events-until-response begin-id)
+            collected (collect-report-state names (+ begin-id 1)
+                                            (fn [name _collected current-id]
+                                              (next-package-plan-report name planned-reports current-id)))
+            reports (get collected :reports)
+            finished-id (get collected :next-id)
+            _finished-sent (send-eval-form-request finished-id (package-finished-form "completed") :finished-packages
+                                                   :package :packages nil)
+            _finished-drained (drain-events-until-response finished-id)]
+        {:next-id (+ finished-id 1)
+         :reports reports
+         :installed (package-report-installed-names reports)
+         :ok (package-reports-ok? reports)})))
 
   (defn next-unit-execution-report [entry planned-report package-reports executed-unit-reports current-id]
     (let [name (graph:entry-name entry)

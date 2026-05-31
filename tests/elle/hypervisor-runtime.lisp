@@ -436,53 +436,52 @@
 (println "  2a. report logs: ok")
 
 # ============================================================================
-# 3. Batch execution treats successful Emacs batch as authoritative.
+# 3. Per-package execution: one eval per package, with failure isolation.
 # ============================================================================
 
+## 3. Success: begin eval + one run-package eval per package + finished eval.
 (let* [{:reports planned-package-reports} (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "core-pkg"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "ui-pkg"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "runtime-fail-pkg"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "runtime-fail-dependent"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :finished :reason "completed"}))
-  (push stub-read-messages
-        (stub-response 10 true
-                       (list {:name "core-pkg" :status :installed}
-                             {:name "ui-pkg" :status :installed :deps (list "core-pkg")}
-                             {:name "runtime-fail-pkg" :status :installed}
-                             {:name "runtime-fail-dependent" :status :installed :deps (list "runtime-fail-pkg")})))
+  (push stub-read-messages (stub-response 10 true nil))  ## begin
+  (push stub-read-messages (stub-response 11 true nil))  ## core-pkg
+  (push stub-read-messages (stub-response 12 true nil))  ## ui-pkg
+  (push stub-read-messages (stub-response 13 true nil))  ## runtime-fail-pkg
+  (push stub-read-messages (stub-response 14 true nil))  ## runtime-fail-dependent
+  (push stub-read-messages (stub-response 15 true nil))  ## finished
   (let* [{:reports package-reports :installed installed :next-id next-id :ok ok?} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
          planned-package-reports 10)
          core (graph:find-entry package-reports "core-pkg")]
-    (assert (= next-id 11) "tracker next id")
-    (assert (= ok? true) "tracker reports successful package batch as ok")
-    (assert (= (length stub-sent-requests) 1) "tracker sends one batch eval")
-    (let* [batch-request (get stub-sent-requests 0)
-           batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
-      (assert (= batch-form
-                 '(emacs-hypervisor-runtime-install-package-batch '("core-pkg" "ui-pkg" "runtime-fail-pkg"
-                 "runtime-fail-dependent"))) "tracker sends planned package names to install-package-batch")
-      (assert (nil? (get batch-request :form-string)) "tracker sends structured eval form instead of string form"))
-    (assert (= (length installed) 4) "tracker success records installed package events")
-    (assert (= (length package-reports) 4) "tracker success returns package event reports")
+    (assert (= next-id 16) "tracker next id (begin + 4 packages + finished)")
+    (assert (= ok? true) "tracker reports successful per-package run as ok")
+    (assert (= (length stub-sent-requests) 6) "tracker sends begin + one eval per package + finished")
+    (let* [begin-request (get stub-sent-requests 0)
+           begin-form (wire-protocol:plist-get (get begin-request :payload) :form)
+           core-request (get stub-sent-requests 1)
+           core-form (wire-protocol:plist-get (get core-request :payload) :form)]
+      (assert (= begin-form '(emacs-hypervisor-runtime-begin-package-installation))
+              "tracker brackets the loop with a begin eval")
+      (assert (= core-form '(emacs-hypervisor-runtime-run-package "core-pkg")) "tracker installs one package per eval")
+      (assert (nil? (get core-request :form-string)) "tracker sends structured eval form instead of string form"))
+    (assert (= (length installed) 4) "tracker records installed packages")
+    (assert (= (length package-reports) 4) "tracker returns one report per package")
     (assert (= (graph:entry-field core :status) :ok) "tracker success package report status")
     (assert (= (graph:entry-field core :reason) :installed) "tracker success package report reason")))
-(println "  3. batch execution: ok")
+(println "  3. per-package execution: ok")
 
+## 3a. Local package name flows into the per-package run form.
 (let* [local-plan-names (list "elle-lsp-bridge")
        planned-package-reports (list (graph:make-report "elle-lsp-bridge" :ok :ready (list)))]
   (reset-stub-state)
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "elle-lsp-bridge"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :finished :reason "completed"}))
-  (push stub-read-messages (stub-response 50 true (list {:name "elle-lsp-bridge" :status :installed})))
+  (push stub-read-messages (stub-response 50 true nil))  ## begin
+  (push stub-read-messages (stub-response 51 true nil))  ## elle-lsp-bridge
+  (push stub-read-messages (stub-response 52 true nil))  ## finished
   (execution:execute-package-entry-plan-tracker local-plan-names planned-package-reports 50)
-  (let* [batch-request (get stub-sent-requests 0)
-         batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
-    (assert (= batch-form '(emacs-hypervisor-runtime-install-package-batch '("elle-lsp-bridge")))
-            "batch sends local package names from the Elle plan")))
-(println "  3a. local package name batch: ok")
+  (let* [run-request (get stub-sent-requests 1)
+         run-form (wire-protocol:plist-get (get run-request :payload) :form)]
+    (assert (= run-form '(emacs-hypervisor-runtime-run-package "elle-lsp-bridge"))
+            "run form sends local package name from the Elle plan")))
+(println "  3a. local package name run form: ok")
 
 (let* [decoded (wire-protocol:from-wire-session-data (quote (:packages ((:name "transient" :repo "magit/transient"
                                                             :host nil :branch "main" :tag nil :ref nil :deps ()
@@ -494,108 +493,64 @@
        {:reports planned-package-reports} (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "magit"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :finished :reason "completed"}))
-  (push stub-read-messages (stub-response 60 true (list {:name "magit" :status :installed})))
+  (push stub-read-messages (stub-response 60 true nil))  ## begin
+  (push stub-read-messages (stub-response 61 true nil))  ## magit
+  (push stub-read-messages (stub-response 62 true nil))  ## finished
   (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan) planned-package-reports 60)
-  (let* [batch-request (get stub-sent-requests 0)
-         batch-form (wire-protocol:plist-get (get batch-request :payload) :form)]
-    (assert (= batch-form '(emacs-hypervisor-runtime-install-package-batch '("magit")))
-            "batch sends decoded live package names from the Elle plan")))
-(println "  3b. decoded live package batch: ok")
+  (let* [run-request (get stub-sent-requests 1)
+         run-form (wire-protocol:plist-get (get run-request :payload) :form)]
+    (assert (= run-form '(emacs-hypervisor-runtime-run-package "magit"))
+            "run form sends decoded live package name from the Elle plan")))
+(println "  3b. decoded live package run form: ok")
 
-(let* [planned-package-reports (list (graph:make-report "consult" :ok :installed (list))
-                                     (graph:make-report "websocket" :ok :installed (list))
-                                     (graph:make-report "consult-snapfile" :ok :ready (list "consult" "websocket")))]
-  (reset-stub-state)
-  (push stub-read-messages
-        (stub-event :package {:phase :packages :kind :failed :name "consult-snapfile" :reason "clone failed"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :finished :reason "completed"}))
-  (push stub-read-messages (stub-response 65 false nil :error "clone failed"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (list "consult-snapfile")
-         planned-package-reports 65)
-         snapfile (graph:find-entry package-reports "consult-snapfile")]
-    (assert (= next-id 66) "tracker raw wire plist next id")
-    (assert (empty? installed) "tracker raw wire plist reports no installed packages")
-    (assert (= (graph:entry-field snapfile :status) :failed) "tracker raw wire plist failure status")
-    (assert (= (graph:entry-field (graph:entry-field snapfile :details) :error) "clone failed")
-            "tracker error response preserves error detail")))
-(println "  3b1. package error response: ok")
-
+## 3c. Failure isolation: a failed package does not fail the others.
 (let* [{:reports planned-package-reports} (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "core-pkg"}))
-  (push stub-read-messages (stub-event :package {:phase :packages :kind :installed :name "ui-pkg"}))
-  (push stub-read-messages
-        (stub-event :package {:phase :packages :kind :failed :name "runtime-fail-pkg" :reason "runtime failed"}))
-  (push stub-read-messages (stub-response 66 false nil :error "runtime failed"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
-         planned-package-reports 66)
+  (push stub-read-messages (stub-response 20 true nil))  ## begin
+  (push stub-read-messages (stub-response 21 true nil))  ## core-pkg
+  (push stub-read-messages (stub-response 22 true nil))  ## ui-pkg
+  (push stub-read-messages (stub-response 23 false nil :error "clone failed"))  ## runtime-fail-pkg
+  (push stub-read-messages (stub-response 24 false nil :error "dep missing"))  ## runtime-fail-dependent
+  (push stub-read-messages (stub-response 25 true nil))  ## finished
+  (let* [{:reports package-reports :installed installed :next-id next-id :ok ok?} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
+         planned-package-reports 20)
          core (graph:find-entry package-reports "core-pkg")
          ui (graph:find-entry package-reports "ui-pkg")
          runtime-fail (graph:find-entry package-reports "runtime-fail-pkg")
          dependent (graph:find-entry package-reports "runtime-fail-dependent")]
-    (assert (= next-id 67) "tracker mixed package events next id")
-    (assert (= (length installed) 2) "tracker mixed package events installed count")
-    (assert (= (graph:entry-field core :status) :ok) "tracker mixed keeps installed root ok")
-    (assert (= (graph:entry-field ui :status) :ok) "tracker mixed keeps installed dependent ok")
-    (assert (= (graph:entry-field runtime-fail :status) :failed) "tracker mixed failed package status")
-    (assert (= (graph:entry-field dependent :status) :failed) "tracker mixed missing event uses batch error")))
-(println "  3b2. mixed package events: ok")
+    (assert (= next-id 26) "tracker isolation next id")
+    (assert (= ok? false) "tracker reports overall failure when any package fails")
+    (assert (= (length installed) 2) "tracker keeps the successful packages installed")
+    (assert (= (graph:entry-field core :status) :ok) "isolation keeps the first package ok")
+    (assert (= (graph:entry-field ui :status) :ok) "isolation keeps the second package ok")
+    (assert (= (graph:entry-field runtime-fail :status) :failed) "isolation marks the failing package failed")
+    (assert (= (graph:entry-field (graph:entry-field runtime-fail :details) :source) :eval)
+            "failed package report source is eval")
+    (assert (= (graph:entry-field (graph:entry-field runtime-fail :details) :error) "clone failed")
+            "failed package report preserves the error detail")
+    (assert (= (graph:entry-field dependent :status) :failed) "isolation marks the dependent failed too")))
+(println "  3c. failure isolation: ok")
 
+## 3c1. A multiline failure keeps only the first error line.
 (let* [{:reports planned-package-reports} (policy:derive-package-reports packages)
        package-plan (planning:derive-package-plan packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-read-messages (stub-response 40 false nil :error "package install failed"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
-         planned-package-reports 40)
-         core (graph:find-entry package-reports "core-pkg")
-         ui (graph:find-entry package-reports "ui-pkg")
-         runtime-fail (graph:find-entry package-reports "runtime-fail-pkg")
-         blocked (graph:find-entry package-reports "runtime-fail-dependent")]
-    (assert (= next-id 41) "tracker failed batch next id")
-    (assert (empty? installed) "tracker reports no installed on batch failure")
-    (assert (= (graph:entry-field core :status) :failed) "tracker fails all packages on batch failure")
-    (assert (= (graph:entry-field ui :status) :failed) "tracker fails ui on batch failure")
-    (assert (= (graph:entry-field (graph:entry-field ui :details) :source) :eval) "tracker failure source is eval")
-    (assert (= (graph:entry-field (graph:entry-field ui :details) :error) "package install failed")
-            "tracker failure error detail")
-    (assert (= (graph:entry-field runtime-fail :status) :failed) "tracker fails missing root after batch failure")
-    (assert (= (graph:entry-field blocked :status) :failed) "tracker fails dependents after batch failure")))
-(println "  3c. tracker batch failure: ok")
-
-(let* [{:reports planned-package-reports} (policy:derive-package-reports packages)
-       package-plan (planning:derive-package-plan packages planned-package-reports)]
-  (reset-stub-state)
+  (push stub-read-messages (stub-response 30 true nil))  ## begin
   (push stub-read-messages
-        (stub-response 45 false nil :error "(void-function transient--set-layout)\n  backtrace()\n  eval(...)"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
-         planned-package-reports 45)
+        (stub-response 31 false nil :error "(void-function transient--set-layout)\n  backtrace()\n  eval(...)"))  ## core-pkg
+  (push stub-read-messages (stub-response 32 true nil))  ## ui-pkg
+  (push stub-read-messages (stub-response 33 true nil))  ## runtime-fail-pkg
+  (push stub-read-messages (stub-response 34 true nil))  ## runtime-fail-dependent
+  (push stub-read-messages (stub-response 35 true nil))  ## finished
+  (let* [{:reports package-reports} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
+         planned-package-reports 30)
          core (graph:find-entry package-reports "core-pkg")
          error-detail (graph:entry-field (graph:entry-field core :details) :error)]
-    (assert (= next-id 46) "tracker multiline failed batch next id")
-    (assert (empty? installed) "tracker multiline failure reports no installed")
-    (assert (= error-detail "(void-function transient--set-layout)")
-            "tracker multiline failure keeps only first error line")))
-(println "  3c1. tracker multiline batch failure: ok")
+    (assert (= error-detail "(void-function transient--set-layout)") "multiline failure keeps only the first error line")))
+(println "  3c1. multiline failure detail: ok")
 
-(let* [{:reports planned-package-reports} (policy:derive-package-reports packages)
-       package-plan (planning:derive-package-plan packages planned-package-reports)]
-  (reset-stub-state)
-  (push stub-read-messages
-        (stub-event :package {:phase :packages :kind :finished :reason "package directory permission denied"}))
-  (push stub-read-messages (stub-response 70 false nil :error "package directory permission denied"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
-         planned-package-reports 70)
-         core (graph:find-entry package-reports "core-pkg")]
-    (assert (= next-id 71) "tracker nil batch next id")
-    (assert (empty? installed) "tracker failed batch reports no installed packages")
-    (assert (= (graph:entry-field core :status) :failed) "tracker failed batch fails package")
-    (assert (= (graph:entry-field (graph:entry-field core :details) :error) "package directory permission denied")
-            "tracker failed batch explains package error")))
-(println "  3d. tracker package error result: ok")
-
+## 3d. Scale: the per-package loop handles many packages.
 (let* [many-packages (map (fn [i]
                             {:name (concat "live-pkg" (number->string i))
                              :deps (list)
@@ -609,18 +564,16 @@
        {:reports planned-package-reports} (policy:derive-package-reports many-packages)
        package-plan (planning:derive-package-plan many-packages planned-package-reports)]
   (reset-stub-state)
-  (push stub-read-messages
-        (stub-event :package {:phase :packages :kind :finished :reason "package directory permission denied"}))
-  (push stub-read-messages (stub-response 80 false nil :error "package directory permission denied"))
-  (let* [{:reports package-reports :installed installed :next-id next-id} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
+  (push stub-read-messages (stub-response 80 true nil))  ## begin
+  (map (fn [i] (push stub-read-messages (stub-response (+ 81 i) true nil))) (->list (range 0 80)))
+  (push stub-read-messages (stub-response 161 true nil))  ## finished
+  (let* [{:reports package-reports :installed installed :next-id next-id :ok ok?} (execution:execute-package-entry-plan-tracker (planning:plan-names package-plan)
          planned-package-reports 80)]
-    (assert (= next-id 81) "tracker large nil batch next id")
-    (assert (empty? installed) "tracker large failed batch reports no installed packages")
-    (assert (= (length package-reports) 80) "tracker large nil batch report count")
-    (assert (= (graph:entry-field (first package-reports) :status) :failed)
-            "tracker large nil batch first package fails")
-    (assert (= (graph:entry-field (last package-reports) :status) :failed) "tracker large nil batch last package fails")))
-(println "  3e. tracker large nil batch result: ok")
+    (assert (= next-id 162) "tracker large plan next id (begin + 80 packages + finished)")
+    (assert (= ok? true) "tracker large plan all ok")
+    (assert (= (length installed) 80) "tracker large plan installs all packages")
+    (assert (= (length package-reports) 80) "tracker large plan report count")))
+(println "  3d. large per-package plan: ok")
 
 (let* [many-planned (map (fn [i] (graph:make-report (concat "pkg" (number->string i)) :ok :ready ()))
                          (->list (range 0 120)))

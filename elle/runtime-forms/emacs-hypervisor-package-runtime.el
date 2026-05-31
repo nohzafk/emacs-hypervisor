@@ -134,6 +134,28 @@ Returns a list of (:name NAME :status STATUS [:error REASON]) plists."
         (error "%s" failure-reason)
       (nreverse results))))
 
+(defun emacs-hypervisor-runtime-run-package (name)
+  "Install the single declared package NAME via the bridge.
+Emits the same per-package :installed/:failed events as the batch path, but
+without the phase :begin/:finished bracket -- the host sends those once around
+the per-package loop (see `emacs-hypervisor-runtime-begin-package-installation'
+and `emacs-hypervisor-runtime-notify-packages-finished').  Signals on failure
+so the host derives the report from the eval response.  Returns NAME on
+success.  This mirrors `emacs-hypervisor-runtime-run-unit' so that each package
+is one eval round-trip, letting Emacs repaint the report between packages."
+  (let ((entry (emacs-hypervisor-runtime--package-entry name))
+        failure-reason)
+    (emacs-hypervisor-bridge-install-batch
+     (list entry)
+     (lambda (installed-name)
+       (emacs-hypervisor-runtime-package-installed installed-name))
+     (lambda (failed-name reason)
+       (unless failure-reason (setq failure-reason reason))
+       (emacs-hypervisor-runtime-package-failed failed-name reason)))
+    (when failure-reason
+      (error "%s" failure-reason))
+    name))
+
 (setq emacs-hypervisor-runtime-packages-installation-active nil)
 (setq emacs-hypervisor-runtime-packages-finished-sent nil)
 
