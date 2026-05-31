@@ -65,74 +65,12 @@
    (t
     (error "Invalid package declaration reference: %S" entry-or-name))))
 
-(defun emacs-hypervisor-runtime--package-entries (entries-or-names)
-  (mapcar #'emacs-hypervisor-runtime--package-entry entries-or-names))
-
-(defun emacs-hypervisor-runtime--package-name (entry)
-  (plist-get entry :name))
-
-(defun emacs-hypervisor-runtime--package-entry-in (name entries)
-  (cl-find name entries
-           :key #'emacs-hypervisor-runtime--package-name
-           :test #'equal))
-
-(defun emacs-hypervisor-runtime--package-result (entry status &optional error)
-  (append
-   (list :name (emacs-hypervisor-runtime--package-name entry)
-         :status status)
-   (when (plist-get entry :deps)
-     (list :deps (copy-sequence (plist-get entry :deps))))
-   (when error
-     (list :error error))))
-
 (defun emacs-hypervisor-runtime-notify-packages-finished (&optional reason)
   (when emacs-hypervisor-runtime-packages-installation-active
     (unless emacs-hypervisor-runtime-packages-finished-sent
       (setq emacs-hypervisor-runtime-packages-finished-sent t)
       (setq emacs-hypervisor-runtime-packages-installation-active nil)
       (emacs-hypervisor-runtime-packages-finished reason))))
-
-(defun emacs-hypervisor-runtime-install-package-batch (entries-or-names)
-  "Install ENTRIES-OR-NAMES synchronously via the package bridge.
-Emits per-package :installed/:failed events and a terminal :finished event.
-Returns a list of (:name NAME :status STATUS [:error REASON]) plists."
-  (emacs-hypervisor-runtime-begin-package-installation)
-  (let ((results nil)
-        (entries (emacs-hypervisor-runtime--package-entries entries-or-names))
-        failure-reason)
-    (condition-case err
-        (progn
-          (emacs-hypervisor-bridge-install-batch
-           entries
-           (lambda (name)
-             (push
-              (emacs-hypervisor-runtime--package-result
-               (emacs-hypervisor-runtime--package-entry-in name entries)
-               :installed)
-              results)
-             (emacs-hypervisor-runtime-package-installed name))
-           (lambda (name reason)
-             (unless failure-reason
-               (setq failure-reason reason))
-             (push
-              (emacs-hypervisor-runtime--package-result
-               (emacs-hypervisor-runtime--package-entry-in name entries)
-               :failed
-               reason)
-              results)
-             (emacs-hypervisor-runtime-package-failed name reason)))
-          (emacs-hypervisor-runtime-notify-packages-finished "completed"))
-      (error
-       (let ((reason (format "%S" err)))
-         (setq failure-reason reason)
-         (dolist (entry entries)
-           (push
-            (emacs-hypervisor-runtime--package-result entry :failed reason)
-            results))
-         (emacs-hypervisor-runtime-notify-packages-finished reason))))
-    (if failure-reason
-        (error "%s" failure-reason)
-      (nreverse results))))
 
 (defun emacs-hypervisor-runtime-run-package (name)
   "Install the single declared package NAME via the bridge.
