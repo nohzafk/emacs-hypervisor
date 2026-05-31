@@ -13,10 +13,6 @@
   (defn send-eval-form-request [id form metric-name metric-kind phase item-name]
     (protocol:send-request id :eval (eval-payload form metric-name metric-kind phase item-name)))
 
-  (defn eval-form [id form metric-name metric-kind phase item-name]
-    (send-eval-form-request id form metric-name metric-kind phase item-name)
-    (protocol:await-response mailbox id))
-
   (defn unit-run-at-index-form [index]
     (list 'emacs-hypervisor-runtime-run-unit-at-index index))
 
@@ -42,9 +38,6 @@
 
   (defn report-state [next-id report]
     {:next-id next-id :report report})
-
-  (defn blocked-report-state [name current-id reason blockers]
-    (report-state current-id (graph:blocked-report name reason blockers)))
 
   (defn failed-eval-report [name error]
     (graph:make-report name :failed :execution (eval-execution-details error)))
@@ -86,19 +79,6 @@
 
   (defn executed-unit-report [name entry]
     (graph:make-report name :ok :executed (unit-execution-details entry)))
-
-  (defn unit-run-form [name]
-    (list 'emacs-hypervisor-runtime-run-unit name))
-
-  (defn execute-unit-entry-state [name entry package-reports executed-unit-reports current-id]
-    (let [package-blockers (graph:known-report-blockers package-reports (graph:entry-field entry :requires))
-          unit-blockers (graph:report-blockers executed-unit-reports (graph:entry-field entry :after))]
-      (match [(empty? package-blockers) (empty? unit-blockers)]
-        [false _] (blocked-report-state name current-id :blocked-by-package package-blockers)
-        [true false] (blocked-report-state name current-id :blocked-by-unit unit-blockers)
-        _
-          (let [result (eval-form current-id (unit-run-form name) :run-unit :unit :units name)]
-            (eval-report-state current-id name (executed-unit-report name entry) result)))))
 
   (defn package-run-form [name]
     (list 'emacs-hypervisor-runtime-run-package name))
@@ -151,21 +131,6 @@
          :installed (package-report-installed-names reports)
          :ok (package-reports-ok? reports)})))
 
-  (defn next-unit-execution-report [entry planned-report package-reports executed-unit-reports current-id]
-    (let [name (graph:entry-name entry)
-          planned-status (graph:entry-field planned-report :status)]
-      (if (not (= planned-status :ok))
-        {:next-id current-id :report planned-report}
-        (execute-unit-entry-state name entry package-reports executed-unit-reports current-id))))
-
-  (defn execute-units [units planned-reports package-reports next-id]
-    (collect-report-state units next-id
-                          (fn [entry executed-reports current-id]
-                            (let [name (graph:entry-name entry)
-                                  planned-report (graph:find-entry planned-reports name)]
-                              (next-unit-execution-report entry planned-report package-reports executed-reports
-                                                          current-id)))))
-
   (defn next-unit-plan-report [plan-item package-reports executed-unit-reports current-id]
     (let [name (graph:entry-field plan-item :name)
           entry (graph:entry-field plan-item :entry)
@@ -184,6 +149,4 @@
                           (fn [plan-item executed-reports current-id]
                             (next-unit-plan-report plan-item package-reports executed-reports current-id))))
 
-  {:execute-package-entry-plan-tracker execute-package-entry-plan-tracker
-   :execute-unit-plan execute-unit-plan
-   :execute-units execute-units})
+  {:execute-package-entry-plan-tracker execute-package-entry-plan-tracker :execute-unit-plan execute-unit-plan})
