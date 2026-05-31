@@ -256,11 +256,46 @@
                               (format "git clone exited %d: %s"
                                       code (string-trim output))))))))))))
 
+(defun emacs-hypervisor-bridge--run-in-clone (entry command label)
+  "Run shell COMMAND inside ENTRY's clone directory.
+LABEL identifies the step in error messages and the output buffer.  Signals an
+error containing the captured output when COMMAND exits non-zero."
+  (let* ((name (plist-get entry :name))
+         (default-directory
+          (file-name-as-directory (emacs-hypervisor-bridge--clone-dir entry)))
+         (buffer (get-buffer-create (format " *hypervisor-%s-%s*" label name))))
+    (with-current-buffer buffer (erase-buffer))
+    (let ((status (call-process shell-file-name nil buffer nil
+                                shell-command-switch command)))
+      (unless (zerop status)
+        (error "%s for %s failed (exit %d): %s"
+               label name status
+               (string-trim (with-current-buffer buffer (buffer-string))))))))
+
+(defun emacs-hypervisor-bridge--prepare-checkout (entry)
+  "Initialise submodules and run the build step declared by ENTRY.
+`:submodules' (non-nil) initialises git submodules recursively, since
+`package-vc' does not fetch them.  `:build' is a shell command, or a list of
+shell commands, run in the package root -- e.g. to compile a native or
+WebAssembly artifact that is not committed to the repository.  Both run before
+`package-vc-install-from-checkout' so the artifacts are present when the
+package is symlinked, byte-compiled, and activated."
+  (when (plist-get entry :submodules)
+    (emacs-hypervisor-bridge--run-in-clone
+     entry "git submodule update --init --recursive" "submodules"))
+  (let ((build (plist-get entry :build)))
+    (dolist (command (if (listp build) build (list build)))
+      (when (and command (stringp command))
+        (emacs-hypervisor-bridge--run-in-clone entry command "build")))))
+
 (defun emacs-hypervisor-bridge--adopt (entry)
   "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'."
   (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
          (dir (emacs-hypervisor-bridge--clone-dir entry)))
     (unless (package-installed-p sym)
+      ;; Fetch submodules and build any compiled artifact in the checkout before
+      ;; package-vc symlinks and byte-compiles it.
+      (emacs-hypervisor-bridge--prepare-checkout entry)
       ;; `package-vc-install-from-checkout' only accepts DIR and NAME in Emacs
       ;; 30.  Register the spec first so package-vc can still see :lisp-dir
       ;; during its unpack step.

@@ -33,7 +33,23 @@
                  (not (member value result)))
         (push value result)))))
 
-(cl-defmacro package! (name &rest args &key repo host branch tag ref deps local lisp-dir)
+(cl-defmacro package! (name &rest args
+                            &key repo host branch tag ref deps local lisp-dir
+                            submodules build)
+  "Declare a Hypervisor-managed package.
+
+In addition to the version-control keys (`:repo' `:host' `:branch' `:tag'
+`:ref' `:local' `:lisp-dir') and `:deps', two keys support packages that
+ship a compiled artifact:
+
+`:submodules'
+  Non-nil initialises git submodules recursively in the checkout before the
+  package is built and activated (package-vc does not fetch submodules).
+
+`:build'
+  A shell command -- or a list of shell commands -- run in the package root
+  after submodules are initialised and before activation, e.g. to compile a
+  native module or WebAssembly bundle that is not committed to the repo."
   (declare (indent defun))
   (let ((pkg-name (if (stringp name) name (symbol-name name))))
     `(push
@@ -46,7 +62,9 @@
        :ref ,ref
        :deps ',(emacs-hypervisor--normalize-symbol-list deps)
        :local ,local
-       :lisp-dir ,lisp-dir)
+       :lisp-dir ,lisp-dir
+       :submodules ,submodules
+       :build ,build)
       emacs-hypervisor-packages)))
 
 (defmacro config-unit! (name &rest args)

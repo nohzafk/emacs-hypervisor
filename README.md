@@ -330,6 +330,21 @@ upstream source, then adoption via `package-vc-install-from-checkout`).
 | `:local` | Local filesystem path instead of a remote URL |
 | `:lisp-dir` | Subdirectory containing the `.el` files (rare; for non-standard layouts) |
 | `:deps` | Package dependencies (used by Elle's topological sort) |
+| `:submodules` | Non-nil: `git submodule update --init --recursive` in the checkout (package-vc does not fetch submodules) |
+| `:build` | Shell command (or list of commands) run in the package root after submodules, before activation — e.g. to compile a native/WASM artifact not committed to the repo |
+
+`:submodules` and `:build` run in the cloned checkout before
+`package-vc-install-from-checkout`, so the artifacts are present when the
+package is symlinked, byte-compiled, and activated. Example for a package whose
+UI is compiled locally from a bundled submodule:
+
+```elisp
+(package! emacs-parquet-explorer
+  :local "~/projects/emacs-parquet-explorer"
+  :lisp-dir "lisp"
+  :submodules t
+  :build "cd ui && wasm-pack build --target web --release")
+```
 
 ### `config-unit!` options
 
