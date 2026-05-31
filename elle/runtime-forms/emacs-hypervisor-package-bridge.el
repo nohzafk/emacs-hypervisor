@@ -4,6 +4,16 @@
 (require 'package)
 (require 'package-vc)
 
+;; `package-vc' generates `<pkg>-pkg.el' and the `<pkg>-autoloads.el' indirection
+;; shim without a `lexical-binding' cookie, so `package--compile' (which runs
+;; `byte-recompile-directory' over the whole package tree) emits a spurious
+;; "file has no `lexical-binding' directive" warning for every VC package -- even
+;; though those files carry `no-byte-compile: t'.  Binding this internal bytecomp
+;; flag (Emacs 28+) around our install calls silences only that cookie warning;
+;; real source-quality warnings (e.g. wide docstrings) are left untouched.
+;; Forward-declared so dynamic binding works without eagerly loading `bytecomp'.
+(defvar bytecomp--inhibit-lexical-cookie-warning)
+
 (defvar emacs-hypervisor-bridge-ready nil)
 (defvar emacs-hypervisor-bridge-activated nil)
 
@@ -255,13 +265,15 @@
       ;; 30.  Register the spec first so package-vc can still see :lisp-dir
       ;; during its unpack step.
       (emacs-hypervisor-bridge--register-vc-spec entry)
-      (package-vc-install-from-checkout dir (symbol-name sym)))
+      (let ((bytecomp--inhibit-lexical-cookie-warning t))
+        (package-vc-install-from-checkout dir (symbol-name sym))))
     (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--archive-install (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
     (unless (package-installed-p sym)
-      (package-install sym))
+      (let ((bytecomp--inhibit-lexical-cookie-warning t))
+        (package-install sym)))
     (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--pump-clones (vc-entries on-each)
