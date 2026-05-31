@@ -17,9 +17,6 @@
     (send-eval-form-request id form metric-name metric-kind phase item-name)
     (protocol:await-response mailbox id))
 
-  (defn package-install-batch-form [names]
-    (list 'emacs-hypervisor-runtime-install-package-batch (list 'quote names)))
-
   (defn unit-run-at-index-form [index]
     (list 'emacs-hypervisor-runtime-run-unit-at-index index))
 
@@ -78,55 +75,11 @@
                                 package-events)))))]
       (loop ())))
 
-  (defn all-failed-batch-reports [names error]
-    (map (fn [name] (failed-eval-report name error)) names))
-
-  (defn package-event-kind [event]
-    (graph:entry-field event :kind))
-
-  (defn package-event-name [event]
-    (graph:entry-field event :name))
-
-  (defn package-event-reason [event]
-    (graph:entry-field event :reason))
-
-  (defn package-event-for-name [events name]
-    (letrec [loop (fn [remaining found]
-                    (match remaining
-                      () found
-                      (event & rest)
-                        (loop rest (if (= (package-event-name event) name) event found))
-                      _ found))]
-      (loop events nil)))
-
-  (defn package-events-with-kind [events kind]
-    (filter (fn [event] (= (package-event-kind event) kind)) events))
-
-  (defn package-installed-names [events]
-    (map package-event-name (package-events-with-kind events :installed)))
-
-  (defn package-failed-events [events]
-    (package-events-with-kind events :failed))
-
   (defn planned-package-details [planned-reports name]
     (graph:entry-field (graph:find-entry planned-reports name) :details))
 
   (defn installed-package-report [name planned-reports]
     (graph:make-report name :ok :installed (planned-package-details planned-reports name)))
-
-  (defn package-event-report [name planned-reports event fallback-error]
-    (if (nil? event)
-      (if (nil? fallback-error) nil (failed-eval-report name fallback-error))
-      (match (package-event-kind event)
-        :installed (installed-package-report name planned-reports)
-        :failed
-          (failed-eval-report name (or (package-event-reason event) fallback-error))
-        _ nil)))
-
-  (defn package-event-reports [names planned-reports events fallback-error]
-    (graph:non-nil-values (map (fn [name]
-                                 (package-event-report name planned-reports (package-event-for-name events name)
-                                                       fallback-error)) names)))
 
   (defn unit-execution-details [entry]
     {:requires (graph:entry-field entry :requires) :after (graph:entry-field entry :after)})
