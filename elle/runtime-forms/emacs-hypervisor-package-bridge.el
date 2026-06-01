@@ -390,6 +390,8 @@ lisp state, and runs the standard install process."
     (setq package-alist (assq-delete-all sym package-alist))
     (setq package-activated-list (delq sym package-activated-list))
     (setq package-vc-selected-packages (assq-delete-all sym package-vc-selected-packages))
+    (message "Rebuilding package %s..." (plist-get entry :name))
+    (redisplay)
     (emacs-hypervisor-bridge-install-batch (list entry) on-installed on-failed)))
 
 (provide 'emacs-hypervisor-package-bridge)
