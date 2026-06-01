@@ -94,7 +94,41 @@ is one eval round-trip, letting Emacs repaint the report between packages."
       (error "%s" failure-reason))
     name))
 
+(defun emacs-hypervisor-runtime-rebuild-package (name)
+  "Force a clean rebuild of package NAME via the bridge.
+Drops cached staging and package directories, purges lisp state, and reinstall.
+Signals on failure so the host derives the report from the eval response."
+  (let ((entry (emacs-hypervisor-runtime--package-entry name))
+        failure-reason)
+    (emacs-hypervisor-bridge-rebuild
+     entry
+     (lambda (installed-name)
+       (emacs-hypervisor-runtime-package-installed installed-name))
+     (lambda (failed-name reason)
+       (unless failure-reason (setq failure-reason reason))
+       (emacs-hypervisor-runtime-package-failed failed-name reason)))
+    (when failure-reason
+      (error "%s" failure-reason))
+    name))
+
+(defun emacs-hypervisor-rebuild-package (name)
+  "Force a clean rebuild of package NAME.
+Provides interactive completion for all declared packages."
+  (interactive
+   (list (completing-read "Rebuild package: "
+                          (mapcar (lambda (e) (plist-get e :name))
+                                  emacs-hypervisor-packages))))
+  (let ((entry (emacs-hypervisor-runtime--package-entry name)))
+    (message "Rebuilding package %s..." name)
+    (emacs-hypervisor-bridge-rebuild
+     entry
+     (lambda (installed-name)
+       (message "Package %s rebuilt successfully." installed-name))
+     (lambda (failed-name reason)
+       (error "Package %s rebuild failed: %s" failed-name reason)))))
+
 (setq emacs-hypervisor-runtime-packages-installation-active nil)
 (setq emacs-hypervisor-runtime-packages-finished-sent nil)
 
 (provide 'emacs-hypervisor-package-runtime)
+

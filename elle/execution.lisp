@@ -81,7 +81,12 @@
     (graph:make-report name :ok :executed (unit-execution-details entry)))
 
   (defn package-run-form [name]
-    (list 'emacs-hypervisor-runtime-run-package name))
+    (let [rebuild-env (sys/env "EMACS_HYPERVISOR_REBUILD_PACKAGES")
+          rebuild-list (if (nil? rebuild-env) () (string/split rebuild-env ","))
+          rebuild? (not (empty? (filter (fn [x] (= x name)) rebuild-list)))]
+      (if rebuild?
+        (list 'emacs-hypervisor-runtime-rebuild-package name)
+        (list 'emacs-hypervisor-runtime-run-package name))))
 
   (defn package-begin-form []
     (list 'emacs-hypervisor-runtime-begin-package-installation))

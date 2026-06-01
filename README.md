@@ -56,9 +56,8 @@ not choose your packages, keybindings, UI, editing model, or workflow.
   startup and reload; no manual tangle step needed.
 - **Built-in package management** --- `package!` declarations install through
   Emacs's built-in `package-vc-install` (Emacs 29.1+) with `Package-Requires:`
-  resolved against GNU ELPA, NonGNU ELPA, and MELPA. No third-party package
-  manager is embedded; the bridge clones git sources in parallel and adopts
-  them via `package-vc-install-from-checkout`.
+  resolved against GNU ELPA, NonGNU ELPA, and MELPA. The bridge clones git sources and adopts
+  them via `package-vc-install-from-checkout`. Clean, transactional rebuilding of local packages is supported via env vars and in-session Lisp commands.
 - **Preflight checks** --- circular dependencies, unset env vars, and missing
   executables are caught before startup execution begins; absent `:requires`
   features are caught before the affected unit body runs.
@@ -345,6 +344,19 @@ UI is compiled locally from a bundled submodule:
   :submodules t
   :build "cd ui && wasm-pack build --target web --release")
 ```
+
+### Package Rebuilding
+
+For local package development (using `:local` paths), changes made in your local repository are not loaded live automatically. The package bridge clones the source into a staging directory (`~/.config/emacs/hypervisor/sources/<pkg-name>`) and prepares/builds it before adoption into `packages/<pkg-name>`.
+
+To force a clean rebuild of a package (which drops staging/package caches, re-clones the latest commits, re-runs the `:build` step, and reinstalls):
+
+- **In-Session Interactive Command:** Run `M-x emacs-hypervisor-rebuild-package` inside Emacs. It provides autocompletion for all declared packages.
+- **Environment Variable:** Launch Emacs or start the session with the `EMACS_HYPERVISOR_REBUILD_PACKAGES` environment variable set to a comma-separated list of packages to rebuild:
+
+  ```bash
+  EMACS_HYPERVISOR_REBUILD_PACKAGES=emacs-parquet-explorer emacs --init-directory ~/.config/emacs
+  ```
 
 ### `config-unit!` options
 

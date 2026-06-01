@@ -372,4 +372,25 @@ Call ON-FAILED with (name reason) on failure."
              (funcall on-failed name (format "%S" err))))))))
     :done))
 
+(defun emacs-hypervisor-bridge-rebuild (entry on-installed on-failed)
+  "Force a clean rebuild of ENTRY: drop cached state, then reinstall.
+Deletes both the staging clone and package directories, purges in-session
+lisp state, and runs the standard install process."
+  (let* ((clone-dir (emacs-hypervisor-bridge--clone-dir entry))
+         (pkg-dir (emacs-hypervisor-bridge--package-dir entry))
+         (sym (emacs-hypervisor-bridge--package-symbol entry))
+         (desc (cadr (assq sym package-alist))))
+    (when (package-installed-p sym)
+      (ignore-errors
+        (when desc
+          (package-delete desc t t))))
+    (dolist (dir (list clone-dir pkg-dir))
+      (when (file-exists-p dir)
+        (delete-directory dir t)))
+    (setq package-alist (assq-delete-all sym package-alist))
+    (setq package-activated-list (delq sym package-activated-list))
+    (setq package-vc-selected-packages (assq-delete-all sym package-vc-selected-packages))
+    (emacs-hypervisor-bridge-install-batch (list entry) on-installed on-failed)))
+
 (provide 'emacs-hypervisor-package-bridge)
+
