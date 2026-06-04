@@ -90,4 +90,13 @@ Return non-nil when a `:shutdown' message was received."
                 (accept-process-output emacs-hypervisor--process 0.05)))
     emacs-hypervisor--completed))
 
+(add-hook 'kill-emacs-hook
+          (lambda ()
+            (when (and (boundp 'emacs-hypervisor--process)
+                       (processp emacs-hypervisor--process)
+                       (process-live-p emacs-hypervisor--process))
+              (ignore-errors
+                (kill-process emacs-hypervisor--process)))))
+
 (provide 'emacs-hypervisor-bootstrap)
+
