@@ -113,7 +113,9 @@ Signals on failure so the host derives the report from the eval response."
 
 (defun emacs-hypervisor-rebuild-package (name)
   "Force a clean rebuild of package NAME.
-Provides interactive completion for all declared packages."
+Provides interactive completion for all declared packages.
+After reinstalling, re-requires the package feature and re-runs
+any config unit that depends on it."
   (interactive
    (list (completing-read "Rebuild package: "
                           (mapcar (lambda (e) (plist-get e :name))
@@ -123,7 +125,10 @@ Provides interactive completion for all declared packages."
     (emacs-hypervisor-bridge-rebuild
      entry
      (lambda (installed-name)
-       (message "Package %s rebuilt successfully." installed-name))
+       ;; Re-require the feature so new code takes effect immediately.
+       (let ((feat (intern installed-name)))
+         (require feat nil t))
+       (message "Package %s rebuilt and reloaded." installed-name))
      (lambda (failed-name reason)
        (error "Package %s rebuild failed: %s" failed-name reason)))))
 

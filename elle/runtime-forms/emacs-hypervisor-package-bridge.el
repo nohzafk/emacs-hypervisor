@@ -372,25 +372,69 @@ Call ON-FAILED with (name reason) on failure."
              (funcall on-failed name (format "%S" err))))))))
     :done))
 
+(defun emacs-hypervisor-bridge--purge-eln-cache (name)
+  "Delete native-compiled .eln files whose source name matches NAME.
+Searches every versioned subdirectory in `native-comp-eln-load-path'
+\(excluding the system native-lisp directory) for files matching
+NAME-<hash>.eln."
+  (when (and (fboundp 'native-comp-available-p)
+             (native-comp-available-p))
+    (let ((pattern (concat (regexp-quote name)
+                           "-[0-9a-f]+-[0-9a-f]+\\.eln\\'")))
+      (dolist (dir native-comp-eln-load-path)
+        ;; Skip the system native-lisp directory shipped with Emacs.app.
+        (unless (string-match-p "/native-lisp/" dir)
+          (when (file-directory-p dir)
+            ;; Each eln-cache dir contains versioned subdirs (e.g. "30_2-4896b87c").
+            ;; Search all of them so we purge across Emacs version upgrades too.
+            (dolist (subdir (directory-files dir t "^[0-9]"))
+              (when (file-directory-p subdir)
+                (dolist (file (directory-files subdir t pattern))
+                  (ignore-errors (delete-file file)))))))))))
+
+(defun emacs-hypervisor-bridge--unload-package-features (name)
+  "Unload all loaded features that were provided by package NAME.
+Inspects `load-history' to find features whose source file lives under the
+package's installed directory."
+  (let ((pkg-dir (expand-file-name name package-user-dir)))
+    (when (file-directory-p pkg-dir)
+      (let ((prefix (file-name-as-directory pkg-dir)))
+        (dolist (entry load-history)
+          (let ((file (car entry)))
+            (when (and file (string-prefix-p prefix file))
+              (let ((feat (cl-loop for item in (cdr entry)
+                                   when (and (consp item) (eq (car item) 'provide))
+                                   return (cdr item))))
+                (when (and feat (featurep feat))
+                  (ignore-errors (unload-feature feat t)))))))))))
+
 (defun emacs-hypervisor-bridge-rebuild (entry on-installed on-failed)
   "Force a clean rebuild of ENTRY: drop cached state, then reinstall.
-Deletes both the staging clone and package directories, purges in-session
-lisp state, and runs the standard install process."
+Deletes both the staging clone and package directories, purges native-compiled
+.eln cache, unloads stale features, and runs the standard install process."
   (let* ((clone-dir (emacs-hypervisor-bridge--clone-dir entry))
          (pkg-dir (emacs-hypervisor-bridge--package-dir entry))
+         (name (plist-get entry :name))
          (sym (emacs-hypervisor-bridge--package-symbol entry))
          (desc (cadr (assq sym package-alist))))
+    ;; 1. Unload features so the running session drops old function definitions.
+    (emacs-hypervisor-bridge--unload-package-features name)
+    ;; 2. Remove package via package.el.
     (when (package-installed-p sym)
       (ignore-errors
         (when desc
           (package-delete desc t t))))
+    ;; 3. Delete staging clone and package directories.
     (dolist (dir (list clone-dir pkg-dir))
       (when (file-exists-p dir)
         (delete-directory dir t)))
+    ;; 4. Purge stale native-compiled .eln files.
+    (emacs-hypervisor-bridge--purge-eln-cache name)
+    ;; 5. Clear in-memory package.el state.
     (setq package-alist (assq-delete-all sym package-alist))
     (setq package-activated-list (delq sym package-activated-list))
     (setq package-vc-selected-packages (assq-delete-all sym package-vc-selected-packages))
-    (message "Rebuilding package %s..." (plist-get entry :name))
+    (message "Rebuilding package %s..." name)
     (redisplay)
     (emacs-hypervisor-bridge-install-batch (list entry) on-installed on-failed)))
 
