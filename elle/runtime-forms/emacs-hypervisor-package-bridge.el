@@ -195,10 +195,12 @@
   (let* ((url    (emacs-hypervisor-bridge--build-url entry))
          (branch (plist-get entry :branch))
          (ref    (plist-get entry :ref))
+         (subs   (plist-get entry :submodules))
          (dir    (emacs-hypervisor-bridge--clone-dir entry)))
     (append (list "git" "clone")
             (unless ref
               (list "--depth" "1" "--no-single-branch"))
+            (when subs (list "--recurse-submodules"))
             (when branch (list "--branch" branch))
             (list url dir))))
 

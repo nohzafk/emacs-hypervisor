@@ -2730,6 +2730,28 @@ Return a cons cell of (STATUS . OUTPUT)."
           (should-not (member "--no-single-branch" command)))
       (delete-directory home-dir t))))
 
+(ert-deftest emacs-hypervisor-bridge-submodules-clone-recurses ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (entry '(:name "treesit-grammars"
+                  :repo "example/treesit-grammars"
+                  :submodules t)))
+    (unwind-protect
+        (let ((command (emacs-hypervisor-bridge--clone-command entry)))
+          (should (member "--recurse-submodules" command)))
+      (delete-directory home-dir t))))
+
+(ert-deftest emacs-hypervisor-bridge-no-submodules-no-recurse ()
+  (let* ((home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-home" t)))
+         (user-emacs-directory home-dir)
+         (entry '(:name "vertico" :repo "minad/vertico")))
+    (unwind-protect
+        (let ((command (emacs-hypervisor-bridge--clone-command entry)))
+          (should-not (member "--recurse-submodules" command)))
+      (delete-directory home-dir t))))
+
 (ert-deftest emacs-hypervisor-bridge-rebuild-drops-cache-and-reinstalls ()
   (let* ((entry '(:name "vc-tool" :repo "example/vc-tool"))
          (home-dir (file-name-as-directory
