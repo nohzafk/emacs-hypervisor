@@ -291,7 +291,11 @@ package is symlinked, byte-compiled, and activated."
         (emacs-hypervisor-bridge--run-in-clone entry command "build")))))
 
 (defun emacs-hypervisor-bridge--adopt (entry)
-  "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'."
+  "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'.
+Dependency ordering is managed by the hypervisor via `:deps', so
+`package-compute-transaction' is bypassed to avoid false negatives for
+packages whose Package-Requires reference hypervisor-only dependencies
+that are not on any archive."
   (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
          (dir (emacs-hypervisor-bridge--clone-dir entry)))
     (unless (package-installed-p sym)
@@ -303,7 +307,14 @@ package is symlinked, byte-compiled, and activated."
       ;; during its unpack step.
       (emacs-hypervisor-bridge--register-vc-spec entry)
       (let ((bytecomp--inhibit-lexical-cookie-warning t))
-        (package-vc-install-from-checkout dir (symbol-name sym))))
+        ;; Suppress package.el's dependency resolution — the hypervisor's :deps
+        ;; graph already ensures correct installation order.  Without this,
+        ;; package-compute-transaction rejects Package-Requires entries that
+        ;; name hypervisor-only packages not published to any archive.
+        (cl-letf (((symbol-function 'package-compute-transaction)
+                   (lambda (packages _requirements &optional _seen)
+                     packages)))
+          (package-vc-install-from-checkout dir (symbol-name sym)))))
     (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--archive-install (entry)

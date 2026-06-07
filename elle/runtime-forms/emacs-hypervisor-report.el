@@ -274,6 +274,10 @@
    (seq-filter
     (lambda (report)
       (memq (plist-get report :status) '(:skipped :failed :invalid)))
+    (emacs-hypervisor--package-report-basis))
+   (seq-filter
+    (lambda (report)
+      (memq (plist-get report :status) '(:skipped :failed :invalid)))
     (emacs-hypervisor--unit-report-basis))))
 
 (defun emacs-hypervisor--unit-plan-items ()
