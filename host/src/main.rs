@@ -7,6 +7,8 @@ mod embedded {
         include_str!("../emacs-kernel/emacs-hypervisor-bootstrap.el");
     pub const EMBEDDED_SEXP_RPC_ELISP: &str =
         include_str!("../emacs-kernel/emacs-hypervisor-sexp-rpc.el");
+    pub const EMBEDDED_EVENTS_ELISP: &str =
+        include_str!("../emacs-kernel/emacs-hypervisor-events.el");
     pub const EMBEDDED_SESSION_STATE_ELISP: &str =
         include_str!("../emacs-kernel/emacs-hypervisor-session-state.el");
     pub const EMBEDDED_EARLY_INIT_ELISP: &str = include_str!("../emacs-kernel/early-init.el");
@@ -447,6 +449,11 @@ fn generated_init_body() -> String {
     );
     append_bundled_elisp_section(
         &mut output,
+        "host/emacs-kernel/emacs-hypervisor-events.el",
+        embedded::EMBEDDED_EVENTS_ELISP,
+    );
+    append_bundled_elisp_section(
+        &mut output,
         "host/emacs-kernel/emacs-hypervisor-sexp-rpc.el",
         embedded::EMBEDDED_SEXP_RPC_ELISP,
     );
@@ -787,6 +794,7 @@ mod tests {
         assert!(init.contains(";; emacs-hypervisor-generated: t"));
         assert!(init.contains(";; emacs-hypervisor-content-hash: fnv1a64:"));
         assert!(init.contains("Bundled from host/emacs-kernel/emacs-hypervisor-session-state.el"));
+        assert!(init.contains("Bundled from host/emacs-kernel/emacs-hypervisor-events.el"));
         assert!(init.contains("Bundled from host/emacs-kernel/emacs-hypervisor-sexp-rpc.el"));
         assert!(init.contains("Bundled from host/emacs-kernel/emacs-hypervisor-bootstrap.el"));
         assert!(init.contains("Bundled from host/emacs-kernel/home-startup.el"));

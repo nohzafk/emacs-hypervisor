@@ -5,6 +5,7 @@
 (defvar emacs-hypervisor--stderr-buffer-name " *emacs-hypervisor stderr*")
 
 (require 'emacs-hypervisor-session-state)
+(require 'emacs-hypervisor-events)
 (require 'emacs-hypervisor-sexp-rpc)
 
 (defun emacs-hypervisor-default-context ()
@@ -99,4 +100,3 @@ Return non-nil when a `:shutdown' message was received."
                 (kill-process emacs-hypervisor--process)))))
 
 (provide 'emacs-hypervisor-bootstrap)
-

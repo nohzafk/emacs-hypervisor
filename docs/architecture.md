@@ -99,8 +99,8 @@ flowchart LR
 ```
 
 **Stage 1 — Stable kernel.** The generated `init.el` contains the trusted
-Emacs kernel: process startup, session state, sexp-rpc parsing, request
-dispatch, and the small eval surface used by the host.
+Emacs kernel: process startup, session state, sexp-rpc parsing, event handling,
+request dispatch, and the small eval surface used by the host.
 
 **Stage 2 — Control plane.** Emacs launches `emacs-hypervisor serve`, then
 Emacs and Elle exchange request, response, and event messages over stdio using
@@ -193,7 +193,7 @@ Emacs as quoted forms for direct `eval`.
 | Position-recording config loader (source provenance) | `elle/runtime-forms/emacs-hypervisor-config-loader.el` |
 | Direct runtime eval of structured bodies | `elle/runtime-forms/emacs-hypervisor-unit-runtime.el`, `elle/runtime-forms/emacs-hypervisor-compose.el` |
 | Quote bodies/requires in Elle-emitted run-unit forms | `elle/execution.lisp` |
-| Avoid Emacs reader shortcuts on outbound messages | `host/templates/lisp/emacs-hypervisor-sexp-rpc.el` |
+| Avoid Emacs reader shortcuts on outbound messages | `host/emacs-kernel/emacs-hypervisor-sexp-rpc.el` |
 
 ### Limitations
 
@@ -231,8 +231,9 @@ emacs-hypervisor/
 │   ├── build.rs                       # embeds Elle source + Elisp at compile time
 │   ├── emacs-kernel/                  # trusted Emacs kernel (bundled into init.el)
 │   │   ├── home-startup.el            #   home bootstrap wrapper
-│   │   ├── emacs-hypervisor-bootstrap.el    #   process startup, sexp-rpc, eval surface
+│   │   ├── emacs-hypervisor-bootstrap.el    #   process startup, eval surface
 │   │   ├── emacs-hypervisor-session-state.el#   session state management
+│   │   ├── emacs-hypervisor-events.el       #   event topics and observability updates
 │   │   └── emacs-hypervisor-sexp-rpc.el     #   S-expression wire protocol
 │   └── elisp_pack/                    # build-time Elisp packer (Rust crate)
 │       └── src/lib.rs

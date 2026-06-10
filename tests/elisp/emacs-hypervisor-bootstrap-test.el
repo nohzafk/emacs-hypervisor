@@ -177,6 +177,12 @@ Return a cons cell of (STATUS . OUTPUT)."
     (should (equal (cadar warnings) "generated init.el is stale"))
     (should (eq (caddar warnings) :warning))))
 
+(ert-deftest emacs-hypervisor-events-handle-ignores-unavailable-handler ()
+  (let ((emacs-hypervisor-events--handlers
+         '((:optional . emacs-hypervisor-events--missing-handler))))
+    (should-not
+     (emacs-hypervisor-events-handle :optional '(:message "not loaded")))))
+
 (ert-deftest emacs-hypervisor-generated-early-init-loads-fixed-xdg-file ()
   (let* ((xdg-dir (make-temp-file "emacs-hypervisor-xdg" t))
          (config-dir (expand-file-name "emacs-hypervisor" xdg-dir))

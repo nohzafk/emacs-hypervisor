@@ -16,6 +16,7 @@
 (defvar emacs-hypervisor--last-log-message nil)
 (defvar emacs-hypervisor--last-error-message nil)
 (defvar emacs-hypervisor--shutdown-reason nil)
+(defvar emacs-hypervisor--shutdown-payload nil)
 (defvar emacs-hypervisor--completed nil)
 (defvar emacs-hypervisor--finish-notified nil)
 (defvar emacs-hypervisor--startup-warnings nil)
