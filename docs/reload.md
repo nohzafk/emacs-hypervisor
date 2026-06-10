@@ -75,8 +75,10 @@ Diff action shape:
 
 Cleanup uses runtime registry records created when a config unit is evaluated.
 Each record stores the owning unit, concrete target, concrete function symbol,
-source form, and an evaluable retract form. See
-[docs/effect-system.md](effect-system.md) for the full record schema.
+source provenance (the original form, plus the `config.org` file, heading, and
+line when the config was loaded through the position-recording loader), and an
+evaluable retract form. See [docs/effect-system.md](effect-system.md) for the
+full record schema.
 
 There is no static cleanup fallback. If a previous unit has no active registry
 records, cleanup is a no-op for that unit and a restart clears any older live

@@ -154,7 +154,8 @@ detect_libclang_path() {
 # clone of upstream Elle gains them automatically.  Patches are git-diff format
 # under patches/elle/*.patch and are reverted before checkout and (re)applied
 # after, keeping the operation idempotent across reruns and ref changes.
-# (None are currently shipped.)
+# Shipped patches are candidates for upstream submission; see each patch
+# header and docs/spec-lockfile-check-source-map.md for context.
 revert_elle_patches() {
   [ -d "$elle_patches_dir" ] || return 0
   local patch
