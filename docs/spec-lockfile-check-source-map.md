@@ -15,6 +15,18 @@ Implementation notes:
 - **Part 3** is implemented for declaration entries, effect records, and
   diff identity. Report-buffer jump buttons and threading `:source` into
   Elle-side planned/executed reports are follow-up work.
+- Implementing `check` end-to-end exposed a pre-existing bug in Elle's
+  io_uring backend: a single write larger than the pipe buffer (64KB on
+  Linux) completed short and silently dropped its tail, deadlocking any
+  session whose config-surface install request exceeded that size.
+  `patches/elle/0001-io-uring-complete-short-writes.patch` (applied to the
+  `.elle` checkout by `scripts/bootstrap-elle`) finishes short writes with
+  a synchronous write loop, mirroring Elle's thread-pool backend. The
+  patch is a candidate for upstream submission. An earlier attempt that
+  resubmitted the remainder as a new asynchronous SQE triggered
+  nondeterministic segfaults in Elle's JIT (`dispatch_trait_method` via
+  `prim_rest`), suggesting a separate latent issue with writes that stay
+  pending across event-loop turns — worth mentioning upstream.
 
 Three independent features, ordered by suggested implementation order. Each
 part stands alone; none depends on another, though Part 2 (`check`) and
