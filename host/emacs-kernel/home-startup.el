@@ -117,7 +117,7 @@
               (when line (format " · line %s" line))))))
 
 (defun emacs-hypervisor--check-render-problem (phase item)
-  (princ (format "%-8s %s %-22s %s%s\n"
+  (princ (format "%-8s %s %-22s %s%s%s\n"
                  (upcase (substring (symbol-name
                                      (or (plist-get item :status) :invalid))
                                     1))
@@ -125,7 +125,10 @@
                  (or (plist-get item :name) "?")
                  (or (plist-get item :reason) "")
                  (let ((details (plist-get item :details)))
-                   (if details (format " %S" details) "")))))
+                   (if details (format " %S" details) ""))
+                 (let ((location (emacs-hypervisor--check-describe-source
+                                  (plist-get item :source))))
+                   (if location (format " [%s]" location) "")))))
 
 (defun emacs-hypervisor--check-render-lint (finding)
   (princ (format "%-8s unit %-22s %s (%s)%s\n"

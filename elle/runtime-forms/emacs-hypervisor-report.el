@@ -154,6 +154,7 @@
       (:missing-after-units "missing after units")
       (:preflight "preflight failed")
       (:cycle "dependency cycle")
+      (:duplicate-name "duplicate name")
       (:execution "execution failed")
       (:executed "executed")
       (_ (string-remove-prefix ":" (symbol-name reason)))))
@@ -224,6 +225,9 @@
     (:cycle
      (format "dependency cycle: %s"
              (emacs-hypervisor--format-report-details details)))
+    (:duplicate-name
+     (format "declared %s times"
+             (or (plist-get details :occurrences) "multiple")))
     (:execution
      (if (string-empty-p (emacs-hypervisor--format-report-details details))
          "execution failed"
@@ -519,6 +523,17 @@
                'face 'shadow)))
     (insert "\n")))
 
+(defun emacs-hypervisor--package-revision-label (event)
+  "Return the short revision/lock label for an installed package EVENT."
+  (let ((rev (plist-get event :rev))
+        (locked (plist-get event :locked)))
+    (when (stringp rev)
+      (concat (substring rev 0 (min 7 (length rev)))
+              (pcase locked
+                (:hit " (locked)")
+                (:pinned " (pinned)")
+                (_ ""))))))
+
 (defun emacs-hypervisor--insert-package-activity-line (name state)
   (let* ((marker
           (pcase state
@@ -540,6 +555,9 @@
             (propertize marker 'face face)
             " "
             (propertize name 'face face))
+    (when-let ((revision (and (eq state :installed)
+                              (emacs-hypervisor--package-revision-label event))))
+      (insert (propertize (format "  %s" revision) 'face 'shadow)))
     (when time
       (insert (propertize
                (format "  %s" (emacs-hypervisor--format-since-start time))
@@ -562,6 +580,15 @@
     (emacs-hypervisor--insert-status-line
      "Progress"
      (emacs-hypervisor--format-package-progress progress))
+    (when-let ((orphan-event
+                (seq-find (lambda (event)
+                            (eq (plist-get event :kind) :orphaned))
+                          emacs-hypervisor--package-events)))
+      (emacs-hypervisor--insert-status-line
+       "Orphaned"
+       (format "%s  (M-x emacs-hypervisor-prune-packages)"
+               (or (plist-get orphan-event :reason) ""))
+       'warning))
     (when plan-names
       (let* ((focus (emacs-hypervisor--package-focus-index plan-names states reports))
              (window-size emacs-hypervisor-report-package-window-size)
@@ -673,6 +700,40 @@
                      name state)))))
     (insert "\n")))
 
+(defun emacs-hypervisor--format-source-location (source)
+  "Format a declaration SOURCE plist as `config.org · Magit · line 14'."
+  (let ((file (plist-get source :file))
+        (heading (plist-get source :heading))
+        (line (plist-get source :line)))
+    (when (stringp file)
+      (concat (file-name-nondirectory file)
+              (when heading (format " · %s" heading))
+              (when line (format " · line %s" line))))))
+
+(defun emacs-hypervisor-report-visit-source (button)
+  "Jump to the config source location recorded on BUTTON."
+  (let* ((source (button-get button 'emacs-hypervisor-source))
+         (file (plist-get source :file))
+         (line (plist-get source :line)))
+    (if (and (stringp file) (file-exists-p file))
+        (progn
+          (find-file-other-window file)
+          (when (integerp line)
+            (goto-char (point-min))
+            (forward-line (1- line))))
+      (message "Source file not found: %s" file))))
+
+(defun emacs-hypervisor--insert-source-button (source)
+  "Insert a clickable source-location line for SOURCE when it has a file."
+  (when-let ((label (and source (emacs-hypervisor--format-source-location source))))
+    (insert "    ")
+    (insert-text-button label
+                        'action #'emacs-hypervisor-report-visit-source
+                        'emacs-hypervisor-source source
+                        'follow-link t
+                        'help-echo "mouse-1, RET: visit config source")
+    (insert "\n")))
+
 (defun emacs-hypervisor--insert-problems-section ()
   (let ((problems (emacs-hypervisor--problem-reports)))
     (when problems
@@ -690,7 +751,9 @@
                   status
                   "  "
                   (emacs-hypervisor--format-reason-and-details reason details)
-                  "\n")))
+                  "\n")
+          (emacs-hypervisor--insert-source-button
+           (plist-get report :source))))
       (insert "\n"))))
 
 (defun emacs-hypervisor--insert-report-contents ()

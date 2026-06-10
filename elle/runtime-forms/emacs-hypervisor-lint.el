@@ -74,36 +74,14 @@ unknown macro), so finding one means the effect is untracked on reload."
               (when (consp child)
                 (push child worklist)))))))))
 
-(defun emacs-hypervisor-lint--duplicate-names (entries kind)
-  "Return :error findings for names declared more than once in ENTRIES."
-  (let ((seen (make-hash-table :test #'equal))
-        findings)
-    (dolist (entry entries)
-      (let ((name (plist-get entry :name)))
-        (puthash name (1+ (gethash name seen 0)) seen)))
-    (dolist (entry entries)
-      (let* ((name (plist-get entry :name))
-             (count (gethash name seen 0)))
-        (when (> count 1)
-          ;; Report once per name, on its first occurrence.
-          (puthash name 0 seen)
-          (push (emacs-hypervisor-lint--finding
-                 name :duplicate-name :error
-                 (format "%s %s is declared %d times" kind name count)
-                 nil (plist-get entry :source))
-                findings))))
-    (nreverse findings)))
-
 (defun emacs-hypervisor-lint-exported-declarations ()
-  "Lint all exported declarations.  Returns a list of finding plists."
-  (let* ((packages (emacs-hypervisor-export-packages))
-         ;; Lint the raw registered entries in declaration order, not the
+  "Lint all exported declarations.  Returns a list of finding plists.
+Duplicate name detection lives in Elle's boot policy, which reports
+duplicates as :invalid planned items during both check and startup."
+  (let* (;; Lint the raw registered entries in declaration order, not the
          ;; canonicalized export: lint output never crosses to Elle as code.
          (units (reverse emacs-hypervisor-config-units))
-         (findings
-          (append
-           (emacs-hypervisor-lint--duplicate-names packages "package")
-           (emacs-hypervisor-lint--duplicate-names units "config-unit"))))
+         (findings nil))
     (dolist (entry units)
       (let ((collected nil))
         (emacs-hypervisor-lint--walk-body

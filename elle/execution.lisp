@@ -39,12 +39,12 @@
   (defn report-state [next-id report]
     {:next-id next-id :report report})
 
-  (defn failed-eval-report [name error]
-    (graph:make-report name :failed :execution (eval-execution-details error)))
+  (defn failed-eval-report [name error source-entry]
+    (graph:report-with-source (graph:make-report name :failed :execution (eval-execution-details error)) source-entry))
 
-  (defn eval-report-state [current-id name ok-report result]
+  (defn eval-report-state [current-id name ok-report result source-entry]
     (report-state (+ current-id 1)
-                  (if (execution-ok? result) ok-report (failed-eval-report name (execution-error result)))))
+                  (if (execution-ok? result) ok-report (failed-eval-report name (execution-error result) source-entry))))
 
   (defn collect-report-state [items next-id next-state]
     (letrec [loop (fn [remaining current-id collected]
@@ -72,13 +72,16 @@
     (graph:entry-field (graph:find-entry planned-reports name) :details))
 
   (defn installed-package-report [name planned-reports]
-    (graph:make-report name :ok :installed (planned-package-details planned-reports name)))
+    ## The planned report already carries the declaration's :source; copy it
+    ## forward so executed reports keep provenance.
+    (graph:report-with-source (graph:make-report name :ok :installed (planned-package-details planned-reports name))
+                              (graph:find-entry planned-reports name)))
 
   (defn unit-execution-details [entry]
     {:requires (graph:entry-field entry :requires) :after (graph:entry-field entry :after)})
 
   (defn executed-unit-report [name entry]
-    (graph:make-report name :ok :executed (unit-execution-details entry)))
+    (graph:report-with-source (graph:make-report name :ok :executed (unit-execution-details entry)) entry))
 
   (defn env-package-list-member? [env-name name]
     (let [env-value (sys/env env-name)
@@ -115,7 +118,8 @@
                                                 :packages name)
           drained (drain-events-until-response current-id)
           result (get drained :response)]
-      (eval-report-state current-id name (installed-package-report name planned-reports) result)))
+      (eval-report-state current-id name (installed-package-report name planned-reports) result
+                         (graph:find-entry planned-reports name))))
 
   ## Drive package installation one package at a time, like the unit plan, so
   ## Emacs returns to its event loop between packages and repaints the report.
@@ -151,7 +155,7 @@
               _request-sent (send-eval-form-request current-id (unit-run-at-index-form index) :run-unit :unit
                                                     :units name)
               result (protocol:await-response mailbox current-id)]
-          (eval-report-state current-id name (executed-unit-report name entry) result)))))
+          (eval-report-state current-id name (executed-unit-report name entry) result entry)))))
 
   (defn execute-unit-plan [plan-items package-reports next-id]
     (collect-report-state plan-items next-id

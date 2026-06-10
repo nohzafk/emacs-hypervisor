@@ -193,12 +193,15 @@ This applies only when `emacs-hypervisor-show-report-on-startup' is nil.")
         emacs-hypervisor--metric-events)
   (emacs-hypervisor-report-refresh))
 
-(defun emacs-hypervisor-report-note-package-event (kind &optional name reason)
-  "Record a local package event for the startup report."
-  (push (delq nil (list :kind kind
-                        :name name
-                        :reason reason
-                        :time (float-time)))
+(defun emacs-hypervisor-report-note-package-event (kind &optional name reason extra)
+  "Record a local package event for the startup report.
+EXTRA is an optional plist of additional fields, e.g. (:rev REV :locked HOW)
+for installed packages."
+  (push (append (list :kind kind)
+                (when name (list :name name))
+                (when reason (list :reason reason))
+                (list :time (float-time))
+                extra)
         emacs-hypervisor--package-events)
   (pcase kind
     (:begin

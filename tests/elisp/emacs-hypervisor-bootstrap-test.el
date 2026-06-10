@@ -3061,25 +3061,15 @@ Return a cons cell of (STATUS . OUTPUT)."
       (should (eq (plist-get finding :severity) :warning))
       (should (stringp (plist-get finding :form-string))))))
 
-(ert-deftest emacs-hypervisor-lint-reports-duplicate-names-as-errors ()
+(ert-deftest emacs-hypervisor-lint-leaves-duplicates-to-boot-policy ()
+  ;; Duplicate detection lives in Elle's boot policy (planned :invalid
+  ;; reports with :duplicate-name), not in the Emacs-side lint pass.
   (emacs-hypervisor-reset-declarations)
   (eval '(progn
-           (package! transient)
-           (package! transient :repo "magit/transient")
            (config-unit! dup-unit :config t)
            (config-unit! dup-unit :config 2))
         t)
-  (let* ((findings (emacs-hypervisor-lint-exported-declarations))
-         (duplicates (cl-remove-if-not
-                      (lambda (f) (eq (plist-get f :rule) :duplicate-name))
-                      findings)))
-    (should (= (length duplicates) 2))
-    (dolist (finding duplicates)
-      (should (eq (plist-get finding :severity) :error)))
-    (should (member "transient"
-                    (mapcar (lambda (f) (plist-get f :unit)) duplicates)))
-    (should (member "dup-unit"
-                    (mapcar (lambda (f) (plist-get f :unit)) duplicates)))))
+  (should (null (emacs-hypervisor-lint-exported-declarations))))
 
 (ert-deftest emacs-hypervisor-lint-leaves-clean-config-unflagged ()
   (emacs-hypervisor-reset-declarations)
@@ -3136,3 +3126,88 @@ Return a cons cell of (STATUS . OUTPUT)."
       (should (string-match-p "INVALID  package transient" rendered))
       (should (string-match-p "SKIPPED  unit magit-ui" rendered))
       (should (string-match-p "2 problems" rendered)))))
+
+(require 'emacs-hypervisor-report)
+
+(ert-deftest emacs-hypervisor-package-event-stores-rev-and-locked-extra ()
+  (let ((emacs-hypervisor--package-events nil))
+    (emacs-hypervisor-report-note-package-event
+     :installed "magit" nil '(:rev "0aa2686deadbeef" :locked :hit))
+    (let ((event (car emacs-hypervisor--package-events)))
+      (should (equal (plist-get event :rev) "0aa2686deadbeef"))
+      (should (eq (plist-get event :locked) :hit))
+      (should (equal (emacs-hypervisor--package-revision-label event)
+                     "0aa2686 (locked)")))
+    (should (equal (emacs-hypervisor--package-revision-label
+                    '(:rev "abc1234" :locked :pinned))
+                   "abc1234 (pinned)"))
+    (should (equal (emacs-hypervisor--package-revision-label
+                    '(:rev "abc1234" :locked :miss))
+                   "abc1234"))
+    (should (null (emacs-hypervisor--package-revision-label '(:locked :hit))))))
+
+(ert-deftest emacs-hypervisor-report-renders-package-revision-and-orphans ()
+  (let ((emacs-hypervisor--package-events
+         (list '(:kind :orphaned :reason "stale-pkg, old-tool" :time 2.0)
+               '(:kind :installed :name "magit" :time 1.0
+                 :rev "0aa2686deadbeef" :locked :hit)))
+        (emacs-hypervisor--session-started-at 0.0))
+    (with-temp-buffer
+      (emacs-hypervisor--insert-package-activity-line "magit" :installed)
+      (should (string-match-p "magit.*0aa2686 (locked)" (buffer-string))))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'emacs-hypervisor--package-progress-summary)
+                 (lambda () '(:plan-known nil)))
+                ((symbol-function 'emacs-hypervisor--package-plan-names)
+                 (lambda () nil))
+                ((symbol-function 'emacs-hypervisor--package-state)
+                 (lambda () "Ready")))
+        (emacs-hypervisor--insert-packages-section))
+      (should (string-match-p "Orphaned" (buffer-string)))
+      (should (string-match-p "stale-pkg, old-tool" (buffer-string)))
+      (should (string-match-p "emacs-hypervisor-prune-packages"
+                              (buffer-string))))))
+
+(ert-deftest emacs-hypervisor-report-problem-includes-source-button ()
+  (let* ((source-dir (make-temp-file "hypervisor-report-source" t))
+         (org-file (expand-file-name "config.org" source-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file org-file
+            (insert "* Magit\nline two\nline three\n"))
+          (let ((emacs-hypervisor--state :completed)
+                (emacs-hypervisor--report-messages
+                 (list
+                  (list :report :stage :executed :phase :units
+                        :items
+                        (list (list :name "broken-unit"
+                                    :status :failed
+                                    :reason :execution
+                                    :details '(:source :eval :error "boom")
+                                    :source (list :file org-file
+                                                  :heading "Magit"
+                                                  :line 3)))))))
+            (with-temp-buffer
+              (emacs-hypervisor--insert-problems-section)
+              (should (string-match-p "broken-unit" (buffer-string)))
+              (should (string-match-p "config\\.org · Magit · line 3"
+                                      (buffer-string)))
+              (goto-char (point-min))
+              (let ((button (next-button (point))))
+                (should button)
+                (should (equal (plist-get
+                                (button-get button 'emacs-hypervisor-source)
+                                :line)
+                               3))
+                ;; Activating the button visits the file at the line.
+                (save-window-excursion
+                  (button-activate button)
+                  (should (equal (buffer-file-name) org-file))
+                  (should (= (line-number-at-pos) 3))
+                  (kill-buffer))))))
+      (delete-directory source-dir t))))
+
+(ert-deftest emacs-hypervisor-report-formats-duplicate-name-reason ()
+  (should (equal (emacs-hypervisor--format-reason-and-details
+                  :duplicate-name '(:occurrences 2))
+                 "declared 2 times")))

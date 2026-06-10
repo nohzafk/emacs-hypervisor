@@ -6,9 +6,9 @@
 (defvar emacs-hypervisor-runtime-packages-installation-active nil)
 (defvar emacs-hypervisor-runtime-packages-finished-sent nil)
 
-(defun emacs-hypervisor-runtime-note-package-event (kind &optional name reason)
+(defun emacs-hypervisor-runtime-note-package-event (kind &optional name reason extra)
   (when (fboundp 'emacs-hypervisor-report-note-package-event)
-    (emacs-hypervisor-report-note-package-event kind name reason)))
+    (emacs-hypervisor-report-note-package-event kind name reason extra)))
 
 (defun emacs-hypervisor-runtime--package-install-info (name)
   (and (boundp 'emacs-hypervisor-bridge-last-install-info)
@@ -42,7 +42,9 @@
     (push name emacs-hypervisor-installed-packages))
   (push (list :phase :packages :event :installed :name name)
         emacs-hypervisor-execution-events)
-  (emacs-hypervisor-runtime-note-package-event :installed name)
+  (emacs-hypervisor-runtime-note-package-event
+   :installed name nil
+   (copy-sequence (emacs-hypervisor-runtime--package-install-info name)))
   (emacs-hypervisor-runtime-send-package-installed name))
 
 (defun emacs-hypervisor-runtime-package-failed (name reason)
