@@ -97,6 +97,118 @@
    :init-generated (not (null (emacs-hypervisor--generated-init-file-p)))
    :init-content-hash (emacs-hypervisor--current-init-content-hash)))
 
+(defun emacs-hypervisor--check-mode-p ()
+  "Return non-nil when this startup is an `emacs-hypervisor check' run."
+  (equal (getenv "EMACS_HYPERVISOR_CHECK") "1"))
+
+(defun emacs-hypervisor--check-strict-p ()
+  (equal (getenv "EMACS_HYPERVISOR_CHECK_STRICT") "1"))
+
+(defun emacs-hypervisor--check-format ()
+  (or (getenv "EMACS_HYPERVISOR_CHECK_FORMAT") "human"))
+
+(defun emacs-hypervisor--check-describe-source (source)
+  (let ((file (plist-get source :file))
+        (heading (plist-get source :heading))
+        (line (plist-get source :line)))
+    (when file
+      (concat (file-name-nondirectory file)
+              (when heading (format " · %s" heading))
+              (when line (format " · line %s" line))))))
+
+(defun emacs-hypervisor--check-render-problem (phase item)
+  (princ (format "%-8s %s %-22s %s%s%s\n"
+                 (upcase (substring (symbol-name
+                                     (or (plist-get item :status) :invalid))
+                                    1))
+                 phase
+                 (or (plist-get item :name) "?")
+                 (or (plist-get item :reason) "")
+                 (let ((details (plist-get item :details)))
+                   (if details (format " %S" details) ""))
+                 (let ((location (emacs-hypervisor--check-describe-source
+                                  (plist-get item :source))))
+                   (if location (format " [%s]" location) "")))))
+
+(defun emacs-hypervisor--check-render-lint (finding)
+  (princ (format "%-8s unit %-22s %s (%s)%s\n"
+                 (if (eq (plist-get finding :severity) :error) "INVALID" "WARN")
+                 (or (plist-get finding :unit) "?")
+                 (or (plist-get finding :message) "")
+                 (or (plist-get finding :rule) "")
+                 (let ((location (emacs-hypervisor--check-describe-source
+                                  (plist-get finding :source))))
+                   (if location (format " [%s]" location) "")))))
+
+(defun emacs-hypervisor--check-exit-code (payload)
+  "Return the exit code for a check shutdown PAYLOAD."
+  (let* ((check (plist-get payload :check))
+         (lint (plist-get check :lint))
+         (lint-errors (cl-count :error lint
+                                :key (lambda (f) (plist-get f :severity))))
+         (lint-warnings (cl-count-if-not
+                         (lambda (f) (eq (plist-get f :severity) :error))
+                         lint))
+         (problems (+ (length (plist-get check :package-problems))
+                      (length (plist-get check :unit-problems))
+                      lint-errors)))
+    (cond
+     ((> problems 0) 1)
+     ((and (emacs-hypervisor--check-strict-p) (> lint-warnings 0)) 1)
+     (t 0))))
+
+(defun emacs-hypervisor--check-render-human (payload)
+  (let* ((check (plist-get payload :check))
+         (package-problems (plist-get check :package-problems))
+         (unit-problems (plist-get check :unit-problems))
+         (lint (plist-get check :lint))
+         (problems (+ (length package-problems) (length unit-problems)))
+         (lint-errors (cl-count :error lint
+                                :key (lambda (f) (plist-get f :severity)))))
+    (princ (format "emacs-hypervisor check: %d problem%s, %d lint finding%s\n\n"
+                   (+ problems lint-errors)
+                   (if (= (+ problems lint-errors) 1) "" "s")
+                   (length lint)
+                   (if (= (length lint) 1) "" "s")))
+    (dolist (item package-problems)
+      (emacs-hypervisor--check-render-problem "package" item))
+    (dolist (item unit-problems)
+      (emacs-hypervisor--check-render-problem "unit" item))
+    (dolist (finding lint)
+      (emacs-hypervisor--check-render-lint finding))
+    (princ (format "\nchecked: %s packages, %s units\n"
+                   (or (plist-get check :packages-total) 0)
+                   (or (plist-get check :units-total) 0)))))
+
+(defun emacs-hypervisor--check-finish ()
+  "Wait for the check session, render the verdict, and exit Emacs."
+  (require 'cl-lib)
+  (emacs-hypervisor-wait-for-completion 300)
+  (let ((payload emacs-hypervisor--shutdown-payload))
+    (cond
+     ((null payload)
+      (princ (format "emacs-hypervisor check: session did not complete: %s\n"
+                     (or emacs-hypervisor--last-process-event
+                         emacs-hypervisor--last-error-message
+                         "no shutdown received")))
+      (kill-emacs 2))
+     ((eq (plist-get payload :reason) :check-complete)
+      (if (equal (emacs-hypervisor--check-format) "sexp")
+          (let ((print-length nil) (print-level nil))
+            (prin1 payload)
+            (princ "\n"))
+        (emacs-hypervisor--check-render-human payload))
+      (kill-emacs (emacs-hypervisor--check-exit-code payload)))
+     (t
+      ;; A non-check shutdown, e.g. :config-load-failed.  The config being
+      ;; unloadable is a finding, not a harness error.
+      (princ (format "emacs-hypervisor check: %s\n%s\n"
+                     (or (plist-get payload :reason) :failed)
+                     (or (plist-get payload :message)
+                         (plist-get payload :details)
+                         "")))
+      (kill-emacs 1)))))
+
 (defun emacs-hypervisor-empty-session-data (&optional fields)
   "Return an explicit empty session-data payload."
   (let ((requested (or fields '(:packages :units :env)))
@@ -132,6 +244,8 @@
               :repo-dir emacs-hypervisor-home-directory
               :binary emacs-hypervisor-binary)
              init-metadata
+             (when (emacs-hypervisor--check-mode-p)
+               (list :check t))
              (when (file-exists-p emacs-hypervisor-config-org-file)
                (list :config-org-file emacs-hypervisor-config-org-file))))))
   (setq emacs-hypervisor-session-data-function
@@ -170,5 +284,14 @@
   (unless noninteractive
     (message "[Hypervisor] starting session %s" "user-home-init")))
  (t
+  (when (and noninteractive (emacs-hypervisor--check-mode-p))
+    (princ (format "emacs-hypervisor check: no config.org or config.el found at %s\n"
+                   (emacs-hypervisor--config-directory)))
+    (kill-emacs 2))
   (message "[Hypervisor] no config.org or config.el found at %s"
            (emacs-hypervisor--config-directory))))
+
+(when (and noninteractive
+           (emacs-hypervisor--check-mode-p)
+           (emacs-hypervisor-live-p))
+  (emacs-hypervisor--check-finish))

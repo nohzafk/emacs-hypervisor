@@ -64,7 +64,8 @@ ship a compiled artifact:
        :local ,local
        :lisp-dir ,lisp-dir
        :submodules ,submodules
-       :build ,build)
+       :build ,build
+       :source (emacs-hypervisor--capture-source))
       emacs-hypervisor-packages)))
 
 (defmacro config-unit! (name &rest args)
@@ -123,7 +124,8 @@ feature preloading, not whether the unit itself is lazy or deferred."
          :after ',after
          :env ',env
          :executable ',executable
-         :body ',body-form)
+         :body ',body-form
+         :source (emacs-hypervisor--capture-source))
         emacs-hypervisor-config-units))))
 
 (defun emacs-hypervisor--package-installed-p (entry)
@@ -186,6 +188,13 @@ feature preloading, not whether the unit itself is lazy or deferred."
                     (list :extensions
                           (if (fboundp 'emacs-hypervisor-export-extension-settings)
                               (emacs-hypervisor-export-extension-settings)
+                            nil)))))
+    (when (memq :lint requested)
+      (setq payload
+            (append payload
+                    (list :lint
+                          (if (fboundp 'emacs-hypervisor-lint-exported-declarations)
+                              (emacs-hypervisor-lint-exported-declarations)
                             nil)))))
     payload))
 

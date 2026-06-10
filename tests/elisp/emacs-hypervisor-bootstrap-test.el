@@ -2808,3 +2808,406 @@ Return a cons cell of (STATUS . OUTPUT)."
       (should (equal (car (car sent-events)) :package))
       (should (equal (plist-get (cadr (car sent-events)) :kind) :installed)))))
 
+
+(require 'emacs-hypervisor-package-lock)
+
+(defmacro emacs-hypervisor-test--with-temp-lock (&rest body)
+  "Run BODY with the package lockfile bound to a fresh temp path."
+  (declare (indent 0))
+  `(let* ((lock-dir (make-temp-file "hypervisor-lock-test" t))
+          (emacs-hypervisor-package-lock-file
+           (expand-file-name "hypervisor.lock" lock-dir)))
+     (unwind-protect
+         (progn ,@body)
+       (delete-directory lock-dir t))))
+
+(ert-deftest emacs-hypervisor-package-lock-roundtrip-is-sorted ()
+  (emacs-hypervisor-test--with-temp-lock
+    (should (null (emacs-hypervisor-package-lock-read)))
+    (emacs-hypervisor-package-lock-put
+     '(:name "zeta" :kind :vc :rev "aaa"))
+    (emacs-hypervisor-package-lock-put
+     '(:name "alpha" :kind :archive :version (1 0)))
+    (let ((entries (emacs-hypervisor-package-lock-entries)))
+      (should (equal (mapcar (lambda (e) (plist-get e :name)) entries)
+                     '("alpha" "zeta"))))
+    ;; Upsert replaces by name rather than duplicating.
+    (emacs-hypervisor-package-lock-put
+     '(:name "zeta" :kind :vc :rev "bbb"))
+    (should (equal (plist-get (emacs-hypervisor-package-lock-entry "zeta") :rev)
+                   "bbb"))
+    (should (= (length (emacs-hypervisor-package-lock-entries)) 2))
+    (emacs-hypervisor-package-lock-remove "alpha")
+    (should (null (emacs-hypervisor-package-lock-entry "alpha")))))
+
+(ert-deftest emacs-hypervisor-package-lock-resolution-precedence ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "magit" :kind :vc :rev "locked-rev"))
+    ;; Declared :ref wins over the lock.
+    (let ((pinned '(:name "magit" :repo "magit/magit" :ref "declared-rev")))
+      (should (equal (emacs-hypervisor-bridge--resolved-rev pinned)
+                     "declared-rev"))
+      (should (eq (emacs-hypervisor-bridge--locked-how pinned) :pinned)))
+    ;; Without a declared pin the lock revision drives resolution.
+    (let ((unpinned '(:name "magit" :repo "magit/magit")))
+      (should (equal (emacs-hypervisor-bridge--resolved-rev unpinned)
+                     "locked-rev"))
+      (should (eq (emacs-hypervisor-bridge--locked-how unpinned) :hit))
+      ;; A locked revision forces the non-shallow clone shape.
+      (should-not (member "--depth"
+                          (emacs-hypervisor-bridge--clone-command unpinned)))
+      ;; Upgrades ignore the lock.
+      (let ((emacs-hypervisor-bridge-ignore-lock t))
+        (should (null (emacs-hypervisor-bridge--resolved-rev unpinned)))
+        (should (eq (emacs-hypervisor-bridge--locked-how unpinned) :miss))))
+    ;; No lock entry at all resolves to the branch/default HEAD shape.
+    (let ((unknown '(:name "consult" :repo "minad/consult")))
+      (should (null (emacs-hypervisor-bridge--resolved-rev unknown)))
+      (should (member "--depth"
+                      (emacs-hypervisor-bridge--clone-command unknown))))))
+
+(ert-deftest emacs-hypervisor-package-lock-local-entries-never-drive-resolution ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "mytool" :kind :vc :rev "locked-rev"))
+    (should (null (emacs-hypervisor-bridge--locked-rev
+                   '(:name "mytool" :local "~/projects/mytool"))))
+    (should (null (emacs-hypervisor-bridge--locked-rev
+                   '(:name "mytool" :repo "~/projects/mytool"))))))
+
+(ert-deftest emacs-hypervisor-upgrade-pinned-package-skips-rebuild ()
+  (emacs-hypervisor-test--with-temp-lock
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool" :tag "v1.0"))
+          rebuild-called)
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (&rest _) (setq rebuild-called t))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry entry)))
+          (should (eq (plist-get report :status) :pinned))
+          (should-not rebuild-called))))))
+
+(ert-deftest emacs-hypervisor-upgrade-updates-lock-and-reports-rev-delta ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "old-rev"))
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool")))
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (ent on-installed _on-failed)
+                   ;; The real rebuild records the fresh revision during
+                   ;; adopt; simulate that effect.
+                   (should (plist-get ent :name))
+                   (emacs-hypervisor-package-lock-put
+                    '(:name "vc-tool" :kind :vc :rev "new-rev"))
+                   (funcall on-installed "vc-tool"))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry entry)))
+          (should (eq (plist-get report :status) :ok))
+          (should (equal (plist-get report :previous-rev) "old-rev"))
+          (should (equal (plist-get report :current-rev) "new-rev")))))))
+
+(ert-deftest emacs-hypervisor-prune-keep-set-includes-requires-closure ()
+  (let* ((temp-home (make-temp-file "hypervisor-prune-test" t))
+         (user-emacs-directory (file-name-as-directory temp-home))
+         (package-user-dir (expand-file-name "hypervisor/packages" temp-home)))
+    (unwind-protect
+        (let* ((pkg-dir (lambda (name)
+                          (let ((dir (expand-file-name name package-user-dir)))
+                            (make-directory dir t)
+                            dir)))
+               (package-alist
+                (list
+                 (list 'mypkg (package-desc-create
+                               :name 'mypkg :version '(1 0)
+                               :reqs '((dep (1 0)))
+                               :dir (funcall pkg-dir "mypkg")))
+                 (list 'dep (package-desc-create
+                             :name 'dep :version '(1 0)
+                             :dir (funcall pkg-dir "dep")))
+                 (list 'stale (package-desc-create
+                               :name 'stale :version '(1 0)
+                               :dir (funcall pkg-dir "stale"))))))
+          ;; A stale staging clone with no declaration is also an orphan.
+          (make-directory
+           (expand-file-name "hypervisor/sources/stale-clone" temp-home) t)
+          (should (equal (emacs-hypervisor-bridge-orphaned-packages '("mypkg"))
+                         '("stale" "stale-clone"))))
+      (delete-directory temp-home t))))
+
+(ert-deftest emacs-hypervisor-installed-event-carries-rev-and-locked ()
+  (let ((emacs-hypervisor-bridge-last-install-info
+         '(("vc-tool" . (:rev "abc123" :locked :hit))))
+        (emacs-hypervisor-installed-packages nil)
+        (emacs-hypervisor-execution-events nil)
+        sent-events)
+    (cl-letf (((symbol-function 'emacs-hypervisor-send-event)
+               (lambda (topic payload)
+                 (push (list topic payload) sent-events))))
+      (emacs-hypervisor-runtime-package-installed "vc-tool")
+      (let ((payload (cadr (car sent-events))))
+        (should (equal (plist-get payload :rev) "abc123"))
+        (should (eq (plist-get payload :locked) :hit))))))
+
+(require 'emacs-hypervisor-config-loader)
+
+(ert-deftest emacs-hypervisor-source-map-resolves-org-heading-and-line ()
+  (let* ((config-dir (make-temp-file "hypervisor-source-map" t))
+         (org-file (expand-file-name "config.org" config-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file org-file
+            (insert "* Editing\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    "(setq emacs-hypervisor-test-runtime-value 1)\n"
+                    "#+end_src\n\n"
+                    "* Magit\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    ";; a comment shifts following lines\n"
+                    "(config-unit! magit-source-unit\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 2))\n"
+                    "#+end_src\n"))
+          (emacs-hypervisor-reset-declarations)
+          (emacs-hypervisor--load-with-source-map
+           (emacs-hypervisor--tangle-config-org-file org-file))
+          (let* ((unit (car (emacs-hypervisor-export-config-units)))
+                 (source (plist-get unit :source)))
+            (should (equal (plist-get unit :name) "magit-source-unit"))
+            (should (equal (plist-get source :file) org-file))
+            (should (equal (plist-get source :heading) "Magit"))
+            ;; The declaration sits on org line 11: heading 7, blank 8,
+            ;; begin_src 9, comment 10, (config-unit! 11.
+            (should (equal (plist-get source :line) 11))
+            (should (integerp (plist-get source :tangled-line)))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-source-map-resolves-plain-config-el-line ()
+  (let* ((config-dir (make-temp-file "hypervisor-source-el" t))
+         (el-file (expand-file-name "config.el" config-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file el-file
+            (insert ";;; config.el -*- lexical-binding: t; -*-\n\n"
+                    "(package! transient)\n"))
+          (emacs-hypervisor-reset-declarations)
+          (emacs-hypervisor--load-with-source-map el-file)
+          (let* ((package (car (emacs-hypervisor-export-packages)))
+                 (source (plist-get package :source)))
+            (should (equal (plist-get package :name) "transient"))
+            (should (equal (plist-get source :file) el-file))
+            (should (equal (plist-get source :line) 3))
+            (should (null (plist-get source :heading)))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-selective-reload-ignores-source-and-index ()
+  (let ((previous '(:name "editing" :requires nil :after nil :env nil
+                    :executable nil :body (progn t)
+                    :source (:file "config.org" :line 4) :index 0))
+        (current '(:name "editing" :requires nil :after nil :env nil
+                   :executable nil :body (progn t)
+                   :source (:file "config.org" :line 90) :index 3)))
+    (should (emacs-hypervisor-selective-reload-unit-equal-p previous current))
+    ;; A real body change still dirties the unit.
+    (should-not
+     (emacs-hypervisor-selective-reload-unit-equal-p
+      previous
+      (plist-put (copy-sequence current) :body '(progn 2 t))))))
+
+(ert-deftest emacs-hypervisor-effect-record-source-carries-file-and-line ()
+  (emacs-hypervisor-reset-declarations)
+  (let ((emacs-hypervisor--current-source
+         '(:file "config.org" :heading "Hooks" :line 14)))
+    (eval '(config-unit! source-hook-unit
+             :config
+             (add-hook 'emacs-hypervisor-test-source-hook #'ignore))
+          t))
+  (let* ((entry (car emacs-hypervisor-config-units))
+         (registry emacs-hypervisor-effect-registry-current))
+    (unwind-protect
+        (progn
+          (eval (plist-get entry :body) t)
+          (let* ((effects (emacs-hypervisor-effect-registry-effects-for-unit
+                           "source-hook-unit"))
+                 (source (plist-get (car effects) :source)))
+            (should (= (length effects) 1))
+            (should (equal (plist-get source :file) "config.org"))
+            (should (equal (plist-get source :heading) "Hooks"))
+            (should (equal (plist-get source :line) 14))
+            (should (equal (plist-get source :form)
+                           '(add-hook 'emacs-hypervisor-test-source-hook
+                                      #'ignore)))))
+      (emacs-hypervisor-effect-registry-retract-unit "source-hook-unit")
+      (setq emacs-hypervisor-effect-registry-current registry))))
+
+(require 'emacs-hypervisor-lint)
+
+(ert-deftest emacs-hypervisor-lint-flags-untracked-and-suspect-forms ()
+  (emacs-hypervisor-reset-declarations)
+  ;; The hook below hides inside a lambda, so the effect rewriter cannot
+  ;; reach it and lint should flag it as untracked.
+  (eval '(config-unit! linted-unit
+           :config
+           (eval-after-load 'magit '(message "loaded"))
+           (setq fancy-minor-mode t)
+           (global-set-key (kbd "C-c x") (lambda ()
+                                           (add-hook 'prog-mode-hook
+                                                     (lambda () nil)))))
+        t)
+  (let* ((findings (emacs-hypervisor-lint-exported-declarations))
+         (rules (mapcar (lambda (f) (plist-get f :rule)) findings)))
+    (should (memq :eval-after-load rules))
+    (should (memq :minor-mode-setq rules))
+    (should (memq :untracked-anonymous-hook rules))
+    (dolist (finding findings)
+      (should (equal (plist-get finding :unit) "linted-unit"))
+      (should (eq (plist-get finding :severity) :warning))
+      (should (stringp (plist-get finding :form-string))))))
+
+(ert-deftest emacs-hypervisor-lint-leaves-duplicates-to-boot-policy ()
+  ;; Duplicate detection lives in Elle's boot policy (planned :invalid
+  ;; reports with :duplicate-name), not in the Emacs-side lint pass.
+  (emacs-hypervisor-reset-declarations)
+  (eval '(progn
+           (config-unit! dup-unit :config t)
+           (config-unit! dup-unit :config 2))
+        t)
+  (should (null (emacs-hypervisor-lint-exported-declarations))))
+
+(ert-deftest emacs-hypervisor-lint-leaves-clean-config-unflagged ()
+  (emacs-hypervisor-reset-declarations)
+  (eval '(progn
+           (package! magit)
+           (config-unit! clean-unit
+             :requires (magit)
+             :config
+             (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+             (keymap-set global-map "C-x g" #'magit-status)))
+        t)
+  (should (null (emacs-hypervisor-lint-exported-declarations))))
+
+(ert-deftest emacs-hypervisor-session-data-exports-lint-when-requested ()
+  (emacs-hypervisor-reset-declarations)
+  (eval '(config-unit! lint-export-unit
+           :config
+           (eval-after-load 'magit '(message "x")))
+        t)
+  (let ((payload (emacs-hypervisor-export-session-data '(:units :lint))))
+    (should (plist-member payload :lint))
+    (should (= (length (plist-get payload :lint)) 1)))
+  ;; Lint stays out of the default startup payload.
+  (should-not (plist-member
+               (emacs-hypervisor-export-session-data '(:units))
+               :lint)))
+
+(ert-deftest emacs-hypervisor-check-exit-code-and-render ()
+  (emacs-hypervisor-test--eval-home-startup-functions)
+  (let ((clean '(:reason :check-complete :status :ok
+                 :check (:packages-total 2 :units-total 3
+                         :package-problems nil :unit-problems nil :lint nil)))
+        (broken '(:reason :check-complete :status :failed
+                  :check (:packages-total 1 :units-total 2
+                          :package-problems ((:name "transient" :status :invalid
+                                              :reason :cycle))
+                          :unit-problems ((:name "magit-ui" :status :skipped
+                                           :reason :preflight))
+                          :lint nil)))
+        (warned '(:reason :check-complete :status :ok
+                  :check (:packages-total 0 :units-total 1
+                          :package-problems nil :unit-problems nil
+                          :lint ((:unit "editing" :rule :eval-after-load
+                                  :severity :warning
+                                  :message "prefer with-eval-after-load"))))))
+    (should (= (emacs-hypervisor--check-exit-code clean) 0))
+    (should (= (emacs-hypervisor--check-exit-code broken) 1))
+    (should (= (emacs-hypervisor--check-exit-code warned) 0))
+    (cl-letf (((symbol-function 'emacs-hypervisor--check-strict-p)
+               (lambda () t)))
+      (should (= (emacs-hypervisor--check-exit-code warned) 1)))
+    (let ((rendered (with-output-to-string
+                      (emacs-hypervisor--check-render-human broken))))
+      (should (string-match-p "INVALID  package transient" rendered))
+      (should (string-match-p "SKIPPED  unit magit-ui" rendered))
+      (should (string-match-p "2 problems" rendered)))))
+
+(require 'emacs-hypervisor-report)
+
+(ert-deftest emacs-hypervisor-package-event-stores-rev-and-locked-extra ()
+  (let ((emacs-hypervisor--package-events nil))
+    (emacs-hypervisor-report-note-package-event
+     :installed "magit" nil '(:rev "0aa2686deadbeef" :locked :hit))
+    (let ((event (car emacs-hypervisor--package-events)))
+      (should (equal (plist-get event :rev) "0aa2686deadbeef"))
+      (should (eq (plist-get event :locked) :hit))
+      (should (equal (emacs-hypervisor--package-revision-label event)
+                     "0aa2686 (locked)")))
+    (should (equal (emacs-hypervisor--package-revision-label
+                    '(:rev "abc1234" :locked :pinned))
+                   "abc1234 (pinned)"))
+    (should (equal (emacs-hypervisor--package-revision-label
+                    '(:rev "abc1234" :locked :miss))
+                   "abc1234"))
+    (should (null (emacs-hypervisor--package-revision-label '(:locked :hit))))))
+
+(ert-deftest emacs-hypervisor-report-renders-package-revision-and-orphans ()
+  (let ((emacs-hypervisor--package-events
+         (list '(:kind :orphaned :reason "stale-pkg, old-tool" :time 2.0)
+               '(:kind :installed :name "magit" :time 1.0
+                 :rev "0aa2686deadbeef" :locked :hit)))
+        (emacs-hypervisor--session-started-at 0.0))
+    (with-temp-buffer
+      (emacs-hypervisor--insert-package-activity-line "magit" :installed)
+      (should (string-match-p "magit.*0aa2686 (locked)" (buffer-string))))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'emacs-hypervisor--package-progress-summary)
+                 (lambda () '(:plan-known nil)))
+                ((symbol-function 'emacs-hypervisor--package-plan-names)
+                 (lambda () nil))
+                ((symbol-function 'emacs-hypervisor--package-state)
+                 (lambda () "Ready")))
+        (emacs-hypervisor--insert-packages-section))
+      (should (string-match-p "Orphaned" (buffer-string)))
+      (should (string-match-p "stale-pkg, old-tool" (buffer-string)))
+      (should (string-match-p "emacs-hypervisor-prune-packages"
+                              (buffer-string))))))
+
+(ert-deftest emacs-hypervisor-report-problem-includes-source-button ()
+  (let* ((source-dir (make-temp-file "hypervisor-report-source" t))
+         (org-file (expand-file-name "config.org" source-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file org-file
+            (insert "* Magit\nline two\nline three\n"))
+          (let ((emacs-hypervisor--state :completed)
+                (emacs-hypervisor--report-messages
+                 (list
+                  (list :report :stage :executed :phase :units
+                        :items
+                        (list (list :name "broken-unit"
+                                    :status :failed
+                                    :reason :execution
+                                    :details '(:source :eval :error "boom")
+                                    :source (list :file org-file
+                                                  :heading "Magit"
+                                                  :line 3)))))))
+            (with-temp-buffer
+              (emacs-hypervisor--insert-problems-section)
+              (should (string-match-p "broken-unit" (buffer-string)))
+              (should (string-match-p "config\\.org · Magit · line 3"
+                                      (buffer-string)))
+              (goto-char (point-min))
+              (let ((button (next-button (point))))
+                (should button)
+                (should (equal (plist-get
+                                (button-get button 'emacs-hypervisor-source)
+                                :line)
+                               3))
+                ;; Activating the button visits the file at the line.
+                (save-window-excursion
+                  (button-activate button)
+                  (should (equal (buffer-file-name) org-file))
+                  (should (= (line-number-at-pos) 3))
+                  (kill-buffer))))))
+      (delete-directory source-dir t))))
+
+(ert-deftest emacs-hypervisor-report-formats-duplicate-name-reason ()
+  (should (equal (emacs-hypervisor--format-reason-and-details
+                  :duplicate-name '(:occurrences 2))
+                 "declared 2 times")))

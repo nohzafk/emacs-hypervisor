@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'package)
 (require 'package-vc)
+(require 'emacs-hypervisor-package-lock)
 
 ;; `package-vc' generates `<pkg>-pkg.el' and the `<pkg>-autoloads.el' indirection
 ;; shim without a `lexical-binding' cookie, so `package--compile' (which runs
@@ -16,6 +17,19 @@
 
 (defvar emacs-hypervisor-bridge-ready nil)
 (defvar emacs-hypervisor-bridge-activated nil)
+
+(defvar emacs-hypervisor-bridge-ignore-lock nil
+  "Non-nil skips lockfile revision resolution.  Bound during upgrades.")
+
+(defvar emacs-hypervisor-bridge-last-install-info nil
+  "Alist of package name to (:rev REV :locked HOW) for this session.
+HOW is :pinned (declared :ref/:tag), :hit (lockfile revision), or
+:miss (no lock entry; branch or default HEAD was used).")
+
+(defun emacs-hypervisor-bridge--note-install-info (name info)
+  (setf (alist-get name emacs-hypervisor-bridge-last-install-info
+                   nil nil #'equal)
+        info))
 
 (defcustom emacs-hypervisor-clone-concurrency 8
   "Maximum number of git clones run in parallel during package install."
@@ -191,22 +205,53 @@
 (defun emacs-hypervisor-bridge--clone-present-p (entry)
   (file-directory-p (emacs-hypervisor-bridge--clone-dir entry)))
 
+(defun emacs-hypervisor-bridge--declared-pin (entry)
+  "Return the declared `:ref' or `:tag' for ENTRY, or nil."
+  (or (plist-get entry :ref) (plist-get entry :tag)))
+
+(defun emacs-hypervisor-bridge--lockable-p (entry)
+  "Return non-nil when ENTRY's lock entry may drive revision resolution.
+Local paths are inherently unlocked; their lock entries are informational."
+  (not (or (plist-get entry :local)
+           (emacs-hypervisor-bridge--local-repo-p (plist-get entry :repo)))))
+
+(defun emacs-hypervisor-bridge--locked-rev (entry)
+  "Return the lockfile revision for ENTRY when it should drive resolution."
+  (when (and (not emacs-hypervisor-bridge-ignore-lock)
+             (not (emacs-hypervisor-bridge--declared-pin entry))
+             (emacs-hypervisor-bridge--lockable-p entry))
+    (let ((locked (emacs-hypervisor-package-lock-entry
+                   (plist-get entry :name))))
+      (and (eq (plist-get locked :kind) :vc)
+           (plist-get locked :rev)))))
+
+(defun emacs-hypervisor-bridge--resolved-rev (entry)
+  "Return the revision to check out for ENTRY: declared pin, then lock."
+  (or (emacs-hypervisor-bridge--declared-pin entry)
+      (emacs-hypervisor-bridge--locked-rev entry)))
+
+(defun emacs-hypervisor-bridge--locked-how (entry)
+  (cond
+   ((emacs-hypervisor-bridge--declared-pin entry) :pinned)
+   ((emacs-hypervisor-bridge--locked-rev entry) :hit)
+   (t :miss)))
+
 (defun emacs-hypervisor-bridge--clone-command (entry)
   (let* ((url    (emacs-hypervisor-bridge--build-url entry))
          (branch (plist-get entry :branch))
-         (ref    (plist-get entry :ref))
+         (rev    (emacs-hypervisor-bridge--resolved-rev entry))
          (subs   (plist-get entry :submodules))
          (dir    (emacs-hypervisor-bridge--clone-dir entry)))
     (append (list "git" "clone")
-            (unless ref
+            (unless rev
               (list "--depth" "1" "--no-single-branch"))
             (when subs (list "--recurse-submodules"))
             (when branch (list "--branch" branch))
             (list url dir))))
 
 (defun emacs-hypervisor-bridge--checkout-ref (entry)
-  "Run `git checkout' for :ref or :tag inside the cloned directory."
-  (let ((ref (or (plist-get entry :ref) (plist-get entry :tag)))
+  "Run `git checkout' for the declared pin or locked revision."
+  (let ((ref (emacs-hypervisor-bridge--resolved-rev entry))
         (dir (emacs-hypervisor-bridge--clone-dir entry)))
     (when ref
       (let* ((buffer (get-buffer-create
@@ -290,6 +335,59 @@ package is symlinked, byte-compiled, and activated."
       (when (and command (stringp command))
         (emacs-hypervisor-bridge--run-in-clone entry command "build")))))
 
+(defun emacs-hypervisor-bridge--clone-head-rev (entry)
+  "Return `git rev-parse HEAD' of ENTRY's staging clone, or nil."
+  (let ((dir (emacs-hypervisor-bridge--clone-dir entry)))
+    (when (file-directory-p (expand-file-name ".git" dir))
+      (let ((default-directory dir))
+        (with-temp-buffer
+          (when (zerop (call-process "git" nil t nil "rev-parse" "HEAD"))
+            (string-trim (buffer-string))))))))
+
+(defun emacs-hypervisor-bridge--lock-timestamp ()
+  (format-time-string "%FT%TZ" nil t))
+
+(defun emacs-hypervisor-bridge--record-vc-lock (entry)
+  "Write the lock entry for installed VC ENTRY and note install info."
+  (let ((name (plist-get entry :name))
+        (rev (emacs-hypervisor-bridge--clone-head-rev entry)))
+    (when rev
+      (emacs-hypervisor-package-lock-put
+       (list :name name
+             :kind :vc
+             :url (emacs-hypervisor-bridge--build-url entry)
+             :branch (plist-get entry :branch)
+             :rev rev
+             :locked-at (emacs-hypervisor-bridge--lock-timestamp)))
+      (emacs-hypervisor-bridge--note-install-info
+       name
+       (list :rev rev :locked (emacs-hypervisor-bridge--locked-how entry))))
+    rev))
+
+(defun emacs-hypervisor-bridge--record-archive-lock (entry)
+  "Write the lock entry for installed archive ENTRY and note install info."
+  (let* ((name (plist-get entry :name))
+         (desc (cadr (assq (emacs-hypervisor-bridge--package-symbol entry)
+                           package-alist)))
+         (version (and desc (package-desc-version desc))))
+    (when version
+      (emacs-hypervisor-package-lock-put
+       (list :name name
+             :kind :archive
+             :archive (and desc (package-desc-archive desc))
+             :version version
+             :locked-at (emacs-hypervisor-bridge--lock-timestamp)))
+      (emacs-hypervisor-bridge--note-install-info
+       name (list :version version :locked :miss)))
+    version))
+
+(defun emacs-hypervisor-bridge--backfill-lock (entry)
+  "Write a lock entry for already-installed ENTRY when none exists."
+  (unless (emacs-hypervisor-package-lock-entry (plist-get entry :name))
+    (if (emacs-hypervisor-bridge--vc-entry-p entry)
+        (emacs-hypervisor-bridge--record-vc-lock entry)
+      (emacs-hypervisor-bridge--record-archive-lock entry))))
+
 (defun emacs-hypervisor-bridge--adopt (entry)
   "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'.
 Dependency ordering is managed by the hypervisor via `:deps', so
@@ -314,14 +412,16 @@ that are not on any archive."
         (cl-letf (((symbol-function 'package-compute-transaction)
                    (lambda (packages _requirements &optional _seen)
                      packages)))
-          (package-vc-install-from-checkout dir (symbol-name sym)))))
+          (package-vc-install-from-checkout dir (symbol-name sym))))
+      (emacs-hypervisor-bridge--record-vc-lock entry))
     (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--archive-install (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
     (unless (package-installed-p sym)
       (let ((bytecomp--inhibit-lexical-cookie-warning t))
-        (package-install sym)))
+        (package-install sym))
+      (emacs-hypervisor-bridge--record-archive-lock entry))
     (emacs-hypervisor-bridge--note-present entry)))
 
 (defun emacs-hypervisor-bridge--pump-clones (vc-entries on-each)
@@ -366,6 +466,7 @@ Call ON-FAILED with (name reason) on failure."
         (cond
          ((emacs-hypervisor-bridge--installed-p entry)
           (emacs-hypervisor-bridge--note-present entry)
+          (emacs-hypervisor-bridge--backfill-lock entry)
           (funcall on-installed name))
          ((and clone-status (not (eq clone-status :ok)))
           (funcall on-failed name (cadr clone-status)))
@@ -421,10 +522,9 @@ package's installed directory."
                 (when (and feat (featurep feat))
                   (ignore-errors (unload-feature feat t)))))))))))
 
-(defun emacs-hypervisor-bridge-rebuild (entry on-installed on-failed)
-  "Force a clean rebuild of ENTRY: drop cached state, then reinstall.
-Deletes both the staging clone and package directories, purges native-compiled
-.eln cache, unloads stale features, and runs the standard install process."
+(defun emacs-hypervisor-bridge--purge-package (entry)
+  "Drop every cached trace of ENTRY: features, package.el state, dirs, eln.
+Used by rebuild (before reinstalling) and prune (without reinstalling)."
   (let* ((clone-dir (emacs-hypervisor-bridge--clone-dir entry))
          (pkg-dir (emacs-hypervisor-bridge--package-dir entry))
          (name (plist-get entry :name))
@@ -446,10 +546,61 @@ Deletes both the staging clone and package directories, purges native-compiled
     ;; 5. Clear in-memory package.el state.
     (setq package-alist (assq-delete-all sym package-alist))
     (setq package-activated-list (delq sym package-activated-list))
-    (setq package-vc-selected-packages (assq-delete-all sym package-vc-selected-packages))
-    (message "Rebuilding package %s..." name)
-    (redisplay)
-    (emacs-hypervisor-bridge-install-batch (list entry) on-installed on-failed)))
+    (setq package-vc-selected-packages (assq-delete-all sym package-vc-selected-packages))))
+
+(defun emacs-hypervisor-bridge-rebuild (entry on-installed on-failed)
+  "Force a clean rebuild of ENTRY: drop cached state, then reinstall.
+Deletes both the staging clone and package directories, purges native-compiled
+.eln cache, unloads stale features, and runs the standard install process."
+  (emacs-hypervisor-bridge--purge-package entry)
+  (message "Rebuilding package %s..." (plist-get entry :name))
+  (redisplay)
+  (emacs-hypervisor-bridge-install-batch (list entry) on-installed on-failed))
+
+(defun emacs-hypervisor-bridge-remove-package (name)
+  "Remove installed package NAME entirely, including its lock entry."
+  (emacs-hypervisor-bridge--purge-package (list :name name))
+  (emacs-hypervisor-package-lock-remove name))
+
+(defun emacs-hypervisor-bridge--requires-closure (names)
+  "Expand NAMES with the transitive Package-Requires of installed packages.
+Archive dependencies installed to satisfy declared packages live in the same
+`package-user-dir' and must never be treated as orphans."
+  (let ((keep (make-hash-table :test #'equal))
+        (worklist (copy-sequence names)))
+    (while worklist
+      (let ((name (pop worklist)))
+        (unless (gethash name keep)
+          (puthash name t keep)
+          (let ((desc (cadr (assq (intern name) package-alist))))
+            (when desc
+              (dolist (requirement (package-desc-reqs desc))
+                (push (symbol-name (car requirement)) worklist)))))))
+    keep))
+
+(defun emacs-hypervisor-bridge-orphaned-packages (declared-names)
+  "Return installed package names that are not in DECLARED-NAMES' keep set.
+The keep set is DECLARED-NAMES plus the transitive Package-Requires closure
+of installed packages.  Both `package-user-dir' installs and stale staging
+clones are scanned."
+  (let ((keep (emacs-hypervisor-bridge--requires-closure declared-names))
+        orphans)
+    (dolist (item package-alist)
+      (let* ((name (symbol-name (car item)))
+             (desc (cadr item))
+             (dir (and desc (package-desc-dir desc))))
+        (when (and dir
+                   (string-prefix-p
+                    (file-name-as-directory (expand-file-name package-user-dir))
+                    (file-name-as-directory (expand-file-name dir)))
+                   (not (gethash name keep)))
+          (push name orphans))))
+    (let ((staging (emacs-hypervisor-bridge--staging-root)))
+      (when (file-directory-p staging)
+        (dolist (dir (directory-files staging nil "\\`[^.]"))
+          (unless (or (gethash dir keep) (member dir orphans))
+            (push dir orphans)))))
+    (sort orphans #'string<)))
 
 (provide 'emacs-hypervisor-package-bridge)
 

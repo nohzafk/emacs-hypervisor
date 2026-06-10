@@ -3,16 +3,22 @@
 
 (defn emacs-hypervisor-boot-policy-module [graph preflight]
   (defn ready-package-report [entry]
-    (graph:make-report (graph:entry-name entry) :ok (if (get entry :installed false) :installed :ready)
-                       {:deps (graph:entry-field entry :deps)}))
+    (graph:report-with-source (graph:make-report (graph:entry-name entry) :ok
+                                                 (if (get entry :installed false) :installed :ready)
+                                                 {:deps (graph:entry-field entry :deps)}) entry))
 
   (defn ready-unit-report [entry]
-    (graph:make-report (graph:entry-name entry) :ok
-                       :ready {:requires (graph:entry-field entry :requires) :after (graph:entry-field entry :after)}))
+    (graph:report-with-source (graph:make-report (graph:entry-name entry) :ok
+                                                 :ready {:requires (graph:entry-field entry :requires)
+                                                 :after (graph:entry-field entry :after)}) entry))
 
   (defn preflight-report [entry env-missing executable-missing]
-    (graph:make-report (graph:entry-name entry) :skipped
-                       :preflight (graph:preflight-details env-missing executable-missing)))
+    (graph:report-with-source (graph:make-report (graph:entry-name entry) :skipped
+                                                 :preflight (graph:preflight-details env-missing executable-missing))
+                              entry))
+
+  (defn blocked-entry-report [entry reason blockers]
+    (graph:report-with-source (graph:blocked-report (graph:entry-name entry) reason blockers) entry))
 
   (defn invalid-reports [entries invalid-report]
     (graph:non-nil-values (map invalid-report entries)))
@@ -26,17 +32,20 @@
     (let [blockers (graph:report-blockers reports (graph:entry-field entry :deps))]
       (match (empty? blockers)
         true (ready-package-report entry)
-        _ (graph:blocked-report (graph:entry-name entry) :blocked-by-package blockers))))
+        _ (blocked-entry-report entry :blocked-by-package blockers))))
 
   (defn derive-package-reports [packages]
     (let [package-names (graph:known-names packages)
           package-missing (graph:collect-missing-ref-entries packages :deps package-names)
           package-cycles (graph:cycle-names packages :deps package-names)
+          package-duplicates (graph:duplicate-names packages)
           invalid-package-reports (invalid-reports packages
                                                    (fn [entry]
-                                                     (graph:invalid-package-report entry package-missing package-cycles)))]
+                                                     (graph:invalid-package-report entry packages package-missing
+                                                                                   package-cycles package-duplicates)))]
       {:cycles package-cycles
        :missing package-missing
+       :duplicates package-duplicates
        :reports (derive-phase-reports packages invalid-package-reports
                                       (fn [entry reports] (graph:all-known? (graph:entry-field entry :deps) reports))
                                       next-package-report)}))
@@ -47,8 +56,8 @@
           env-missing (preflight:env-missing-for-unit entry env)
           executable-missing (preflight:executable-missing-for-unit executable-reports (graph:entry-name entry))]
       (match [(empty? package-blockers) (empty? unit-blockers) (empty? env-missing) (empty? executable-missing)]
-        [false _ _ _] (graph:blocked-report (graph:entry-name entry) :blocked-by-package package-blockers)
-        [true false _ _] (graph:blocked-report (graph:entry-name entry) :blocked-by-unit unit-blockers)
+        [false _ _ _] (blocked-entry-report entry :blocked-by-package package-blockers)
+        [true false _ _] (blocked-entry-report entry :blocked-by-unit unit-blockers)
         [true true false _] (preflight-report entry env-missing executable-missing)
         [true true _ false] (preflight-report entry env-missing executable-missing)
         _ (ready-unit-report entry))))
@@ -57,12 +66,15 @@
     (let [unit-names (graph:known-names units)
           unit-missing-after (graph:collect-missing-ref-entries units :after unit-names)
           unit-cycles (graph:cycle-names units :after unit-names)
+          unit-duplicates (graph:duplicate-names units)
           invalid-unit-reports (invalid-reports units
                                                 (fn [entry]
-                                                  (graph:invalid-unit-report entry () unit-missing-after unit-cycles)))]
+                                                  (graph:invalid-unit-report entry units () unit-missing-after
+                                                                             unit-cycles unit-duplicates)))]
       {:cycles unit-cycles
        :missing-after unit-missing-after
        :missing-requires ()
+       :duplicates unit-duplicates
        :reports (derive-phase-reports units invalid-unit-reports
                                       (fn [entry reports] (graph:all-known? (graph:entry-field entry :after) reports))
                                       (fn [entry reports]

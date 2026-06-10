@@ -6,8 +6,18 @@
 (defvar emacs-hypervisor-effect-aware-reload-effect-specs nil
   "Registered effect rewrite specs in dispatch order.")
 
+(defvar emacs-hypervisor--current-source nil
+  "Source location plist for the top-level form currently being loaded.
+Bound by the config loader around each form it evaluates, so declaration
+macros and effect rewrites capture file/heading/line provenance.")
+
+(defun emacs-hypervisor--capture-source ()
+  "Return the source location of the form being loaded, or nil."
+  (and emacs-hypervisor--current-source
+       (copy-sequence emacs-hypervisor--current-source)))
+
 (defun emacs-hypervisor-effect-aware-reload-source-plist (form)
-  (list :form form))
+  (append (list :form form) (emacs-hypervisor--capture-source)))
 
 (defun emacs-hypervisor-effect-aware-reload-register-effect-spec (spec)
   "Register effect rewrite SPEC.

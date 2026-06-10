@@ -57,7 +57,8 @@
                       (load-module-by-name manifest "EFFECT_KIND_HOOK")
                       (load-module-by-name manifest "EFFECT_KIND_ADVICE")
                       (load-module-by-name manifest "EFFECT_KIND_KEYBINDING")
-                      (load-module-by-name manifest "DECLARATIONS") (load-module-by-name manifest "SELECTIVE_RELOAD")
+                      (load-module-by-name manifest "DECLARATIONS") (load-module-by-name manifest "LINT")
+                      (load-module-by-name manifest "SELECTIVE_RELOAD")
                       (load-module-by-name manifest "CONFIG_PATHS") (load-module-by-name manifest "CONFIG_LOADER")
                       (load-module-by-name manifest "EXTENSIONS") (load-module-by-name manifest "MARKDOWN_MERMAID")
                       (load-module-by-name manifest "RELOAD_REPORT") (load-module-by-name manifest "RELOAD_POLICY")
@@ -65,6 +66,7 @@
 
   (defn install-session-helpers-form [manifest]
     (append-all (list '(progn) (load-module-by-name manifest "SESSION_BASE")
+                      (load-module-by-name manifest "PACKAGE_LOCK")
                       (load-module-by-name manifest "PACKAGE_BRIDGE") (load-module-by-name manifest "PACKAGE_RUNTIME")
                       (load-module-by-name manifest "UNIT_RUNTIME")
                       '((emacs-hypervisor-bridge-activate) :emacs-hypervisor-session-helpers-ready))))

@@ -22,7 +22,8 @@
       {:name (graph:entry-name entry)
        :index (graph:entry-field entry :index)
        :requires (graph:entry-field entry :requires)
-       :after (graph:entry-field entry :after)}
+       :after (graph:entry-field entry :after)
+       :source (graph:entry-field entry :source)}
       entry))
 
   (defn make-plan-item [phase entry planned-report]

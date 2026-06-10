@@ -57,6 +57,11 @@ Units are compared with `equal` over the canonical exported entry:
  :body BODY)
 ```
 
+`:source` (org/file provenance) and `:index` (declaration order) are
+stripped before comparison: editing text above a unit shifts its line
+numbers, and reordering units changes their indices, without changing what
+the unit does. Ordering constraints are still enforced through `:after`.
+
 Diff action shape:
 
 ```elisp

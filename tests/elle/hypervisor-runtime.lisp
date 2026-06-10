@@ -364,6 +364,74 @@
 (println "  1. boot policy: ok")
 
 # ============================================================================
+# 1a. Boot policy marks duplicate names invalid and threads source provenance.
+# ============================================================================
+
+(let* [dup-packages (list {:name "dup-pkg" :deps (list) :source {:file "config.org" :heading "Tools" :line 3}}
+                          {:name "dup-pkg" :deps (list)} {:name "unique-pkg" :deps (list)})
+       {:reports reports :duplicates duplicates} (policy:derive-package-reports dup-packages)
+       dup-report (graph:find-entry reports "dup-pkg")
+       unique-report (graph:find-entry reports "unique-pkg")]
+  (assert (= duplicates (list "dup-pkg")) "boot-policy collects duplicate package names")
+  (assert (= (graph:entry-field dup-report :status) :invalid) "duplicate package status")
+  (assert (= (graph:entry-field dup-report :reason) :duplicate-name) "duplicate package reason")
+  (assert (= (graph:entry-field (graph:entry-field dup-report :details) :occurrences) 2)
+          "duplicate package occurrence count")
+  (assert (= (graph:entry-field (graph:entry-field dup-report :source) :heading) "Tools")
+          "duplicate package report carries source")
+  (assert (= (graph:entry-field unique-report :status) :ok) "unique package unaffected by duplicates"))
+
+(let* [dup-units (list {:name "dup-unit" :requires (list) :after (list) :env (list) :executable (list)
+                        :body '(progn t)}
+                       {:name "dup-unit" :requires (list) :after (list) :env (list) :executable (list)
+                        :body '(progn 2 t)})
+       {:reports reports} (policy:derive-unit-reports dup-units () () env ())
+       dup-report (graph:find-entry reports "dup-unit")]
+  (assert (= (graph:entry-field dup-report :status) :invalid) "duplicate unit status")
+  (assert (= (graph:entry-field dup-report :reason) :duplicate-name) "duplicate unit reason"))
+
+(let* [sourced-units (list {:name "sourced-unit" :index 0 :requires (list) :after (list) :env (list)
+                            :executable (list) :body '(progn t)
+                            :source {:file "config.org" :heading "Magit" :line 14}}
+                           {:name "sourced-bad-unit" :index 1 :requires (list) :after (list)
+                            :env (list "HYPERVISOR_MISSING_ENV") :executable (list) :body '(progn t)
+                            :source {:file "config.org" :heading "Broken" :line 30}})
+       {:reports reports} (policy:derive-unit-reports sourced-units () () env ())
+       ready-report (graph:find-entry reports "sourced-unit")
+       preflight-report (graph:find-entry reports "sourced-bad-unit")]
+  (assert (= (graph:entry-field (graph:entry-field ready-report :source) :file) "config.org")
+          "ready unit report carries source file")
+  (assert (= (graph:entry-field (graph:entry-field ready-report :source) :line) 14)
+          "ready unit report carries source line")
+  (assert (= (graph:entry-field preflight-report :status) :skipped) "sourced preflight unit skipped")
+  (assert (= (graph:entry-field (graph:entry-field preflight-report :source) :heading) "Broken")
+          "preflight unit report carries source heading"))
+
+## Executed and failed unit reports keep declaration provenance.
+(let* [sourced-units (list {:name "sourced-run-unit" :index 0 :requires (list) :after (list) :env (list)
+                            :executable (list) :body '(progn t)
+                            :source {:file "config.org" :heading "Magit" :line 14}}
+                           {:name "sourced-fail-unit" :index 1 :requires (list) :after (list) :env (list)
+                            :executable (list) :body '(error "boom")
+                            :source {:file "config.org" :heading "Broken" :line 30}})
+       {:reports planned-unit-reports} (policy:derive-unit-reports sourced-units () () env ())
+       unit-plan (planning:derive-unit-plan sourced-units planned-unit-reports)]
+  (reset-stub-state)
+  (push stub-await-responses (stub-response 40 true :sourced-ok))
+  (push stub-await-responses (stub-response 41 false nil :error "(error \"boom\")"))
+  (let* [{:reports unit-reports} (execution:execute-unit-plan (planning:plan-items unit-plan) () 40)
+         executed (graph:find-entry unit-reports "sourced-run-unit")
+         failed (graph:find-entry unit-reports "sourced-fail-unit")]
+    (assert (= (graph:entry-field executed :status) :ok) "sourced unit executes")
+    (assert (= (graph:entry-field (graph:entry-field executed :source) :line) 14)
+            "executed unit report carries source")
+    (assert (= (graph:entry-field failed :status) :failed) "sourced unit failure recorded")
+    (assert (= (graph:entry-field (graph:entry-field failed :source) :heading) "Broken")
+            "failed unit report carries source")))
+
+(println "  1a. duplicate names and source provenance: ok")
+
+# ============================================================================
 # 2. Planning emits dependency order, not declaration order.
 # ============================================================================
 

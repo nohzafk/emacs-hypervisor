@@ -7,6 +7,7 @@ EFFECT_KIND_HOOK|elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el|:emacs-
 EFFECT_KIND_ADVICE|elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el|:emacs-hypervisor-effect-kind-advice-ready
 EFFECT_KIND_KEYBINDING|elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el|:emacs-hypervisor-effect-kind-keybinding-ready
 DECLARATIONS|elle/runtime-forms/emacs-hypervisor-declarations.el|:emacs-hypervisor-config-surface-ready
+LINT|elle/runtime-forms/emacs-hypervisor-lint.el|:emacs-hypervisor-lint-ready
 SELECTIVE_RELOAD|elle/runtime-forms/emacs-hypervisor-selective-reload.el|:emacs-hypervisor-selective-reload-ready
 CONFIG_PATHS|elle/runtime-forms/emacs-hypervisor-config-paths.el|:emacs-hypervisor-config-paths-ready
 CONFIG_LOADER|elle/runtime-forms/emacs-hypervisor-config-loader.el|:emacs-hypervisor-config-loader-ready
@@ -16,6 +17,7 @@ RELOAD_REPORT|elle/runtime-forms/emacs-hypervisor-reload-report.el|:emacs-hyperv
 RELOAD_POLICY|elle/runtime-forms/emacs-hypervisor-reload-policy.el|:emacs-hypervisor-reload-policy-ready
 COMPOSE|elle/runtime-forms/emacs-hypervisor-compose.el|:emacs-hypervisor-compose-ready
 SESSION_BASE|elle/runtime-forms/emacs-hypervisor-session-base.el|:emacs-hypervisor-session-base-ready
+PACKAGE_LOCK|elle/runtime-forms/emacs-hypervisor-package-lock.el|:emacs-hypervisor-package-lock-ready
 PACKAGE_BRIDGE|elle/runtime-forms/emacs-hypervisor-package-bridge.el|:emacs-hypervisor-package-bridge-ready
 PACKAGE_RUNTIME|elle/runtime-forms/emacs-hypervisor-package-runtime.el|:emacs-hypervisor-package-runtime-ready
 UNIT_RUNTIME|elle/runtime-forms/emacs-hypervisor-unit-runtime.el|:emacs-hypervisor-unit-runtime-ready

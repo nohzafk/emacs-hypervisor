@@ -98,10 +98,15 @@ Failure:
 Emitted by the package bridge on the Emacs side, consumed by Elle:
 
 ```lisp
-(:phase :packages :kind :installed :name "magit")
+(:phase :packages :kind :installed :name "magit" :rev "0aa2686..." :locked :hit)
 (:phase :packages :kind :failed    :name "magit" :reason "clone exited 128: ...")
 (:phase :packages :kind :finished)              ;; :reason is optional
 ```
+
+`:rev` and `:locked` are optional. `:rev` is the concrete revision recorded in
+the package lockfile; `:locked` reports how it was chosen: `:pinned` (declared
+`:ref`/`:tag`), `:hit` (lockfile revision), or `:miss` (branch or default
+HEAD).
 
 ## Handshake
 
@@ -179,7 +184,9 @@ another waiter is active.
 ## Failure Payloads
 
 Reports are the source of truth for execution outcomes. Each report item has
-`:name`, `:status`, `:reason`, and `:details`.
+`:name`, `:status`, `:reason`, and `:details`, plus an optional `:source`
+plist (`:file`, `:heading`, `:line`) carrying the declaration's config
+provenance when the config loader captured it.
 
 ### Status
 
@@ -201,6 +208,7 @@ Reports are the source of truth for execution outcomes. Each report item has
 | `:missing-required-packages` | Unit has unresolved `:requires` |
 | `:missing-after-units` | Unit has unresolved `:after` |
 | `:cycle` | Part of a dependency cycle |
+| `:duplicate-name` | Package or unit name declared more than once |
 | `:preflight` | Failed env or executable check |
 | `:execution` | Eval or runtime error |
 
@@ -215,6 +223,9 @@ Reports are the source of truth for execution outcomes. Each report item has
 
 ;; cycle members
 (:members (...))
+
+;; duplicate declarations
+(:occurrences N)
 
 ;; preflight failures
 (:env (...) :executable (...))

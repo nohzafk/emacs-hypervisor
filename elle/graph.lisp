@@ -35,6 +35,24 @@
   (defn known-names [entries]
     (map entry-name entries))
 
+  (defn name-occurrences [entries name]
+    (length (filter (fn [entry] (= (entry-name entry) name)) entries)))
+
+  (defn duplicate-names [entries]
+    (let [names (known-names entries)]
+      (letrec [dedupe (fn [remaining seen]
+                        (match remaining
+                          () (reverse seen)
+                          (name & rest) (if (member? seen name) (dedupe rest seen) (dedupe rest (pair name seen)))
+                          _ (reverse seen)))]
+        (filter (fn [name] (< 1 (name-occurrences entries name))) (dedupe names ())))))
+
+  ## Attach declaration provenance to a report when the entry carries it.
+  ## Sources flow from Emacs as (:file ... :heading ... :line ...) plists.
+  (defn report-with-source [report entry]
+    (let [source (entry-field entry :source)]
+      (if (empty? source) report (put report :source source))))
+
   (defn missing-refs-for [refs known]
     (filter (fn [ref] (not (member? known ref))) refs))
 
@@ -113,16 +131,26 @@
   (defn cycle-entry-report [name members]
     (make-report name :invalid :cycle (cycle-details members)))
 
-  (defn invalid-package-report [entry missing-entries cycle-members]
+  (defn duplicate-entry-report [entry entries duplicates]
     (let [name (entry-name entry)]
-      (if-let [missing-report (entry-missing-report name :missing-deps missing-entries)] missing-report
-              (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil))))
+      (if (member? duplicates name)
+        (make-report name :invalid :duplicate-name {:occurrences (name-occurrences entries name)})
+        nil)))
 
-  (defn invalid-unit-report [entry missing-requires missing-after cycle-members]
-    (let [name (entry-name entry)]
-      (if-let [missing-report (entry-missing-report name :missing-required-packages missing-requires)] missing-report
-              (if-let [missing-report (entry-missing-report name :missing-after-units missing-after)] missing-report
-                      (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil)))))
+  (defn invalid-package-report [entry entries missing-entries cycle-members duplicates]
+    (let [name (entry-name entry)
+          report (if-let [duplicate-report (duplicate-entry-report entry entries duplicates)] duplicate-report
+                         (if-let [missing-report (entry-missing-report name :missing-deps missing-entries)] missing-report
+                                 (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil)))]
+      (if (nil? report) nil (report-with-source report entry))))
+
+  (defn invalid-unit-report [entry entries missing-requires missing-after cycle-members duplicates]
+    (let [name (entry-name entry)
+          report (if-let [duplicate-report (duplicate-entry-report entry entries duplicates)] duplicate-report
+                         (if-let [missing-report (entry-missing-report name :missing-required-packages missing-requires)] missing-report
+                                 (if-let [missing-report (entry-missing-report name :missing-after-units missing-after)] missing-report
+                                         (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil))))]
+      (if (nil? report) nil (report-with-source report entry))))
 
   (defn non-invalid-entries [entries invalid-reports]
     (filter (fn [entry] (nil? (find-entry invalid-reports (entry-name entry)))) entries))
@@ -155,6 +183,8 @@
    :collect-missing-ref-entries collect-missing-ref-entries
    :cycle-names cycle-names
    :cycle-details cycle-details
+   :duplicate-names duplicate-names
+   :report-with-source report-with-source
    :entry-field entry-field
    :entry-field-default entry-field-default
    :entry-name entry-name
