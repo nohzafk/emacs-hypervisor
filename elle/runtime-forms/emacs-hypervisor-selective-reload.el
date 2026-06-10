@@ -8,8 +8,19 @@
 (defun emacs-hypervisor-selective-reload-unit-after (entry)
   (copy-sequence (plist-get entry :after)))
 
+(defun emacs-hypervisor-selective-reload--identity-entry (entry)
+  "Return ENTRY without the keys that never participate in unit identity.
+`:source' is provenance: editing text above a unit shifts its line numbers
+without changing the unit.  `:index' is declaration order bookkeeping."
+  (let (identity)
+    (cl-loop for (key value) on entry by #'cddr
+             unless (memq key '(:source :index))
+             do (setq identity (append identity (list key value))))
+    identity))
+
 (defun emacs-hypervisor-selective-reload-unit-equal-p (previous current)
-  (equal previous current))
+  (equal (emacs-hypervisor-selective-reload--identity-entry previous)
+         (emacs-hypervisor-selective-reload--identity-entry current)))
 
 (defun emacs-hypervisor-selective-reload--units-by-name (units)
   (let ((table (make-hash-table :test #'equal)))

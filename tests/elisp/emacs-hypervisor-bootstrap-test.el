@@ -2945,3 +2945,94 @@ Return a cons cell of (STATUS . OUTPUT)."
       (let ((payload (cadr (car sent-events))))
         (should (equal (plist-get payload :rev) "abc123"))
         (should (eq (plist-get payload :locked) :hit))))))
+
+(require 'emacs-hypervisor-config-loader)
+
+(ert-deftest emacs-hypervisor-source-map-resolves-org-heading-and-line ()
+  (let* ((config-dir (make-temp-file "hypervisor-source-map" t))
+         (org-file (expand-file-name "config.org" config-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file org-file
+            (insert "* Editing\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    "(setq emacs-hypervisor-test-runtime-value 1)\n"
+                    "#+end_src\n\n"
+                    "* Magit\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    ";; a comment shifts following lines\n"
+                    "(config-unit! magit-source-unit\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 2))\n"
+                    "#+end_src\n"))
+          (emacs-hypervisor-reset-declarations)
+          (emacs-hypervisor--load-with-source-map
+           (emacs-hypervisor--tangle-config-org-file org-file))
+          (let* ((unit (car (emacs-hypervisor-export-config-units)))
+                 (source (plist-get unit :source)))
+            (should (equal (plist-get unit :name) "magit-source-unit"))
+            (should (equal (plist-get source :file) org-file))
+            (should (equal (plist-get source :heading) "Magit"))
+            ;; The declaration sits on org line 11: heading 7, blank 8,
+            ;; begin_src 9, comment 10, (config-unit! 11.
+            (should (equal (plist-get source :line) 11))
+            (should (integerp (plist-get source :tangled-line)))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-source-map-resolves-plain-config-el-line ()
+  (let* ((config-dir (make-temp-file "hypervisor-source-el" t))
+         (el-file (expand-file-name "config.el" config-dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file el-file
+            (insert ";;; config.el -*- lexical-binding: t; -*-\n\n"
+                    "(package! transient)\n"))
+          (emacs-hypervisor-reset-declarations)
+          (emacs-hypervisor--load-with-source-map el-file)
+          (let* ((package (car (emacs-hypervisor-export-packages)))
+                 (source (plist-get package :source)))
+            (should (equal (plist-get package :name) "transient"))
+            (should (equal (plist-get source :file) el-file))
+            (should (equal (plist-get source :line) 3))
+            (should (null (plist-get source :heading)))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-selective-reload-ignores-source-and-index ()
+  (let ((previous '(:name "editing" :requires nil :after nil :env nil
+                    :executable nil :body (progn t)
+                    :source (:file "config.org" :line 4) :index 0))
+        (current '(:name "editing" :requires nil :after nil :env nil
+                   :executable nil :body (progn t)
+                   :source (:file "config.org" :line 90) :index 3)))
+    (should (emacs-hypervisor-selective-reload-unit-equal-p previous current))
+    ;; A real body change still dirties the unit.
+    (should-not
+     (emacs-hypervisor-selective-reload-unit-equal-p
+      previous
+      (plist-put (copy-sequence current) :body '(progn 2 t))))))
+
+(ert-deftest emacs-hypervisor-effect-record-source-carries-file-and-line ()
+  (emacs-hypervisor-reset-declarations)
+  (let ((emacs-hypervisor--current-source
+         '(:file "config.org" :heading "Hooks" :line 14)))
+    (eval '(config-unit! source-hook-unit
+             :config
+             (add-hook 'emacs-hypervisor-test-source-hook #'ignore))
+          t))
+  (let* ((entry (car emacs-hypervisor-config-units))
+         (registry emacs-hypervisor-effect-registry-current))
+    (unwind-protect
+        (progn
+          (eval (plist-get entry :body) t)
+          (let* ((effects (emacs-hypervisor-effect-registry-effects-for-unit
+                           "source-hook-unit"))
+                 (source (plist-get (car effects) :source)))
+            (should (= (length effects) 1))
+            (should (equal (plist-get source :file) "config.org"))
+            (should (equal (plist-get source :heading) "Hooks"))
+            (should (equal (plist-get source :line) 14))
+            (should (equal (plist-get source :form)
+                           '(add-hook 'emacs-hypervisor-test-source-hook
+                                      #'ignore)))))
+      (emacs-hypervisor-effect-registry-retract-unit "source-hook-unit")
+      (setq emacs-hypervisor-effect-registry-current registry))))
