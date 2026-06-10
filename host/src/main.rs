@@ -34,7 +34,8 @@ const ELLE_PLUGIN_CACHE_ENV: &str = "EMACS_HYPERVISOR_ELLE_PLUGIN_CACHE_DIR";
 #[command(override_usage = "emacs-hypervisor
        emacs-hypervisor serve
        emacs-hypervisor init [--home DIR] [--upgrade]
-       emacs-hypervisor env [--home DIR] [-o FILE]")]
+       emacs-hypervisor env [--home DIR] [-o FILE]
+       emacs-hypervisor check [--home DIR] [--emacs PATH] [--format human|sexp] [--strict]")]
 #[command(
     after_help = "When no subcommand is given, `emacs-hypervisor` defaults to `serve`.
 
@@ -59,9 +60,79 @@ enum Commands {
     Init(InitArgs),
     /// Write an env snapshot Lisp file for the Emacs home
     Env(EnvArgs),
+    /// Validate the config structurally without executing it
+    Check(CheckArgs),
     /// Print the generated init.el bootstrap content hash
     #[command(name = "bootstrap-hash", hide = true)]
     BootstrapHash,
+}
+
+#[derive(Args, Debug)]
+#[command(after_help = "Runs a plan-only Hypervisor session in batch Emacs: the config is
+tangled and loaded, the dependency graph is built, and preflight,
+planning, and structural lint findings are reported -- but no package
+is installed and no config-unit body is executed.
+
+Exit codes:
+  0  no findings (lint warnings allowed unless --strict)
+  1  invalid or failed planned items, or any finding under --strict
+  2  harness error (Emacs missing, home not initialized, no shutdown)")]
+struct CheckArgs {
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Emacs home directory (default: ~/.config/emacs or XDG_CONFIG_HOME/emacs)"
+    )]
+    home: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH", help = "Emacs executable (default: emacs on PATH)")]
+    emacs: Option<PathBuf>,
+
+    #[arg(
+        long,
+        value_name = "FORMAT",
+        default_value = "human",
+        help = "Verdict format: human or sexp"
+    )]
+    format: String,
+
+    #[arg(long, help = "Treat lint warnings as failures")]
+    strict: bool,
+}
+
+fn run_check(args: CheckArgs) -> Result<i32, String> {
+    let home = match args.home {
+        Some(home) => home,
+        None => default_config_root()?,
+    };
+    let init_file = home.join("init.el");
+    if !init_file.is_file() {
+        return Err(format!(
+            "no init.el in {}; run `emacs-hypervisor init --home {}` first",
+            home.display(),
+            home.display()
+        ));
+    }
+    if !matches!(args.format.as_str(), "human" | "sexp") {
+        return Err(format!("unsupported --format: {}", args.format));
+    }
+    let emacs_bin = args.emacs.unwrap_or_else(|| PathBuf::from("emacs"));
+    let current_exe = env::current_exe()
+        .map_err(|error| format!("could not resolve current executable: {}", error))?;
+    let status = process::Command::new(&emacs_bin)
+        .arg("--batch")
+        .arg("--load")
+        .arg(&init_file)
+        .env("EMACS_HYPERVISOR_CHECK", "1")
+        .env("EMACS_HYPERVISOR_CHECK_FORMAT", &args.format)
+        .env(
+            "EMACS_HYPERVISOR_CHECK_STRICT",
+            if args.strict { "1" } else { "0" },
+        )
+        .env("EMACS_HYPERVISOR_BIN", &current_exe)
+        .status()
+        .map_err(|error| format!("failed to launch {}: {}", emacs_bin.display(), error))?;
+    Ok(status.code().unwrap_or(2))
 }
 
 #[derive(Args, Debug)]
@@ -605,6 +676,13 @@ fn main() {
                 process::exit(1);
             }
         }
+        Some(Commands::Check(args)) => match run_check(args) {
+            Ok(code) => process::exit(code),
+            Err(error) => {
+                eprintln!("emacs-hypervisor check: {}", error);
+                process::exit(2);
+            }
+        },
         Some(Commands::BootstrapHash) => {
             println!("{}", generated_init_hash());
         }

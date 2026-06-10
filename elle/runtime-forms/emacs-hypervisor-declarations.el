@@ -189,6 +189,13 @@ feature preloading, not whether the unit itself is lazy or deferred."
                           (if (fboundp 'emacs-hypervisor-export-extension-settings)
                               (emacs-hypervisor-export-extension-settings)
                             nil)))))
+    (when (memq :lint requested)
+      (setq payload
+            (append payload
+                    (list :lint
+                          (if (fboundp 'emacs-hypervisor-lint-exported-declarations)
+                              (emacs-hypervisor-lint-exported-declarations)
+                            nil)))))
     payload))
 
 (provide 'emacs-hypervisor-declarations)

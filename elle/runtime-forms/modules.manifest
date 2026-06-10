@@ -7,6 +7,7 @@ EFFECT_KIND_HOOK|elle/runtime-forms/emacs-hypervisor-effect-kind-hook.el|:emacs-
 EFFECT_KIND_ADVICE|elle/runtime-forms/emacs-hypervisor-effect-kind-advice.el|:emacs-hypervisor-effect-kind-advice-ready
 EFFECT_KIND_KEYBINDING|elle/runtime-forms/emacs-hypervisor-effect-kind-keybinding.el|:emacs-hypervisor-effect-kind-keybinding-ready
 DECLARATIONS|elle/runtime-forms/emacs-hypervisor-declarations.el|:emacs-hypervisor-config-surface-ready
+LINT|elle/runtime-forms/emacs-hypervisor-lint.el|:emacs-hypervisor-lint-ready
 SELECTIVE_RELOAD|elle/runtime-forms/emacs-hypervisor-selective-reload.el|:emacs-hypervisor-selective-reload-ready
 CONFIG_PATHS|elle/runtime-forms/emacs-hypervisor-config-paths.el|:emacs-hypervisor-config-paths-ready
 CONFIG_LOADER|elle/runtime-forms/emacs-hypervisor-config-loader.el|:emacs-hypervisor-config-loader-ready

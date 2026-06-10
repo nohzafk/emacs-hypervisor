@@ -283,6 +283,21 @@ Emacs's inherited environment.
 | `emacs-hypervisor serve` | Start the stdio backend explicitly |
 | `emacs-hypervisor init [--home DIR] [--upgrade]` | Write or refresh generated bootstrap files in an Emacs home |
 | `emacs-hypervisor env [--home DIR] [-o FILE]` | Write a shell environment snapshot |
+| `emacs-hypervisor check [--home DIR] [--emacs PATH] [--format human\|sexp] [--strict]` | Validate the config structurally without executing it |
+
+### `check`
+
+`check` runs a plan-only Hypervisor session in batch Emacs: the config is
+tangled and loaded, the dependency graph is built, and preflight, planning,
+and structural lint findings are reported — but no package is installed and
+no config-unit body is executed. The verdict reuses the exact graph,
+preflight, and planning code that real startup uses, so a passing `check`
+means startup planning will agree.
+
+Exit codes: `0` no findings (lint warnings allowed unless `--strict`),
+`1` invalid or failed planned items, `2` harness errors (Emacs missing,
+home not initialized, no shutdown received). This makes a dotfiles repo
+CI-able: run `emacs-hypervisor check` on every push.
 
 Default Emacs home: `$XDG_CONFIG_HOME/emacs` if set, otherwise
 `$HOME/.config/emacs`.
@@ -357,6 +372,48 @@ To force a clean rebuild of a package (which drops staging/package caches, re-cl
   ```bash
   EMACS_HYPERVISOR_REBUILD_PACKAGES=emacs-parquet-explorer emacs --init-directory ~/.config/emacs
   ```
+
+### Package Lockfile
+
+Hypervisor records every concretely installed package revision in
+`hypervisor.lock`, next to `config.org` in the Hypervisor config directory —
+commit it with your dotfiles. VC packages record the adopted commit
+(`git rev-parse HEAD` of the staging clone); archive packages record the
+installed version. Entries are sorted by name and rewritten atomically, so
+VCS diffs stay stable.
+
+Resolution precedence at install time: a declared `:ref`/`:tag` always wins
+(and rewrites the lock to match), then the locked revision, then the
+branch or default HEAD (whose result is written to the lock). A fresh
+install from `config.org` + `hypervisor.lock` therefore reproduces the
+revisions of the machine that wrote the lock. `:local` packages never
+resolve through the lock. Already-installed packages without a lock entry
+are backfilled on startup, so adopting the lockfile on an existing home is
+automatic.
+
+### Package Upgrade
+
+Upgrading means: ignore the lock, honor the declaration.
+
+- **`M-x emacs-hypervisor-upgrade-package`** — upgrade one declared package
+  (with completion). Packages pinned by `:ref`/`:tag` report "pinned" and
+  are skipped.
+- **`M-x emacs-hypervisor-upgrade-all-packages`** — upgrade everything.
+- **`EMACS_HYPERVISOR_UPGRADE_PACKAGES=name1,name2`** (or `all`) — upgrade
+  during startup, analogous to `EMACS_HYPERVISOR_REBUILD_PACKAGES`.
+
+Upgrades reuse the clean-rebuild path, rewrite the lock entry, and report
+the revision delta (`Upgraded magit: 0aa2686 -> 4f81c9d`).
+
+### Package Prune
+
+Packages removed from your config stay installed until pruned. At startup,
+Hypervisor reports installed-but-undeclared packages (the keep set includes
+the transitive `Package-Requires` closure of declared packages, so archive
+dependencies are never flagged). **`M-x emacs-hypervisor-prune-packages`**
+lists the orphans and removes them after confirmation, including their
+staging clones, native-compiled artifacts, and lock entries. Nothing is
+ever deleted automatically.
 
 ### `config-unit!` options
 

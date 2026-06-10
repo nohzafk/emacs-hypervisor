@@ -3036,3 +3036,103 @@ Return a cons cell of (STATUS . OUTPUT)."
                                       #'ignore)))))
       (emacs-hypervisor-effect-registry-retract-unit "source-hook-unit")
       (setq emacs-hypervisor-effect-registry-current registry))))
+
+(require 'emacs-hypervisor-lint)
+
+(ert-deftest emacs-hypervisor-lint-flags-untracked-and-suspect-forms ()
+  (emacs-hypervisor-reset-declarations)
+  ;; The hook below hides inside a lambda, so the effect rewriter cannot
+  ;; reach it and lint should flag it as untracked.
+  (eval '(config-unit! linted-unit
+           :config
+           (eval-after-load 'magit '(message "loaded"))
+           (setq fancy-minor-mode t)
+           (global-set-key (kbd "C-c x") (lambda ()
+                                           (add-hook 'prog-mode-hook
+                                                     (lambda () nil)))))
+        t)
+  (let* ((findings (emacs-hypervisor-lint-exported-declarations))
+         (rules (mapcar (lambda (f) (plist-get f :rule)) findings)))
+    (should (memq :eval-after-load rules))
+    (should (memq :minor-mode-setq rules))
+    (should (memq :untracked-anonymous-hook rules))
+    (dolist (finding findings)
+      (should (equal (plist-get finding :unit) "linted-unit"))
+      (should (eq (plist-get finding :severity) :warning))
+      (should (stringp (plist-get finding :form-string))))))
+
+(ert-deftest emacs-hypervisor-lint-reports-duplicate-names-as-errors ()
+  (emacs-hypervisor-reset-declarations)
+  (eval '(progn
+           (package! transient)
+           (package! transient :repo "magit/transient")
+           (config-unit! dup-unit :config t)
+           (config-unit! dup-unit :config 2))
+        t)
+  (let* ((findings (emacs-hypervisor-lint-exported-declarations))
+         (duplicates (cl-remove-if-not
+                      (lambda (f) (eq (plist-get f :rule) :duplicate-name))
+                      findings)))
+    (should (= (length duplicates) 2))
+    (dolist (finding duplicates)
+      (should (eq (plist-get finding :severity) :error)))
+    (should (member "transient"
+                    (mapcar (lambda (f) (plist-get f :unit)) duplicates)))
+    (should (member "dup-unit"
+                    (mapcar (lambda (f) (plist-get f :unit)) duplicates)))))
+
+(ert-deftest emacs-hypervisor-lint-leaves-clean-config-unflagged ()
+  (emacs-hypervisor-reset-declarations)
+  (eval '(progn
+           (package! magit)
+           (config-unit! clean-unit
+             :requires (magit)
+             :config
+             (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+             (keymap-set global-map "C-x g" #'magit-status)))
+        t)
+  (should (null (emacs-hypervisor-lint-exported-declarations))))
+
+(ert-deftest emacs-hypervisor-session-data-exports-lint-when-requested ()
+  (emacs-hypervisor-reset-declarations)
+  (eval '(config-unit! lint-export-unit
+           :config
+           (eval-after-load 'magit '(message "x")))
+        t)
+  (let ((payload (emacs-hypervisor-export-session-data '(:units :lint))))
+    (should (plist-member payload :lint))
+    (should (= (length (plist-get payload :lint)) 1)))
+  ;; Lint stays out of the default startup payload.
+  (should-not (plist-member
+               (emacs-hypervisor-export-session-data '(:units))
+               :lint)))
+
+(ert-deftest emacs-hypervisor-check-exit-code-and-render ()
+  (emacs-hypervisor-test--eval-home-startup-functions)
+  (let ((clean '(:reason :check-complete :status :ok
+                 :check (:packages-total 2 :units-total 3
+                         :package-problems nil :unit-problems nil :lint nil)))
+        (broken '(:reason :check-complete :status :failed
+                  :check (:packages-total 1 :units-total 2
+                          :package-problems ((:name "transient" :status :invalid
+                                              :reason :cycle))
+                          :unit-problems ((:name "magit-ui" :status :skipped
+                                           :reason :preflight))
+                          :lint nil)))
+        (warned '(:reason :check-complete :status :ok
+                  :check (:packages-total 0 :units-total 1
+                          :package-problems nil :unit-problems nil
+                          :lint ((:unit "editing" :rule :eval-after-load
+                                  :severity :warning
+                                  :message "prefer with-eval-after-load"))))))
+    (should (= (emacs-hypervisor--check-exit-code clean) 0))
+    (should (= (emacs-hypervisor--check-exit-code broken) 1))
+    (should (= (emacs-hypervisor--check-exit-code warned) 0))
+    (cl-letf (((symbol-function 'emacs-hypervisor--check-strict-p)
+               (lambda () t)))
+      (should (= (emacs-hypervisor--check-exit-code warned) 1)))
+    (let ((rendered (with-output-to-string
+                      (emacs-hypervisor--check-render-human broken))))
+      (should (string-match-p "INVALID  package transient" rendered))
+      (should (string-match-p "SKIPPED  unit magit-ui" rendered))
+      (should (string-match-p "2 problems" rendered)))))

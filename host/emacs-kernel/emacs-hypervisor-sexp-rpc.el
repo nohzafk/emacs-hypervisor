@@ -18,6 +18,7 @@
 (defvar emacs-hypervisor--last-log-message nil)
 (defvar emacs-hypervisor--last-error-message nil)
 (defvar emacs-hypervisor--shutdown-reason nil)
+(defvar emacs-hypervisor--shutdown-payload nil)
 (defvar emacs-hypervisor--completed nil)
 (defvar emacs-hypervisor--next-request-id 100000)
 (defvar emacs-hypervisor--pending-responses nil)
@@ -287,6 +288,7 @@ Return the request id."
       (:shutdown
        (setq emacs-hypervisor--shutdown-reason
              (plist-get payload :reason))
+       (setq emacs-hypervisor--shutdown-payload payload)
        (setq emacs-hypervisor--state
              (if (emacs-hypervisor--failed-shutdown-p payload)
                  :failed

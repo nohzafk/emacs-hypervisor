@@ -565,7 +565,12 @@ them identity and retract closures, use the registry to keep reload clean.
 
 ## Remaining Work
 
-- Add source location metadata beyond the current source-form provenance.
 - Decide whether unknown macro bodies should stay opaque or expose explicit
   extension points.
 - Specify and implement any future effect kinds separately.
+
+Source location metadata is implemented: effect-record `:source` plists now
+carry `:file`, `:heading`, and `:line` alongside `:form` when the config was
+loaded through the position-recording loader (see
+[docs/spec-lockfile-check-source-map.md](spec-lockfile-check-source-map.md),
+Part 3).

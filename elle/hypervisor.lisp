@@ -46,6 +46,27 @@
 (defn emacs-hypervisor-send-startup-complete [payload]
   (protocol:send-event :shutdown payload))
 
+(defn emacs-hypervisor-check-report-problem? [report]
+  (not (= (get report :status) :ok)))
+
+(defn emacs-hypervisor-check-lint-error? [finding]
+  (= (get finding :severity) :error))
+
+## Check mode stops after planning: the planned reports are the verdict.
+## The compact problem lists travel in the shutdown payload so the Emacs
+## kernel can render them and exit with the right code.
+(defn emacs-hypervisor-send-check-shutdown [package-reports unit-reports lint]
+  (let [package-problems (filter emacs-hypervisor-check-report-problem? package-reports)
+        unit-problems (filter emacs-hypervisor-check-report-problem? unit-reports)
+        lint-errors (filter emacs-hypervisor-check-lint-error? lint)
+        failed? (or (not (empty? package-problems)) (not (empty? unit-problems)) (not (empty? lint-errors)))]
+    (emacs-hypervisor-send-shutdown `(:reason :check-complete :status ,(if failed? :failed :ok)
+                                              :check (:packages-total ,(length package-reports)
+                                                      :units-total ,(length unit-reports)
+                                                      :package-problems ,package-problems
+                                                      :unit-problems ,unit-problems
+                                                      :lint ,lint)))))
+
 (defn emacs-hypervisor-handle-config-load-failure [config-load-result config-file config-org-file]
   (let* [config-error (or (protocol:response-error config-load-result) :unknown-error)
          config-source (or config-org-file config-file "<unknown config>")
@@ -131,6 +152,8 @@
                                        (string (get boot-context :config-org-file)))
                                        boot-repo-dir (and (get boot-context :repo-dir)
                                                           (string (get boot-context :repo-dir)))
+                                       boot-check (and (not (nil? (get boot-context :check)))
+                                       (not (= (get boot-context :check) false)))
                                        boot-expected-init-hash (sys/env "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH")
                                        runtime-module-manifest (emacs-hypervisor-runtime-module-manifest)
                                        config-file (or boot-config-file
@@ -170,7 +193,9 @@
                                         (protocol:send-event :progress '(:phase :startup :step :config-loaded :done 2
                                         :total 10))
                                         (protocol:send-request 5
-                                        :session-data '(:fields (:packages :units :env :extensions)))
+                                        :session-data (if boot-check
+                                                        '(:fields (:packages :units :env :extensions :lint))
+                                                        '(:fields (:packages :units :env :extensions))))
                                         (let* [session-data-response (protocol:await-response mailbox 5)
                                                _ (assert (protocol:response-ok? session-data-response)
                                                          "expected successful :session-data response")
@@ -205,6 +230,17 @@
                                           nil)
                                           (protocol:send-event :progress '(:phase :handshake :step :session-data-parsed
                                           :done 3 :total 10))
+                                          ## Check mode: emit the planned reports and plans, then ship the
+                                          ## verdict in the shutdown payload.  send-shutdown exits the
+                                          ## process, so execution below never runs.
+                                          (when boot-check
+                                            (emacs-hypervisor-debug-send-report :planned :packages
+                                            planned-package-reports)
+                                            (emacs-hypervisor-debug-send-report :planned :units planned-unit-reports)
+                                            (planning:emit-plan-message package-plan)
+                                            (planning:emit-plan-message unit-plan)
+                                            (emacs-hypervisor-send-check-shutdown planned-package-reports
+                                            planned-unit-reports (or (get session-data :lint) ())))
                                           (protocol:send-event :log `(:level :info
                                           :message "prepared session helper forms"))
                                           (protocol:send-request 6

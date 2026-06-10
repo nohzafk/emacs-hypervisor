@@ -1,6 +1,20 @@
 # Spec: Package Lockfile, Check Subcommand, Org Source Mapping
 
-Status: draft, not yet implemented.
+Status: implemented, with deviations noted below.
+
+Implementation notes:
+
+- **Part 1** is implemented as specified. Lock visibility flows through the
+  extended `:package` event payloads (`:rev`, `:locked`); dedicated startup
+  report rendering of the revision column is follow-up work.
+- **Part 2** is implemented with one deviation: duplicate package/unit name
+  detection landed in the Emacs-side lint pass (as a `:severity :error`
+  finding, which fails the check) rather than in Elle's boot policy, so it
+  required no graph changes. Moving it into boot policy so normal startup
+  also reports duplicates remains open.
+- **Part 3** is implemented for declaration entries, effect records, and
+  diff identity. Report-buffer jump buttons and threading `:source` into
+  Elle-side planned/executed reports are follow-up work.
 
 Three independent features, ordered by suggested implementation order. Each
 part stands alone; none depends on another, though Part 2 (`check`) and

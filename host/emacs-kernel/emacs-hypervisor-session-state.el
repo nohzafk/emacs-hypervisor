@@ -66,6 +66,7 @@
   (setq emacs-hypervisor--last-log-message nil)
   (setq emacs-hypervisor--last-error-message nil)
   (setq emacs-hypervisor--shutdown-reason nil)
+  (setq emacs-hypervisor--shutdown-payload nil)
   (setq emacs-hypervisor--completed nil)
   (setq emacs-hypervisor--next-request-id 100000)
   (setq emacs-hypervisor--pending-responses nil)
