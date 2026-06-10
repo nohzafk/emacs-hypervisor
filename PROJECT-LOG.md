@@ -1,7 +1,7 @@
 # Emacs Hypervisor Project Log
 
-Last updated: 2026-04-25
-Status: Lisp-to-Lisp config-unit execution path working; README is the current architecture contract
+Last updated: 2026-06-10
+Status: lockfile/check/source-mapping milestone landed; README is the current architecture contract
 
 ## Purpose
 
@@ -5021,3 +5021,56 @@ The next implementation step should be:
 - continue moving remaining static runtime helpers toward the same source-backed
   / embedded-module path while keeping startup behavior identical between
   repo-home and installed-home execution
+
+## Milestone: Lockfile, Check Subcommand, Source Mapping (2026-06-10)
+
+### Summary
+
+Implemented the three features specified in
+`docs/spec-lockfile-check-source-map.md`, plus their follow-ups:
+
+- **Package lockfile** (`hypervisor.lock` in the Hypervisor config directory):
+  installed revisions recorded by the bridge, resolution precedence declared
+  `:ref`/`:tag` -> locked rev -> branch HEAD, backfill for existing installs.
+  Upgrade commands (`M-x emacs-hypervisor-upgrade-package`, `-all-packages`,
+  `EMACS_HYPERVISOR_UPGRADE_PACKAGES`) ignore the lock and honor declarations.
+  Orphan scan with the transitive `Package-Requires` closure as the keep set;
+  `M-x emacs-hypervisor-prune-packages` removes orphans after confirmation.
+- **Org source mapping**: tangling injects provenance markers
+  (`:comments link` with a custom format carrying `%file`/`%start-line`); a
+  position-recording loader replaces `load-file`, binding
+  `emacs-hypervisor--current-source` around each top-level form. `package!`
+  and `config-unit!` capture `:source` (`:file`/`:heading`/`:line`); effect
+  records carry it; selective reload strips `:source`/`:index` from unit
+  identity so edits above a unit do not dirty it.
+- **`check` subcommand**: plan-only session in batch Emacs reusing the real
+  graph/preflight/planning path; structural lint over exported bodies; verdict
+  rendered by the kernel from the `:check-complete` shutdown payload with exit
+  codes 0/1/2. Duplicate package/unit names are detected in Elle boot policy
+  (`:invalid` / `:duplicate-name`), so normal startup reports them too.
+- **Report provenance**: every Elle-side planned/executed/failed report
+  carries the declaration's `:source`; the startup report's Problems section
+  renders clickable jump buttons; the Packages section shows installed
+  revisions with lock state and surfaces orphans.
+
+### Elle Upstream Finding
+
+Implementing `check` end-to-end exposed a bug in Elle's io_uring backend: a
+single write larger than the pipe buffer (64KB) completed short and silently
+dropped its tail, deadlocking any session whose config-surface install
+request exceeded that size. Fixed by
+`patches/elle/0001-io-uring-complete-short-writes.patch` (applied by
+`scripts/bootstrap-elle`), which finishes short writes with a synchronous
+write loop mirroring Elle's thread-pool backend. An earlier async-resubmission
+approach triggered nondeterministic JIT segfaults (`dispatch_trait_method`
+via `prim_rest`) once writes stayed pending across event-loop turns -- worth
+reporting upstream alongside the patch.
+
+### Verification
+
+- `tests/elle/hypervisor-runtime.lisp`: all sections pass, including the new
+  duplicate-name and source-provenance coverage.
+- ERT: 119 tests, 0 unexpected (lockfile, source map, lint, check rendering,
+  report provenance).
+- End-to-end `emacs-hypervisor check` against broken/clean/duplicate configs
+  produces the expected verdicts, exit codes, and org source citations.

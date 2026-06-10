@@ -77,7 +77,7 @@ Failure:
 |---|---|
 | `:hello` | Handshake; Emacs responds with protocol, version, mode, transport |
 | `:boot-context` | Emacs responds with session-level facts |
-| `:session-data` | Emacs responds with exported packages, units, env |
+| `:session-data` | Emacs responds with the requested `:fields` --- `:packages`, `:units`, `:env`, `:extensions`, plus `:lint` (structural lint findings) in check sessions |
 | `:eval` | Emacs evaluates a form from `:payload :form` |
 
 ## Event Topics
@@ -91,7 +91,7 @@ Failure:
 | `:report` | Elle | Planned and executed report items |
 | `:metric` | Elle | Benchmark timing data (when enabled) |
 | `:package` | Emacs | Package install/failure/finish events |
-| `:shutdown` | Elle | Session finished, with reason and optional failure status |
+| `:shutdown` | Elle | Session finished, with reason and optional failure status; check sessions use `:reason :check-complete` with a `:check` payload of problem reports and lint findings |
 
 ### Package event payloads
 
@@ -168,6 +168,7 @@ runtime crashes:
 | `:init-file` | Generated home `init.el` path |
 | `:init-generated` | Whether the home `init.el` has the Hypervisor generated marker |
 | `:init-content-hash` | Content hash recorded in the generated `init.el`, when present |
+| `:check` | Present and `t` when this is an `emacs-hypervisor check` run; the backend stops after planning and ships the verdict in a `:check-complete` shutdown payload |
 
 ## Mailbox
 

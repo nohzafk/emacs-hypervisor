@@ -110,6 +110,18 @@ S-expressions.
 Elisp forms; Elle sends them into Emacs for the current session, then runs
 package planning, config-unit execution, reload support, reports, and shutdown.
 
+### Check Sessions
+
+`emacs-hypervisor check` reuses the same three stages in batch Emacs: the CLI
+spawns `emacs --batch` loading the generated `init.el` with
+`EMACS_HYPERVISOR_CHECK=1`, the kernel adds `:check t` to the boot context,
+and the Elle backend runs the normal pipeline — config load, session-data
+export, preflight, boot policy, planning — then stops before execution and
+ships the planned problem reports plus structural lint findings in a
+`:check-complete` shutdown payload. The kernel renders the verdict and exits
+`0`/`1`/`2`. Because check is a plan-only session rather than a separate
+validator, its verdict agrees with real startup planning by construction.
+
 ## Lisp-to-Lisp Data Flow
 
 The key invariant: **protocol metadata and code data are decoded with different
@@ -120,15 +132,20 @@ code/data, not a protocol plist.
 
 The path through the system:
 
-1. `config-unit!` captures the body as `(progn ... t)`.
-2. Emacs canonicalizes reader-hostile forms while preserving semantics.
-3. Supported hook, advice, and keybinding sites are normalized into
-   effect-registry helper calls.
-4. Emacs sends session data through sexp-rpc.
-5. Elle decodes package, unit, and env metadata; each unit `:body` stays raw
-   Lisp code rather than becoming protocol data.
-6. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
-7. Emacs evaluates the structured body directly; registry helpers install and
+1. The config loader reads the tangled config form by form, resolving each
+   top-level form to its `config.org` heading and line through tangle
+   markers, and binds that source location around each eval.
+2. `config-unit!` captures the body as `(progn ... t)` and records the
+   active source location as the unit's `:source`.
+3. Emacs canonicalizes reader-hostile forms while preserving semantics.
+4. Supported hook, advice, and keybinding sites are normalized into
+   effect-registry helper calls, each carrying the unit's source location.
+5. Emacs sends session data through sexp-rpc.
+6. Elle decodes package, unit, and env metadata; each unit `:body` stays raw
+   Lisp code rather than becoming protocol data. `:source` is protocol
+   metadata and flows into every planned and executed report.
+7. Elle emits `(emacs-hypervisor-runtime-run-unit NAME 'BODY 'REQUIRES)`.
+8. Emacs evaluates the structured body directly; registry helpers install and
    record supported runtime effects.
 
 This homoiconic surface is what makes structural inspection, targeted rewrites,
@@ -173,6 +190,7 @@ Emacs as quoted forms for direct `eval`.
 | Recursive array traversal in `from-wire` / `to-wire` | `elle/protocol.lisp` |
 | Structured config-unit body export | `elle/runtime-forms/emacs-hypervisor-declarations.el` |
 | Canonicalize `1+` / `1-` call forms | `elle/runtime-forms/emacs-hypervisor-declarations.el` |
+| Position-recording config loader (source provenance) | `elle/runtime-forms/emacs-hypervisor-config-loader.el` |
 | Direct runtime eval of structured bodies | `elle/runtime-forms/emacs-hypervisor-unit-runtime.el`, `elle/runtime-forms/emacs-hypervisor-compose.el` |
 | Quote bodies/requires in Elle-emitted run-unit forms | `elle/execution.lisp` |
 | Avoid Emacs reader shortcuts on outbound messages | `host/templates/lisp/emacs-hypervisor-sexp-rpc.el` |
@@ -209,7 +227,7 @@ stable-ABI plugin does.
 ```text
 emacs-hypervisor/
 ├── host/                              # Rust native host
-│   ├── src/main.rs                    # CLI entrypoint (init, env, serve)
+│   ├── src/main.rs                    # CLI entrypoint (init, env, serve, check)
 │   ├── build.rs                       # embeds Elle source + Elisp at compile time
 │   ├── emacs-kernel/                  # trusted Emacs kernel (bundled into init.el)
 │   │   ├── home-startup.el            #   home bootstrap wrapper
@@ -232,12 +250,14 @@ emacs-hypervisor/
 │       ├── modules.manifest           #   single source for embedded runtime modules
 │       ├── module-loader.lisp         #   module loading coordinator
 │       ├── emacs-hypervisor-declarations.el       #   package!/config-unit! macros
+│       ├── emacs-hypervisor-lint.el                #   structural lint for `check`
+│       ├── emacs-hypervisor-package-lock.el        #   hypervisor.lock read/write
 │       ├── emacs-hypervisor-package-bridge.el      #   package.el/package-vc bridge
-│       ├── emacs-hypervisor-package-runtime.el     #   package event handling
+│       ├── emacs-hypervisor-package-runtime.el     #   package events, upgrade, prune
 │       ├── emacs-hypervisor-unit-runtime.el        #   unit execution helpers
 │       ├── emacs-hypervisor-session-base.el        #   session lifecycle
 │       ├── emacs-hypervisor-selective-reload.el    #   reload diffing + scheduling
-│       ├── emacs-hypervisor-config-loader.el       #   startup/reload config loading
+│       ├── emacs-hypervisor-config-loader.el       #   tangle + source-mapped config loading
 │       ├── emacs-hypervisor-reload-policy.el       #   Emacs-resident soft reload policy
 │       ├── emacs-hypervisor-reload-report.el       #   reload reports, warnings, log formatting
 │       ├── emacs-hypervisor-effect-registry.el     #   generic effect records
@@ -256,6 +276,10 @@ emacs-hypervisor/
 ├── scripts/
 │   ├── analyze-runtime.lisp           # compile-aware analysis source
 │   └── analyze-runtime-modules        # repo-local analysis runner
+│
+├── patches/
+│   └── elle/                          # repo-maintained fixes applied to the
+│                                      #   pinned .elle checkout by bootstrap-elle
 │
 ├── config.org                         # repo test configuration
 ├── config/                            # repo-local support files for config.org

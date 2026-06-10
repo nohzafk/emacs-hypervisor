@@ -58,17 +58,29 @@ not choose your packages, keybindings, UI, editing model, or workflow.
   Emacs's built-in `package-vc-install` (Emacs 29.1+) with `Package-Requires:`
   resolved against GNU ELPA, NonGNU ELPA, and MELPA. The bridge clones git sources and adopts
   them via `package-vc-install-from-checkout`. Clean, transactional rebuilding of local packages is supported via env vars and in-session Lisp commands.
-- **Preflight checks** --- circular dependencies, unset env vars, and missing
-  executables are caught before startup execution begins; absent `:requires`
-  features are caught before the affected unit body runs.
+- **Reproducible installs** --- a `hypervisor.lock` next to your config records
+  every installed revision; a fresh machine restores the exact same package
+  state. Deliberate upgrades (`M-x emacs-hypervisor-upgrade-package`) and
+  orphan pruning (`M-x emacs-hypervisor-prune-packages`) keep the lock and the
+  installed set in step with your declarations.
+- **Preflight checks** --- circular dependencies, duplicate names, unset env
+  vars, and missing executables are caught before startup execution begins;
+  absent `:requires` features are caught before the affected unit body runs.
+- **Batch validation** --- `emacs-hypervisor check` runs the same graph,
+  preflight, and planning code in batch Emacs without executing anything, so a
+  dotfiles repo can validate its config in CI.
+- **Source provenance** --- every declaration records its `config.org` heading
+  and line; failures, lint findings, and startup report problems cite the
+  exact location, and the report buffer links jump straight to it.
 - **Fault-tolerant execution** --- a failed package or unit skips its
   dependents; independent units continue normally.
 - **Selective reload** --- edit one unit and apply only what changed, without
   replaying the entire config.
 - **Effect-aware reload** --- automatically clean old hooks, advice, and
   keybindings before re-applying a changed unit.
-- **Startup reports** --- progress events, package status, unit results, and
-  optional metrics give you full visibility into what happened and why.
+- **Startup reports** --- progress events, package status with installed
+  revisions and lock state, unit results, and optional metrics give you full
+  visibility into what happened and why.
 
 ## Config Example
 
@@ -320,10 +332,14 @@ that file exists.
 
 ```text
 ~/.config/emacs-hypervisor/
-├── early-init.el  # optional, user-owned startup customization
-├── config.org     # literate config (preferred, auto-tangled)
-└── config.el      # plain config fallback
+├── early-init.el    # optional, user-owned startup customization
+├── config.org       # literate config (preferred, auto-tangled)
+├── config.el        # plain config fallback
+└── hypervisor.lock  # installed package revisions, written by Hypervisor
 ```
+
+`hypervisor.lock` lives beside your config so it travels with your dotfiles
+repo --- commit it. See [Package Lockfile](#package-lockfile).
 
 ## Reference
 
@@ -610,6 +626,13 @@ just emacs-home-e2e-reset    # full live Emacs home test from a clean home
 
 Step-by-step live testing: `just emacs-home-e2e-reset`
 
+The build uses a repo-local Elle checkout (`.elle`, pinned by `.elle-ref`).
+`scripts/bootstrap-elle` clones it and applies the repo-maintained fixes in
+`patches/elle/*.patch` on top of the pinned ref --- currently a fix for
+io_uring short writes that would otherwise truncate large sexp-rpc lines.
+Patches are candidates for upstream submission and are reverted/reapplied
+idempotently across ref changes.
+
 ## Further Reading
 
 | Document | Topic |
@@ -618,6 +641,8 @@ Step-by-step live testing: `just emacs-home-e2e-reset`
 | [`docs/architecture.md`](docs/architecture.md) | Three-stage bootstrap, Lisp-to-Lisp data flow, source map |
 | [`docs/reload.md`](docs/reload.md) | Selective reload design, effect-aware reload API |
 | [`docs/effect-system.md`](docs/effect-system.md) | Effect registry contract, adding new effect kinds |
+| [`docs/spec-lockfile-check-source-map.md`](docs/spec-lockfile-check-source-map.md) | Lockfile, `check`, and source-mapping design and status |
+| [`docs/rfc-extension-manifest.md`](docs/rfc-extension-manifest.md) | Manifest-based extension packaging (discussion draft) |
 | [`host/README.md`](host/README.md) | Generated-home bootstrap rules |
 | [`host/ELISP-PACK.md`](host/ELISP-PACK.md) | Static Elisp packing boundary |
 | [`PROJECT-LOG.md`](PROJECT-LOG.md) | Historical implementation context |

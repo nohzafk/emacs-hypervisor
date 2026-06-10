@@ -22,7 +22,8 @@ An effect record is an Emacs Lisp plist.
  :kind :hook
  :target prog-mode-hook
  :function emacs-hypervisor--hook/prog-mode-hook/line-numbers
- :source (:file "config.org" :line 14 :form-index 2)
+ :source (:form (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+          :file "config.org" :heading "Editing" :line 14 :tangled-line 87)
  :apply (add-hook 'prog-mode-hook
                   #'emacs-hypervisor--hook/prog-mode-hook/line-numbers)
  :retract (remove-hook 'prog-mode-hook
@@ -44,7 +45,7 @@ An effect record is an Emacs Lisp plist.
 | `:unit` | Owning `config-unit!` name. |
 | `:kind` | Effect kind. The bundled effect kinds are `:hook`, `:advice`, and `:keybinding`. |
 | `:target` | Runtime target that was mutated. For hooks this is the hook symbol; for advice this is the advised symbol; for keybindings this includes the map expression and key. |
-| `:source` | Best available source location or form provenance. |
+| `:source` | Provenance plist: always `:form` (the original source form); plus `:file`, `:heading` (org configs), `:line`, and `:tangled-line` when the config was loaded through the position-recording loader. |
 | `:apply` | Form, thunk, or structured operation that applied the effect. |
 | `:retract` | Form, thunk, or structured operation that reverses the effect. May be nil for irreversible effects. |
 | `:body-hash` | Hash of the user body or normalized operation body. |
@@ -112,7 +113,7 @@ Unsupported effects can get opaque records when enough provenance is available.
  :unit "editing"
  :kind :opaque
  :target nil
- :source (:file "config.org" :line 31 :form-index 3)
+ :source (:form FORM :file "config.org" :line 31)
  :apply FORM
  :retract nil
  :body-hash "9fb402ac13"
@@ -178,7 +179,8 @@ The hook helper has this shape:
  :function (lambda () (setq-local fill-column 80))
  :depth nil
  :local nil
- :source '(:file "config.org" :line 14 :form-index 0))
+ :source '(:form (add-hook hook (lambda () (setq-local fill-column 80)))
+           :file "config.org" :heading "Editing" :line 14))
 ```
 
 At runtime the helper receives actual values from the executed form:
