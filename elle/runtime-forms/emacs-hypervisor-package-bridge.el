@@ -199,11 +199,22 @@ HOW is :pinned (declared :ref/:tag), :hit (lockfile revision), or
 
 (defun emacs-hypervisor-bridge--installed-p (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
-    (or (package-installed-p sym)
-        (file-directory-p (emacs-hypervisor-bridge--package-dir entry)))))
+    (package-installed-p sym)))
 
 (defun emacs-hypervisor-bridge--clone-present-p (entry)
   (file-directory-p (emacs-hypervisor-bridge--clone-dir entry)))
+
+(defun emacs-hypervisor-bridge--delete-cache-path (path)
+  "Delete PATH from the Hypervisor package cache.
+Handles package-vc symlinks, including dangling symlinks left after their
+source checkout has already been removed."
+  (cond
+   ((file-symlink-p path)
+    (delete-file path))
+   ((file-directory-p path)
+    (delete-directory path t))
+   ((file-exists-p path)
+    (delete-file path))))
 
 (defun emacs-hypervisor-bridge--declared-pin (entry)
   "Return the declared `:ref' or `:tag' for ENTRY, or nil."
@@ -395,11 +406,16 @@ Dependency ordering is managed by the hypervisor via `:deps', so
 packages whose Package-Requires reference hypervisor-only dependencies
 that are not on any archive."
   (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
-         (dir (emacs-hypervisor-bridge--clone-dir entry)))
+         (dir (emacs-hypervisor-bridge--clone-dir entry))
+         (pkg-dir (emacs-hypervisor-bridge--package-dir entry)))
     (unless (package-installed-p sym)
       ;; Fetch submodules and build any compiled artifact in the checkout before
       ;; package-vc symlinks and byte-compiles it.
       (emacs-hypervisor-bridge--prepare-checkout entry)
+      ;; A previous failed/purged install can leave a package-vc symlink in
+      ;; `package-user-dir' without package.el metadata.  Treat that as
+      ;; incomplete state and let package-vc create a fresh link after build.
+      (emacs-hypervisor-bridge--delete-cache-path pkg-dir)
       ;; `package-vc-install-from-checkout' only accepts DIR and NAME in Emacs
       ;; 30.  Register the spec first so package-vc can still see :lisp-dir
       ;; during its unpack step.
@@ -539,8 +555,7 @@ Used by rebuild (before reinstalling) and prune (without reinstalling)."
           (package-delete desc t t))))
     ;; 3. Delete staging clone and package directories.
     (dolist (dir (list clone-dir pkg-dir))
-      (when (file-exists-p dir)
-        (delete-directory dir t)))
+      (emacs-hypervisor-bridge--delete-cache-path dir))
     ;; 4. Purge stale native-compiled .eln files.
     (emacs-hypervisor-bridge--purge-eln-cache name)
     ;; 5. Clear in-memory package.el state.
@@ -603,4 +618,3 @@ clones are scanned."
     (sort orphans #'string<)))
 
 (provide 'emacs-hypervisor-package-bridge)
-

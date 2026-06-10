@@ -2628,13 +2628,17 @@ Return a cons cell of (STATUS . OUTPUT)."
     (unwind-protect
         (progn
           (make-directory lisp-dir t)
-          (should (emacs-hypervisor-bridge--installed-p entry))
-          (emacs-hypervisor-bridge--note-present entry)
-          (should (equal (alist-get 'ghostel package-vc-selected-packages)
-                         '(:url "https://github.com/dakra/ghostel"
-                           :branch "main"
-                           :lisp-dir "lisp")))
-          (should (member lisp-dir load-path)))
+          (should-not (emacs-hypervisor-bridge--installed-p entry))
+          (cl-letf (((symbol-function 'package-installed-p)
+                     (lambda (package &optional _min-version)
+                       (eq package 'ghostel))))
+            (should (emacs-hypervisor-bridge--installed-p entry))
+            (emacs-hypervisor-bridge--note-present entry)
+            (should (equal (alist-get 'ghostel package-vc-selected-packages)
+                           '(:url "https://github.com/dakra/ghostel"
+                             :branch "main"
+                             :lisp-dir "lisp")))
+            (should (member lisp-dir load-path))))
       (delete-directory home-dir t))))
 
 (ert-deftest emacs-hypervisor-bridge-archive-install-activates-current-session ()
@@ -2702,6 +2706,38 @@ Return a cons cell of (STATUS . OUTPUT)."
                 (:installed "vc-tool")
                 (:archive "archive-addon")
                 (:installed "archive-addon")))))))
+
+(ert-deftest emacs-hypervisor-bridge-adopt-replaces-incomplete-package-symlink ()
+  (let* ((entry '(:name "vc-tool" :repo "example/vc-tool"))
+         (home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-adopt-test" t)))
+         (user-emacs-directory home-dir)
+         (package-user-dir (expand-file-name "hypervisor/packages/" home-dir))
+         (clone-dir (expand-file-name "hypervisor/sources/vc-tool" home-dir))
+         (pkg-dir (expand-file-name "hypervisor/packages/vc-tool" home-dir))
+         installed-from-checkout)
+    (unwind-protect
+        (progn
+          (make-directory clone-dir t)
+          (make-directory package-user-dir t)
+          (make-symbolic-link clone-dir pkg-dir)
+          (cl-letf (((symbol-function 'package-installed-p)
+                     (lambda (_package &optional _min-version) nil))
+                    ((symbol-function 'emacs-hypervisor-bridge--prepare-checkout)
+                     (lambda (_entry) :prepared))
+                    ((symbol-function 'package-vc-install-from-checkout)
+                     (lambda (dir name)
+                       (should (equal dir clone-dir))
+                       (should (equal name "vc-tool"))
+                       (should-not (file-symlink-p pkg-dir))
+                       (should-not (file-exists-p pkg-dir))
+                       (setq installed-from-checkout t)))
+                    ((symbol-function 'emacs-hypervisor-bridge--record-vc-lock)
+                     (lambda (_entry) "rev")))
+            (emacs-hypervisor-bridge--adopt entry)
+            (should installed-from-checkout)))
+      (when (file-exists-p home-dir)
+        (delete-directory home-dir t)))))
 
 (ert-deftest emacs-hypervisor-bridge-vc-entry-p-detects-archive-vs-vc ()
   (should     (emacs-hypervisor-bridge--vc-entry-p '(:name "magit" :repo "magit/magit")))
@@ -2786,6 +2822,29 @@ Return a cons cell of (STATUS . OUTPUT)."
             (should-not (assq 'vc-tool package-vc-selected-packages))
             (should (equal reinstalled-batch (list entry)))))
       (delete-directory home-dir t))))
+
+(ert-deftest emacs-hypervisor-bridge-purge-removes-package-symlink-after-clone-delete ()
+  (let* ((entry '(:name "vc-tool" :repo "example/vc-tool"))
+         (home-dir (file-name-as-directory
+                    (make-temp-file "emacs-hypervisor-bridge-symlink-test" t)))
+         (user-emacs-directory home-dir)
+         (package-user-dir (expand-file-name "hypervisor/packages/" home-dir))
+         (package-alist nil)
+         (package-activated-list nil)
+         (package-vc-selected-packages nil)
+         (clone-dir (expand-file-name "hypervisor/sources/vc-tool" home-dir))
+         (pkg-dir (expand-file-name "hypervisor/packages/vc-tool" home-dir)))
+    (unwind-protect
+        (progn
+          (make-directory clone-dir t)
+          (make-directory package-user-dir t)
+          (make-symbolic-link clone-dir pkg-dir)
+          (emacs-hypervisor-bridge--purge-package entry)
+          (should-not (file-exists-p clone-dir))
+          (should-not (file-symlink-p pkg-dir))
+          (should-not (file-exists-p pkg-dir)))
+      (when (file-exists-p home-dir)
+        (delete-directory home-dir t)))))
 
 (ert-deftest emacs-hypervisor-runtime-rebuild-package-triggers-rebuild ()
   (let* ((entry '(:name "vc-tool"))
