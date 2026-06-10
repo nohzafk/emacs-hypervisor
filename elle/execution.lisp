@@ -80,11 +80,15 @@
   (defn executed-unit-report [name entry]
     (graph:make-report name :ok :executed (unit-execution-details entry)))
 
+  (defn env-package-list-member? [env-name name]
+    (let [env-value (sys/env env-name)
+          env-list (if (nil? env-value) () (string/split env-value ","))]
+      (or (= env-value "all") (not (empty? (filter (fn [x] (= x name)) env-list))))))
+
   (defn package-run-form [name]
-    (let [rebuild-env (sys/env "EMACS_HYPERVISOR_REBUILD_PACKAGES")
-          rebuild-list (if (nil? rebuild-env) () (string/split rebuild-env ","))
-          rebuild? (not (empty? (filter (fn [x] (= x name)) rebuild-list)))]
-      (if rebuild?
+    (if (env-package-list-member? "EMACS_HYPERVISOR_UPGRADE_PACKAGES" name)
+      (list 'emacs-hypervisor-runtime-upgrade-package name)
+      (if (env-package-list-member? "EMACS_HYPERVISOR_REBUILD_PACKAGES" name)
         (list 'emacs-hypervisor-runtime-rebuild-package name)
         (list 'emacs-hypervisor-runtime-run-package name))))
 

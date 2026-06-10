@@ -16,6 +16,7 @@ RELOAD_REPORT|elle/runtime-forms/emacs-hypervisor-reload-report.el|:emacs-hyperv
 RELOAD_POLICY|elle/runtime-forms/emacs-hypervisor-reload-policy.el|:emacs-hypervisor-reload-policy-ready
 COMPOSE|elle/runtime-forms/emacs-hypervisor-compose.el|:emacs-hypervisor-compose-ready
 SESSION_BASE|elle/runtime-forms/emacs-hypervisor-session-base.el|:emacs-hypervisor-session-base-ready
+PACKAGE_LOCK|elle/runtime-forms/emacs-hypervisor-package-lock.el|:emacs-hypervisor-package-lock-ready
 PACKAGE_BRIDGE|elle/runtime-forms/emacs-hypervisor-package-bridge.el|:emacs-hypervisor-package-bridge-ready
 PACKAGE_RUNTIME|elle/runtime-forms/emacs-hypervisor-package-runtime.el|:emacs-hypervisor-package-runtime-ready
 UNIT_RUNTIME|elle/runtime-forms/emacs-hypervisor-unit-runtime.el|:emacs-hypervisor-unit-runtime-ready

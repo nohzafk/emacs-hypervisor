@@ -2808,3 +2808,140 @@ Return a cons cell of (STATUS . OUTPUT)."
       (should (equal (car (car sent-events)) :package))
       (should (equal (plist-get (cadr (car sent-events)) :kind) :installed)))))
 
+
+(require 'emacs-hypervisor-package-lock)
+
+(defmacro emacs-hypervisor-test--with-temp-lock (&rest body)
+  "Run BODY with the package lockfile bound to a fresh temp path."
+  (declare (indent 0))
+  `(let* ((lock-dir (make-temp-file "hypervisor-lock-test" t))
+          (emacs-hypervisor-package-lock-file
+           (expand-file-name "hypervisor.lock" lock-dir)))
+     (unwind-protect
+         (progn ,@body)
+       (delete-directory lock-dir t))))
+
+(ert-deftest emacs-hypervisor-package-lock-roundtrip-is-sorted ()
+  (emacs-hypervisor-test--with-temp-lock
+    (should (null (emacs-hypervisor-package-lock-read)))
+    (emacs-hypervisor-package-lock-put
+     '(:name "zeta" :kind :vc :rev "aaa"))
+    (emacs-hypervisor-package-lock-put
+     '(:name "alpha" :kind :archive :version (1 0)))
+    (let ((entries (emacs-hypervisor-package-lock-entries)))
+      (should (equal (mapcar (lambda (e) (plist-get e :name)) entries)
+                     '("alpha" "zeta"))))
+    ;; Upsert replaces by name rather than duplicating.
+    (emacs-hypervisor-package-lock-put
+     '(:name "zeta" :kind :vc :rev "bbb"))
+    (should (equal (plist-get (emacs-hypervisor-package-lock-entry "zeta") :rev)
+                   "bbb"))
+    (should (= (length (emacs-hypervisor-package-lock-entries)) 2))
+    (emacs-hypervisor-package-lock-remove "alpha")
+    (should (null (emacs-hypervisor-package-lock-entry "alpha")))))
+
+(ert-deftest emacs-hypervisor-package-lock-resolution-precedence ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "magit" :kind :vc :rev "locked-rev"))
+    ;; Declared :ref wins over the lock.
+    (let ((pinned '(:name "magit" :repo "magit/magit" :ref "declared-rev")))
+      (should (equal (emacs-hypervisor-bridge--resolved-rev pinned)
+                     "declared-rev"))
+      (should (eq (emacs-hypervisor-bridge--locked-how pinned) :pinned)))
+    ;; Without a declared pin the lock revision drives resolution.
+    (let ((unpinned '(:name "magit" :repo "magit/magit")))
+      (should (equal (emacs-hypervisor-bridge--resolved-rev unpinned)
+                     "locked-rev"))
+      (should (eq (emacs-hypervisor-bridge--locked-how unpinned) :hit))
+      ;; A locked revision forces the non-shallow clone shape.
+      (should-not (member "--depth"
+                          (emacs-hypervisor-bridge--clone-command unpinned)))
+      ;; Upgrades ignore the lock.
+      (let ((emacs-hypervisor-bridge-ignore-lock t))
+        (should (null (emacs-hypervisor-bridge--resolved-rev unpinned)))
+        (should (eq (emacs-hypervisor-bridge--locked-how unpinned) :miss))))
+    ;; No lock entry at all resolves to the branch/default HEAD shape.
+    (let ((unknown '(:name "consult" :repo "minad/consult")))
+      (should (null (emacs-hypervisor-bridge--resolved-rev unknown)))
+      (should (member "--depth"
+                      (emacs-hypervisor-bridge--clone-command unknown))))))
+
+(ert-deftest emacs-hypervisor-package-lock-local-entries-never-drive-resolution ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "mytool" :kind :vc :rev "locked-rev"))
+    (should (null (emacs-hypervisor-bridge--locked-rev
+                   '(:name "mytool" :local "~/projects/mytool"))))
+    (should (null (emacs-hypervisor-bridge--locked-rev
+                   '(:name "mytool" :repo "~/projects/mytool"))))))
+
+(ert-deftest emacs-hypervisor-upgrade-pinned-package-skips-rebuild ()
+  (emacs-hypervisor-test--with-temp-lock
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool" :tag "v1.0"))
+          rebuild-called)
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (&rest _) (setq rebuild-called t))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry entry)))
+          (should (eq (plist-get report :status) :pinned))
+          (should-not rebuild-called))))))
+
+(ert-deftest emacs-hypervisor-upgrade-updates-lock-and-reports-rev-delta ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "old-rev"))
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool")))
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (ent on-installed _on-failed)
+                   ;; The real rebuild records the fresh revision during
+                   ;; adopt; simulate that effect.
+                   (should (plist-get ent :name))
+                   (emacs-hypervisor-package-lock-put
+                    '(:name "vc-tool" :kind :vc :rev "new-rev"))
+                   (funcall on-installed "vc-tool"))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry entry)))
+          (should (eq (plist-get report :status) :ok))
+          (should (equal (plist-get report :previous-rev) "old-rev"))
+          (should (equal (plist-get report :current-rev) "new-rev")))))))
+
+(ert-deftest emacs-hypervisor-prune-keep-set-includes-requires-closure ()
+  (let* ((temp-home (make-temp-file "hypervisor-prune-test" t))
+         (user-emacs-directory (file-name-as-directory temp-home))
+         (package-user-dir (expand-file-name "hypervisor/packages" temp-home)))
+    (unwind-protect
+        (let* ((pkg-dir (lambda (name)
+                          (let ((dir (expand-file-name name package-user-dir)))
+                            (make-directory dir t)
+                            dir)))
+               (package-alist
+                (list
+                 (list 'mypkg (package-desc-create
+                               :name 'mypkg :version '(1 0)
+                               :reqs '((dep (1 0)))
+                               :dir (funcall pkg-dir "mypkg")))
+                 (list 'dep (package-desc-create
+                             :name 'dep :version '(1 0)
+                             :dir (funcall pkg-dir "dep")))
+                 (list 'stale (package-desc-create
+                               :name 'stale :version '(1 0)
+                               :dir (funcall pkg-dir "stale"))))))
+          ;; A stale staging clone with no declaration is also an orphan.
+          (make-directory
+           (expand-file-name "hypervisor/sources/stale-clone" temp-home) t)
+          (should (equal (emacs-hypervisor-bridge-orphaned-packages '("mypkg"))
+                         '("stale" "stale-clone"))))
+      (delete-directory temp-home t))))
+
+(ert-deftest emacs-hypervisor-installed-event-carries-rev-and-locked ()
+  (let ((emacs-hypervisor-bridge-last-install-info
+         '(("vc-tool" . (:rev "abc123" :locked :hit))))
+        (emacs-hypervisor-installed-packages nil)
+        (emacs-hypervisor-execution-events nil)
+        sent-events)
+    (cl-letf (((symbol-function 'emacs-hypervisor-send-event)
+               (lambda (topic payload)
+                 (push (list topic payload) sent-events))))
+      (emacs-hypervisor-runtime-package-installed "vc-tool")
+      (let ((payload (cadr (car sent-events))))
+        (should (equal (plist-get payload :rev) "abc123"))
+        (should (eq (plist-get payload :locked) :hit))))))
