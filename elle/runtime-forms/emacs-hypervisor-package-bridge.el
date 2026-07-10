@@ -432,11 +432,24 @@ that are not on any archive."
       (emacs-hypervisor-bridge--record-vc-lock entry))
     (emacs-hypervisor-bridge--note-present entry)))
 
+(defvar emacs-hypervisor-bridge--archive-refreshed-on-error nil
+  "Non-nil after a failed archive install has triggered a one-shot refresh.")
+
 (defun emacs-hypervisor-bridge--archive-install (entry)
   (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
     (unless (package-installed-p sym)
       (let ((bytecomp--inhibit-lexical-cookie-warning t))
-        (package-install sym))
+        (condition-case err
+            (package-install sym)
+          (error
+           ;; A stale archive-contents can reference a version that the server
+           ;; has garbage-collected.  Refresh once per session and retry before
+           ;; propagating the failure.
+           (if emacs-hypervisor-bridge--archive-refreshed-on-error
+               (signal (car err) (cdr err))
+             (setq emacs-hypervisor-bridge--archive-refreshed-on-error t)
+             (package-refresh-contents)
+             (package-install sym)))))
       (emacs-hypervisor-bridge--record-archive-lock entry))
     (emacs-hypervisor-bridge--note-present entry)))
 
