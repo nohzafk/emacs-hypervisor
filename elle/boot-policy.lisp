@@ -3,14 +3,14 @@
 
 (defn emacs-hypervisor-boot-policy-module [graph preflight]
   (defn ready-package-report [entry]
-    (graph:report-with-source (graph:make-report (graph:entry-name entry) :ok
-                                                 (if (get entry :installed false) :installed :ready)
+    (graph:report-with-source (graph:make-report (graph:entry-name entry)
+                                                 :ok (if (get entry :installed false) :installed :ready)
                                                  {:deps (graph:entry-field entry :deps)}) entry))
 
   (defn ready-unit-report [entry]
     (graph:report-with-source (graph:make-report (graph:entry-name entry) :ok
                                                  :ready {:requires (graph:entry-field entry :requires)
-                                                 :after (graph:entry-field entry :after)}) entry))
+                                                         :after (graph:entry-field entry :after)}) entry))
 
   (defn preflight-report [entry env-missing executable-missing]
     (graph:report-with-source (graph:make-report (graph:entry-name entry) :skipped
@@ -42,7 +42,7 @@
           invalid-package-reports (invalid-reports packages
                                                    (fn [entry]
                                                      (graph:invalid-package-report entry packages package-missing
-                                                                                   package-cycles package-duplicates)))]
+                                                     package-cycles package-duplicates)))]
       {:cycles package-cycles
        :missing package-missing
        :duplicates package-duplicates
@@ -69,11 +69,10 @@
           unit-duplicates (graph:duplicate-names units)
           invalid-unit-reports (invalid-reports units
                                                 (fn [entry]
-                                                  (graph:invalid-unit-report entry units () unit-missing-after
-                                                                             unit-cycles unit-duplicates)))]
+                                                  (graph:invalid-unit-report entry units unit-missing-after unit-cycles
+                                                  unit-duplicates)))]
       {:cycles unit-cycles
        :missing-after unit-missing-after
-       :missing-requires ()
        :duplicates unit-duplicates
        :reports (derive-phase-reports units invalid-unit-reports
                                       (fn [entry reports] (graph:all-known? (graph:entry-field entry :after) reports))

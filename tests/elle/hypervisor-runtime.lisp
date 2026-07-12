@@ -11,6 +11,7 @@
 
 (include-file "../../elle/graph.lisp")
 (include-file "../../elle/protocol.lisp")
+(include-file "../../elle/benchmark.lisp")
 (include-file "../../elle/preflight.lisp")
 (include-file "../../elle/boot-policy.lisp")
 (include-file "../../elle/reporting.lisp")
@@ -91,6 +92,8 @@
 (def extensions (emacs-hypervisor-extensions-module protocol))
 (def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
 (def runtime-module-loader (emacs-hypervisor-runtime-forms-module-loader-module))
+(def benchmark-enabled-module (emacs-hypervisor-benchmark-module protocol true))
+(def benchmark-disabled-module (emacs-hypervisor-benchmark-module protocol false))
 
 (def packages
   (list {:name "ui-pkg"
@@ -264,15 +267,23 @@
 (println "  0a. executable probe serialization: ok")
 
 (let* [probe-units (list {:name "has-sh" :executable (list "sh")}
-                         {:name "missing-bin" :executable (list "definitely-not-installed-command")})
+                         {:name "missing-bin" :executable (list "definitely-not-installed-command")}
+                         {:name "second-missing" :executable (list "sh" "definitely-not-installed-command")}
+                         {:name "both-missing" :executable (list "missing-command-one" "missing-command-two")})
        probe-env (list {:name "PATH" :value "/bin:/usr/bin"})
        {:next-id next-id :reports reports} (preflight:probe-executables probe-units 10 probe-env)
        has-sh (graph:find-entry reports "has-sh")
-       missing-bin (graph:find-entry reports "missing-bin")]
+       missing-bin (graph:find-entry reports "missing-bin")
+       second-missing (graph:find-entry reports "second-missing")
+       both-missing (graph:find-entry reports "both-missing")]
   (assert (= next-id 10) "path preflight does not consume rpc ids")
   (assert (= (get has-sh :missing) (list)) "path preflight finds present executable")
   (assert (= (get missing-bin :missing) (list "definitely-not-installed-command"))
-          "path preflight reports missing executable"))
+          "path preflight reports missing executable")
+  (assert (= (get second-missing :missing) (list "definitely-not-installed-command"))
+          "path preflight probes every declared executable, not just the first")
+  (assert (= (get both-missing :missing) (list "missing-command-one" "missing-command-two"))
+          "path preflight reports all missing executables for a unit"))
 (println "  0b. executable PATH preflight: ok")
 
 (let* [{:reports installed-package-reports} (policy:derive-package-reports installed-packages)
@@ -381,20 +392,33 @@
           "duplicate package report carries source")
   (assert (= (graph:entry-field unique-report :status) :ok) "unique package unaffected by duplicates"))
 
-(let* [dup-units (list {:name "dup-unit" :requires (list) :after (list) :env (list) :executable (list)
-                        :body '(progn t)}
-                       {:name "dup-unit" :requires (list) :after (list) :env (list) :executable (list)
+(let* [dup-units (list {:name "dup-unit" :requires (list) :after (list) :env (list) :executable (list) :body '(progn t)}
+                       {:name "dup-unit"
+                        :requires (list)
+                        :after (list)
+                        :env (list)
+                        :executable (list)
                         :body '(progn 2 t)})
        {:reports reports} (policy:derive-unit-reports dup-units () () env ())
        dup-report (graph:find-entry reports "dup-unit")]
   (assert (= (graph:entry-field dup-report :status) :invalid) "duplicate unit status")
   (assert (= (graph:entry-field dup-report :reason) :duplicate-name) "duplicate unit reason"))
 
-(let* [sourced-units (list {:name "sourced-unit" :index 0 :requires (list) :after (list) :env (list)
-                            :executable (list) :body '(progn t)
+(let* [sourced-units (list {:name "sourced-unit"
+                            :index 0
+                            :requires (list)
+                            :after (list)
+                            :env (list)
+                            :executable (list)
+                            :body '(progn t)
                             :source {:file "config.org" :heading "Magit" :line 14}}
-                           {:name "sourced-bad-unit" :index 1 :requires (list) :after (list)
-                            :env (list "HYPERVISOR_MISSING_ENV") :executable (list) :body '(progn t)
+                           {:name "sourced-bad-unit"
+                            :index 1
+                            :requires (list)
+                            :after (list)
+                            :env (list "HYPERVISOR_MISSING_ENV")
+                            :executable (list)
+                            :body '(progn t)
                             :source {:file "config.org" :heading "Broken" :line 30}})
        {:reports reports} (policy:derive-unit-reports sourced-units () () env ())
        ready-report (graph:find-entry reports "sourced-unit")
@@ -408,11 +432,21 @@
           "preflight unit report carries source heading"))
 
 ## Executed and failed unit reports keep declaration provenance.
-(let* [sourced-units (list {:name "sourced-run-unit" :index 0 :requires (list) :after (list) :env (list)
-                            :executable (list) :body '(progn t)
+(let* [sourced-units (list {:name "sourced-run-unit"
+                            :index 0
+                            :requires (list)
+                            :after (list)
+                            :env (list)
+                            :executable (list)
+                            :body '(progn t)
                             :source {:file "config.org" :heading "Magit" :line 14}}
-                           {:name "sourced-fail-unit" :index 1 :requires (list) :after (list) :env (list)
-                            :executable (list) :body '(error "boom")
+                           {:name "sourced-fail-unit"
+                            :index 1
+                            :requires (list)
+                            :after (list)
+                            :env (list)
+                            :executable (list)
+                            :body '(error "boom")
                             :source {:file "config.org" :heading "Broken" :line 30}})
        {:reports planned-unit-reports} (policy:derive-unit-reports sourced-units () () env ())
        unit-plan (planning:derive-unit-plan sourced-units planned-unit-reports)]
@@ -423,13 +457,53 @@
          executed (graph:find-entry unit-reports "sourced-run-unit")
          failed (graph:find-entry unit-reports "sourced-fail-unit")]
     (assert (= (graph:entry-field executed :status) :ok) "sourced unit executes")
-    (assert (= (graph:entry-field (graph:entry-field executed :source) :line) 14)
-            "executed unit report carries source")
+    (assert (= (graph:entry-field (graph:entry-field executed :source) :line) 14) "executed unit report carries source")
     (assert (= (graph:entry-field failed :status) :failed) "sourced unit failure recorded")
     (assert (= (graph:entry-field (graph:entry-field failed :source) :heading) "Broken")
             "failed unit report carries source")))
 
 (println "  1a. duplicate names and source provenance: ok")
+
+# ============================================================================
+# 1b. A genuine :after cycle marks every member invalid with :cycle.
+# ============================================================================
+
+(let* [cycle-units (list {:name "cycle-a"
+                          :index 0
+                          :requires (list)
+                          :after (list "cycle-b")
+                          :env (list)
+                          :executable (list)
+                          :body '(progn t)}
+                         {:name "cycle-b"
+                          :index 1
+                          :requires (list)
+                          :after (list "cycle-a")
+                          :env (list)
+                          :executable (list)
+                          :body '(progn t)}
+                         {:name "cycle-free"
+                          :index 2
+                          :requires (list)
+                          :after (list)
+                          :env (list)
+                          :executable (list)
+                          :body '(progn t)})
+       cycle-names (graph:cycle-names cycle-units :after (graph:known-names cycle-units))
+       {:reports reports :cycles cycles} (policy:derive-unit-reports cycle-units () () env ())
+       cycle-a (graph:find-entry reports "cycle-a")
+       cycle-b (graph:find-entry reports "cycle-b")
+       cycle-free (graph:find-entry reports "cycle-free")]
+  (assert (= cycle-names (list "cycle-a" "cycle-b")) "cycle-names finds mutually :after units")
+  (assert (= cycles (list "cycle-a" "cycle-b")) "derive-unit-reports records cycle members")
+  (assert (= (graph:entry-field cycle-a :status) :invalid) "cycle unit a status")
+  (assert (= (graph:entry-field cycle-a :reason) :cycle) "cycle unit a reason")
+  (assert (= (graph:entry-field (graph:entry-field cycle-a :details) :members) (list "cycle-a" "cycle-b"))
+          "cycle report lists all cycle members")
+  (assert (= (graph:entry-field cycle-b :status) :invalid) "cycle unit b status")
+  (assert (= (graph:entry-field cycle-b :reason) :cycle) "cycle unit b reason")
+  (assert (= (graph:entry-field cycle-free :status) :ok) "unit outside the cycle unaffected"))
+(println "  1b. genuine :after cycle: ok")
 
 # ============================================================================
 # 2. Planning emits dependency order, not declaration order.
@@ -703,6 +777,75 @@
 (println "  4. unit execution: ok")
 
 # ============================================================================
+# 4a. A package that failed at install time gates its dependent units.
+# ============================================================================
+
+(let* [gate-units (list {:name "gated-unit"
+                         :index 0
+                         :requires (list "install-fail-pkg")
+                         :after (list)
+                         :env (list)
+                         :executable (list)
+                         :body '(progn :gated)}
+                        {:name "free-unit"
+                         :index 1
+                         :requires (list)
+                         :after (list)
+                         :env (list)
+                         :executable (list)
+                         :body '(progn :free)})
+       {:reports planned-unit-reports} (policy:derive-unit-reports gate-units () () env ())
+       unit-plan (planning:derive-unit-plan gate-units planned-unit-reports)
+       package-reports (list (graph:make-report "install-fail-pkg" :failed
+                                                :execution {:source :eval :error "clone failed"}))]
+  (assert (= (graph:entry-field (graph:find-entry planned-unit-reports "gated-unit") :status) :ok)
+          "gated unit is planned :ok before package execution")
+  (reset-stub-state)
+  (push stub-await-responses (stub-response 70 true :free-ok))
+  (let* [{:reports unit-reports :next-id next-id} (execution:execute-unit-plan (planning:plan-items unit-plan)
+         package-reports 70)
+         gated (graph:find-entry unit-reports "gated-unit")
+         free (graph:find-entry unit-reports "free-unit")]
+    (assert (= next-id 71) "package-gated unit consumes no rpc id")
+    (assert (= (length stub-sent-requests) 1) "no eval request is sent for a package-gated unit")
+    (assert (= (graph:entry-field gated :status) :skipped) "package-gated unit is skipped")
+    (assert (= (graph:entry-field gated :reason) :blocked-by-package) "package-gated unit reason")
+    (assert (= (graph:entry-field (graph:entry-field gated :details) :blockers) (list "install-fail-pkg"))
+            "package-gated unit names the failed package")
+    (assert (= (graph:entry-field free :status) :ok) "unit without failed requires still executes")))
+
+## :requires entries that are plain Emacs features (no package report) never gate.
+(let* [feature-units (list {:name "feature-gated-unit"
+                            :index 0
+                            :requires (list "some-feature")
+                            :after (list)
+                            :env (list)
+                            :executable (list)
+                            :body '(progn :feature)})
+       {:reports planned-unit-reports} (policy:derive-unit-reports feature-units () () env ())
+       unit-plan (planning:derive-unit-plan feature-units planned-unit-reports)
+       package-reports (list (graph:make-report "install-fail-pkg" :failed
+                                                :execution {:source :eval :error "clone failed"}))]
+  (reset-stub-state)
+  (push stub-await-responses (stub-response 80 true :feature-ok))
+  (let* [{:reports unit-reports} (execution:execute-unit-plan (planning:plan-items unit-plan) package-reports 80)
+         feature-unit (graph:find-entry unit-reports "feature-gated-unit")]
+    (assert (= (length stub-sent-requests) 1) "feature-requiring unit still evaluated")
+    (assert (= (graph:entry-field feature-unit :status) :ok)
+            "feature :requires without a package report does not gate execution")))
+(println "  4a. failed package gates dependent units: ok")
+
+# ============================================================================
+# 4b. Env package-list values are trimmed and empties dropped.
+# ============================================================================
+
+(assert (= (execution:parse-package-list-value "magit, transient ,,  vertico") (list "magit" "transient" "vertico"))
+        "package list env values are trimmed per element")
+(assert (= (execution:parse-package-list-value nil) ()) "nil package list env value parses to empty")
+(assert (= (execution:parse-package-list-value " , ") ()) "whitespace-only package list parses to empty")
+(println "  4b. env package list trimming: ok")
+
+# ============================================================================
 # 5. Extension dispatch returns plugin-backed Mermaid render payloads.
 # ============================================================================
 
@@ -835,5 +978,56 @@
           "runtime loader first binding names source path"))
 
 (println "  6. runtime form loader shape: ok")
+
+# ============================================================================
+# 7. Benchmark module: metric stripping and enable gating.
+# ============================================================================
+
+(let [payload (list :form '(progn t) :metric-name :run-unit :metric-kind :unit :phase :startup :item-name "u")]
+  (assert (= (benchmark-enabled-module:eval-payload payload) payload)
+          "enabled benchmark keeps metric fields in eval payload")
+  (assert (= (benchmark-disabled-module:eval-payload payload) (list :form '(progn t)))
+          "disabled benchmark strips metric fields from eval payload"))
+
+## Stripping is shallow: nested lists and maps inside kept values survive.
+(let [nested-payload (list :form '(progn (setq x '(:metric-name :inner :phase :inner-phase)) t)
+                           :context {:phase :keep-me} :metric-name :outer :phase :startup)]
+  (assert (= (benchmark-disabled-module:eval-payload nested-payload)
+             (list :form '(progn (setq x '(:metric-name :inner :phase :inner-phase)) t) :context {:phase :keep-me}))
+          "metric stripping preserves nested values that contain metric-like keys"))
+
+(reset-stub-state)
+(benchmark-disabled-module:emit-metric :planning :noop 1.0 nil nil)
+(assert (= (length stub-sent-events) 0) "disabled benchmark emits no metric events")
+(benchmark-enabled-module:emit-metric :planning :probe 2.5 :planning "probe-item")
+(assert (= (length stub-sent-events) 1) "enabled benchmark emits a metric event")
+(assert (= (get (get stub-sent-events 0) :topic) :metric) "benchmark metric event topic")
+(println "  7. benchmark module: ok")
+
+# ============================================================================
+# 8. Runtime form installers list modules in manifest order (static check).
+# ============================================================================
+
+(defn runtime-forms-repo-file [relative]
+  (if (file/exists? relative) relative (string "../../" relative)))
+
+(defn manifest-module-names []
+  (map (fn [line] (first (string/split (string/trim line) "|")))
+       (filter (fn [line] (not (= (string/trim line) "")))
+               (file/lines (runtime-forms-repo-file "elle/runtime-forms/modules.manifest")))))
+
+## The names referenced by install-config-surface-form and
+## install-session-helpers-form, in source order. Both installers are
+## defined in that order, so occurrence order in the file is install order.
+(defn runtime-forms-install-order []
+  (->list (map (fn [segment] (first (string/split segment "\"")))
+               (rest (string/split (file/read (runtime-forms-repo-file "elle/runtime-forms.lisp"))
+                                   "load-module-by-name manifest \"")))))
+
+(let [manifest-names (manifest-module-names)
+      install-names (runtime-forms-install-order)]
+  (assert (= (length manifest-names) 23) "modules.manifest entry count")
+  (assert (= install-names manifest-names) "runtime-forms.lisp installs modules in modules.manifest order"))
+(println "  8. runtime form module order: ok")
 
 (println "tests/elle/hypervisor-runtime.lisp: all tests passed")

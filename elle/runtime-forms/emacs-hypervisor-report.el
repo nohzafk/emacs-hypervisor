@@ -150,7 +150,6 @@
     (pcase reason
       (:blocked-by-package "blocked by package")
       (:blocked-by-unit "blocked by unit")
-      (:missing-required-packages "missing required packages")
       (:missing-after-units "missing after units")
       (:preflight "preflight failed")
       (:cycle "dependency cycle")
@@ -212,9 +211,6 @@
              (emacs-hypervisor--format-report-details details)))
     (:blocked-by-unit
      (format "blocked by unit: %s"
-             (emacs-hypervisor--format-report-details details)))
-    (:missing-required-packages
-     (format "missing required packages: %s"
              (emacs-hypervisor--format-report-details details)))
     (:missing-after-units
      (format "missing after units: %s"

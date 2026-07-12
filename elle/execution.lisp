@@ -71,8 +71,7 @@
   (defn planned-package-details [planned-reports name]
     (graph:entry-field (graph:find-entry planned-reports name) :details))
 
-  (defn installed-package-report [name planned-reports]
-    ## The planned report already carries the declaration's :source; copy it
+  (defn installed-package-report [name planned-reports]  ## The planned report already carries the declaration's :source; copy it
     ## forward so executed reports keep provenance.
     (graph:report-with-source (graph:make-report name :ok :installed (planned-package-details planned-reports name))
                               (graph:find-entry planned-reports name)))
@@ -83,10 +82,17 @@
   (defn executed-unit-report [name entry]
     (graph:report-with-source (graph:make-report name :ok :executed (unit-execution-details entry)) entry))
 
+  ## Split a comma-separated package list from an env var, trimming
+  ## whitespace around each name and dropping empty entries so values like
+  ## "magit, transient" match their packages.
+  (defn parse-package-list-value [value]
+    (if (nil? value)
+      ()
+      (->list (filter (fn [x] (not (= x ""))) (map string/trim (string/split value ","))))))
+
   (defn env-package-list-member? [env-name name]
-    (let [env-value (sys/env env-name)
-          env-list (if (nil? env-value) () (string/split env-value ","))]
-      (or (= env-value "all") (not (empty? (filter (fn [x] (= x name)) env-list))))))
+    (let [env-value (sys/env env-name)]
+      (or (= env-value "all") (graph:member? (parse-package-list-value env-value) name))))
 
   (defn package-run-form [name]
     (if (env-package-list-member? "EMACS_HYPERVISOR_UPGRADE_PACKAGES" name)
@@ -144,22 +150,36 @@
          :installed (package-report-installed-names reports)
          :ok (package-reports-ok? reports)})))
 
-  (defn next-unit-plan-report [plan-item package-reports executed-unit-reports current-id]
+  ## Packages that were planned :ok can still fail at install time; a unit
+  ## requiring one of them must be skipped instead of failing opaquely inside
+  ## Emacs. Only names with an actual package report gate the unit — plain
+  ## Emacs features in :requires are unaffected.
+  (defn package-blocked-report [name entry package-reports]
+    (let [blockers (graph:known-report-blockers package-reports (graph:entry-field entry :requires))]
+      (if (empty? blockers)
+        nil
+        (graph:report-with-source (graph:blocked-report name :blocked-by-package blockers) entry))))
+
+  (defn next-unit-plan-report [plan-item package-reports current-id]
     (let [name (graph:entry-field plan-item :name)
           entry (graph:entry-field plan-item :entry)
           planned-report (graph:entry-field plan-item :planned-report)
           planned-status (graph:entry-field planned-report :status)]
       (if (not (= planned-status :ok))
         {:next-id current-id :report planned-report}
-        (let [index (graph:entry-field entry :index)
-              _request-sent (send-eval-form-request current-id (unit-run-at-index-form index) :run-unit :unit
-                                                    :units name)
-              result (protocol:await-response mailbox current-id)]
-          (eval-report-state current-id name (executed-unit-report name entry) result entry)))))
+        (if-let [blocked-report (package-blocked-report name entry package-reports)]
+                {:next-id current-id :report blocked-report}
+                (let [index (graph:entry-field entry :index)
+                      _request-sent (send-eval-form-request current-id (unit-run-at-index-form index) :run-unit :unit
+                                                            :units name)
+                      result (protocol:await-response mailbox current-id)]
+                  (eval-report-state current-id name (executed-unit-report name entry) result entry))))))
 
   (defn execute-unit-plan [plan-items package-reports next-id]
     (collect-report-state plan-items next-id
-                          (fn [plan-item executed-reports current-id]
-                            (next-unit-plan-report plan-item package-reports executed-reports current-id))))
+                          (fn [plan-item _collected current-id]
+                            (next-unit-plan-report plan-item package-reports current-id))))
 
-  {:execute-package-entry-plan-tracker execute-package-entry-plan-tracker :execute-unit-plan execute-unit-plan})
+  {:execute-package-entry-plan-tracker execute-package-entry-plan-tracker
+   :execute-unit-plan execute-unit-plan
+   :parse-package-list-value parse-package-list-value})

@@ -18,6 +18,7 @@
 (defvar emacs-hypervisor--shutdown-reason nil)
 (defvar emacs-hypervisor--shutdown-payload nil)
 (defvar emacs-hypervisor--completed nil)
+(defvar emacs-hypervisor--ready nil)
 (defvar emacs-hypervisor--finish-notified nil)
 (defvar emacs-hypervisor--startup-warnings nil)
 (defvar emacs-hypervisor-process-sentinel-function nil)
@@ -69,6 +70,7 @@
   (setq emacs-hypervisor--shutdown-reason nil)
   (setq emacs-hypervisor--shutdown-payload nil)
   (setq emacs-hypervisor--completed nil)
+  (setq emacs-hypervisor--ready nil)
   (setq emacs-hypervisor--next-request-id 100000)
   (setq emacs-hypervisor--pending-responses nil)
   (setq emacs-hypervisor--finish-notified nil)
@@ -170,6 +172,7 @@ that should not prevent local config reloads."
    :state emacs-hypervisor--state
    :live (emacs-hypervisor-live-p)
    :active (emacs-hypervisor-session-active-p)
+   :ready emacs-hypervisor--ready
    :completed emacs-hypervisor--completed
    :shutdown emacs-hypervisor--shutdown-reason
    :last-process-event emacs-hypervisor--last-process-event
@@ -193,12 +196,12 @@ The return value is one of:
 External clients such as Hammerspoon should use this function instead of
 reading private Hypervisor session variables."
   (cond
-   ((and emacs-hypervisor--completed
-         (eq emacs-hypervisor--state :completed))
-    'ready)
-   ((and emacs-hypervisor--completed
-         (eq emacs-hypervisor--state :failed))
+   ((eq emacs-hypervisor--state :failed)
     'failed)
+   ((or emacs-hypervisor--ready
+        (and emacs-hypervisor--completed
+             (eq emacs-hypervisor--state :completed)))
+    'ready)
    (t
     'loading)))
 

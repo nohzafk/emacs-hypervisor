@@ -43,8 +43,11 @@
   (protocol:send-event :shutdown payload)
   (sys/exit 0))
 
+## Startup-complete travels on its own topic: the process keeps running to
+## serve extension calls, so :shutdown stays reserved for actual termination
+## and the Emacs sentinel can still mark a post-startup crash as failed.
 (defn emacs-hypervisor-send-startup-complete [payload]
-  (protocol:send-event :shutdown payload))
+  (protocol:send-event :session-ready payload))
 
 (defn emacs-hypervisor-check-report-problem? [report]
   (not (= (get report :status) :ok)))
@@ -62,10 +65,8 @@
         failed? (or (not (empty? package-problems)) (not (empty? unit-problems)) (not (empty? lint-errors)))]
     (emacs-hypervisor-send-shutdown `(:reason :check-complete :status ,(if failed? :failed :ok)
                                               :check (:packages-total ,(length package-reports)
-                                                      :units-total ,(length unit-reports)
-                                                      :package-problems ,package-problems
-                                                      :unit-problems ,unit-problems
-                                                      :lint ,lint)))))
+                                              :units-total ,(length unit-reports) :package-problems ,package-problems
+                                              :unit-problems ,unit-problems :lint ,lint)))))
 
 (defn emacs-hypervisor-handle-config-load-failure [config-load-result config-file config-org-file]
   (let* [config-error (or (protocol:response-error config-load-result) :unknown-error)
@@ -75,6 +76,12 @@
                                        :message ,config-message :details ,config-error))
     (emacs-hypervisor-send-shutdown `(:reason :config-load-failed :status :failed :phase :startup :step :load-config
                                               :source ,config-source :message ,config-message :details ,config-error))))
+
+## Debug wire dumps are expensive (raw sexp serialization per report item);
+## they only run when EMACS_HYPERVISOR_DEBUG is set to a non-empty value.
+(def emacs-hypervisor-debug-enabled?
+  (let [value (sys/env "EMACS_HYPERVISOR_DEBUG")]
+    (and (not (nil? value)) (not (= value "")))))
 
 (defn emacs-hypervisor-debug-value-summary [value]
   (if (nil? value)
@@ -111,22 +118,24 @@
     (loop reports 0)))
 
 (defn emacs-hypervisor-debug-send-report [stage phase reports]
-  (let [label (string "stage=" (emacs-hypervisor-debug-value-summary stage) " phase="
-                      (emacs-hypervisor-debug-value-summary phase))]
-    (eprintln "[Hypervisor debug] report-send " label " type=" (emacs-hypervisor-debug-value-summary reports) " count="
-              (number->string (length reports)))
-    (emacs-hypervisor-debug-report-items label reports 8)
-    (protocol:send-report stage phase reports)))
+  (when emacs-hypervisor-debug-enabled?
+    (let [label (string "stage=" (emacs-hypervisor-debug-value-summary stage) " phase="
+                        (emacs-hypervisor-debug-value-summary phase))]
+      (eprintln "[Hypervisor debug] report-send " label " type=" (emacs-hypervisor-debug-value-summary reports)
+                " count=" (number->string (length reports)))
+      (emacs-hypervisor-debug-report-items label reports 8)))
+  (protocol:send-report stage phase reports))
 
 (defn emacs-hypervisor-debug-package-items [packages limit]
-  (letrec [loop (fn [remaining index]
-                  (when (and (not (empty? remaining)) (< index limit))
-                    (let [entry (first remaining)]
-                      (eprintln "[Hypervisor debug] source-package index=" (number->string index) " type="
-                                (emacs-hypervisor-debug-value-summary entry) " raw="
-                                (emacs-hypervisor-debug-wire-string entry)))
-                    (loop (rest remaining) (+ index 1))))]
-    (loop packages 0)))
+  (when emacs-hypervisor-debug-enabled?
+    (letrec [loop (fn [remaining index]
+                    (when (and (not (empty? remaining)) (< index limit))
+                      (let [entry (first remaining)]
+                        (eprintln "[Hypervisor debug] source-package index=" (number->string index) " type="
+                                  (emacs-hypervisor-debug-value-summary entry) " raw="
+                                  (emacs-hypervisor-debug-wire-string entry)))
+                      (loop (rest remaining) (+ index 1))))]
+      (loop packages 0))))
 
 (protocol:with-mailbox-reader mailbox
                               (fn []
@@ -153,7 +162,7 @@
                                        boot-repo-dir (and (get boot-context :repo-dir)
                                                           (string (get boot-context :repo-dir)))
                                        boot-check (and (not (nil? (get boot-context :check)))
-                                       (not (= (get boot-context :check) false)))
+                                                       (not (= (get boot-context :check) false)))
                                        boot-expected-init-hash (sys/env "EMACS_HYPERVISOR_EMBEDDED_INIT_HASH")
                                        runtime-module-manifest (emacs-hypervisor-runtime-module-manifest)
                                        config-file (or boot-config-file
@@ -229,13 +238,12 @@
                                           :session-analysis-total (benchmark:elapsed-ms session-analysis-started-at) nil
                                           nil)
                                           (protocol:send-event :progress '(:phase :handshake :step :session-data-parsed
-                                          :done 3 :total 10))
-                                          ## Check mode: emit the planned reports and plans, then ship the
+                                          :done 3 :total 10))  ## Check mode: emit the planned reports and plans, then ship the
                                           ## verdict in the shutdown payload.  send-shutdown exits the
                                           ## process, so execution below never runs.
                                           (when boot-check
-                                            (emacs-hypervisor-debug-send-report :planned :packages
-                                            planned-package-reports)
+                                            (emacs-hypervisor-debug-send-report :planned
+                                            :packages planned-package-reports)
                                             (emacs-hypervisor-debug-send-report :planned :units planned-unit-reports)
                                             (planning:emit-plan-message package-plan)
                                             (planning:emit-plan-message unit-plan)
@@ -253,8 +261,9 @@
                                                             (or (protocol:response-error runtime-result) :unknown-error))))
                                           (protocol:send-event :progress '(:phase :planning :step :policy-derived
                                           :done 4 :total 10))
-                                          (eprintln "[Hypervisor debug] source packages count="
-                                                    (number->string (length packages)))
+                                          (when emacs-hypervisor-debug-enabled?
+                                            (eprintln "[Hypervisor debug] source packages count="
+                                                      (number->string (length packages))))
                                           (emacs-hypervisor-debug-package-items packages 5)
                                           (emacs-hypervisor-debug-send-report :planned :packages planned-package-reports)
                                           (emacs-hypervisor-debug-send-report :planned :units planned-unit-reports)

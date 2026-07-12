@@ -43,7 +43,8 @@
       (letrec [dedupe (fn [remaining seen]
                         (match remaining
                           () (reverse seen)
-                          (name & rest) (if (member? seen name) (dedupe rest seen) (dedupe rest (pair name seen)))
+                          (name & rest)
+                            (if (member? seen name) (dedupe rest seen) (dedupe rest (pair name seen)))
                           _ (reverse seen)))]
         (filter (fn [name] (< 1 (name-occurrences entries name))) (dedupe names ())))))
 
@@ -140,16 +141,17 @@
   (defn invalid-package-report [entry entries missing-entries cycle-members duplicates]
     (let [name (entry-name entry)
           report (if-let [duplicate-report (duplicate-entry-report entry entries duplicates)] duplicate-report
-                         (if-let [missing-report (entry-missing-report name :missing-deps missing-entries)] missing-report
+                         (if-let [missing-report (entry-missing-report name :missing-deps missing-entries)]
+                                 missing-report
                                  (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil)))]
       (if (nil? report) nil (report-with-source report entry))))
 
-  (defn invalid-unit-report [entry entries missing-requires missing-after cycle-members duplicates]
+  (defn invalid-unit-report [entry entries missing-after cycle-members duplicates]
     (let [name (entry-name entry)
           report (if-let [duplicate-report (duplicate-entry-report entry entries duplicates)] duplicate-report
-                         (if-let [missing-report (entry-missing-report name :missing-required-packages missing-requires)] missing-report
-                                 (if-let [missing-report (entry-missing-report name :missing-after-units missing-after)] missing-report
-                                         (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil))))]
+                         (if-let [missing-report (entry-missing-report name :missing-after-units missing-after)]
+                                 missing-report
+                                 (if (member? cycle-members name) (cycle-entry-report name cycle-members) nil)))]
       (if (nil? report) nil (report-with-source report entry))))
 
   (defn non-invalid-entries [entries invalid-reports]

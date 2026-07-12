@@ -14,6 +14,7 @@
 (defvar emacs-hypervisor--shutdown-reason nil)
 (defvar emacs-hypervisor--shutdown-payload nil)
 (defvar emacs-hypervisor--completed nil)
+(defvar emacs-hypervisor--ready nil)
 
 (declare-function emacs-hypervisor--notify-session-finished "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor--report-call "emacs-hypervisor-session-state")
@@ -28,6 +29,7 @@
     (:report . emacs-hypervisor-events--handle-report)
     (:package . emacs-hypervisor-events--handle-package)
     (:metric . emacs-hypervisor-events--handle-metric)
+    (:session-ready . emacs-hypervisor-events--handle-session-ready)
     (:shutdown . emacs-hypervisor-events--handle-shutdown))
   "Topic handler table for Hypervisor session events.")
 
@@ -128,6 +130,20 @@
      :metric-kind (plist-get payload :metric-kind)
      :item-name (or (plist-get payload :item-name)
                     (plist-get payload :detail))))
+  t)
+
+(defun emacs-hypervisor-events--handle-session-ready (payload)
+  "Record that startup completed while the session process keeps running.
+
+Unlike `:shutdown', this must not mark the session completed: the Elle
+process stays alive to serve extension calls, and the sentinel still needs
+to report a later abnormal exit as `:failed'."
+  (setq emacs-hypervisor--ready t)
+  (setq emacs-hypervisor--state :completed)
+  (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-finished)
+  (unless noninteractive
+    (message "[Hypervisor] session ready: %s"
+             (or (plist-get payload :status) :ready)))
   t)
 
 (defun emacs-hypervisor-events--handle-shutdown (payload)

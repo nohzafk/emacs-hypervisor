@@ -27,19 +27,13 @@
                             (if (file/exists? candidate) candidate (loop (rest dirs))))))]
           (loop path-dirs))))
 
-  (defn probe-executable [binary path-dirs]
-    (let [resolved (executable-path binary path-dirs)]
-      {:binary binary :ok (not (nil? resolved)) :value resolved}))
-
-  (defn executable-probe-report [unit {:binary binary :ok ok?}]
-    {:name (graph:entry-name unit) :missing (if ok? () (list binary))})
+  (defn missing-executables [unit path-dirs]
+    (filter (fn [binary] (nil? (executable-path binary path-dirs))) (graph:entry-field unit :executable)))
 
   (defn probe-executables [units next-id env]
     (let [path-dirs (path-entries env)]
       {:next-id next-id
-       :reports (map (fn [unit]
-                       (let [binary (first (graph:entry-field unit :executable))]
-                         (executable-probe-report unit (probe-executable binary path-dirs)))) units)}))
+       :reports (map (fn [unit] {:name (graph:entry-name unit) :missing (missing-executables unit path-dirs)}) units)}))
 
   (defn executable-missing-for-unit [reports unit-name]
     (if-let [entry (graph:find-entry reports unit-name)] (get entry :missing ()) ()))

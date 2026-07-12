@@ -2462,6 +2462,49 @@ Return a cons cell of (STATUS . OUTPUT)."
               (should (string-match-p "config load failed" contents)))))
       (kill-buffer emacs-hypervisor--report-buffer-name))))
 
+(ert-deftest emacs-hypervisor-session-ready-marks-ready-without-completing ()
+  (emacs-hypervisor-reset)
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :session-ready
+    '(:reason :startup-complete :status :ready)))
+  (should emacs-hypervisor--ready)
+  (should (eq emacs-hypervisor--state :completed))
+  (should-not emacs-hypervisor--completed)
+  (should (eq (emacs-hypervisor-readiness) 'ready))
+  ;; The live-but-ready session must not block local config reloads.
+  (cl-letf (((symbol-function 'processp) (lambda (_process) t))
+            ((symbol-function 'process-live-p) (lambda (_process) t)))
+    (let ((emacs-hypervisor--process :fake-process))
+      (should-not (emacs-hypervisor-session-active-p)))))
+
+(ert-deftest emacs-hypervisor-session-ready-then-process-death-is-failed ()
+  (emacs-hypervisor-reset)
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :session-ready
+    '(:reason :startup-complete :status :ready)))
+  (should (eq (emacs-hypervisor-readiness) 'ready))
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_process) nil)))
+    (emacs-hypervisor--sentinel :fake-process "exited abnormally\n"))
+  (should (eq emacs-hypervisor--state :failed))
+  (should (eq emacs-hypervisor--shutdown-reason :process-exited))
+  (should (eq (emacs-hypervisor-readiness) 'failed)))
+
+(ert-deftest emacs-hypervisor-shutdown-then-process-death-stays-completed ()
+  (emacs-hypervisor-reset)
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event
+    :shutdown
+    '(:reason :hypervisor-session-complete)))
+  (should emacs-hypervisor--completed)
+  (should (eq emacs-hypervisor--state :completed))
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_process) nil)))
+    (emacs-hypervisor--sentinel :fake-process "finished\n"))
+  (should (eq emacs-hypervisor--state :completed))
+  (should (eq emacs-hypervisor--shutdown-reason :hypervisor-session-complete))
+  (should (eq (emacs-hypervisor-readiness) 'ready)))
+
 (ert-deftest emacs-hypervisor-report-session-finished-displays-initial-buffer-when-report-hidden ()
   (let ((emacs-hypervisor-show-report-on-startup nil)
         (emacs-hypervisor-display-initial-buffer-on-finish t)
