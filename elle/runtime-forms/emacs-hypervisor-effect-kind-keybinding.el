@@ -115,9 +115,31 @@
    (emacs-hypervisor-effect-registry--safe-name-component key)
    emacs-hypervisor-effect-kind-keybinding--state-counter))
 
+(defun emacs-hypervisor-effect-kind-keybinding--other-live-owner-p
+    (state-id state)
+  "Return non-nil when another active record owns STATE's exact binding.
+Two units may bind the same key to the same definition; physically
+removing the key while another owner is still active would make that
+owner's later retraction see a missing binding and warn misleadingly."
+  (cl-some
+   (lambda (record)
+     (and (eq (plist-get record :kind) :keybinding)
+          (eq (plist-get record :status) :active)
+          (let ((metadata (plist-get record :metadata)))
+            (and (not (equal (plist-get metadata :state-id) state-id))
+                 (equal (plist-get metadata :map)
+                        (plist-get state :map-form))
+                 (equal (plist-get metadata :key)
+                        (plist-get state :key))
+                 (equal (plist-get record :function)
+                        (plist-get state :definition))))))
+   emacs-hypervisor-effect-registry-current))
+
 (defun emacs-hypervisor-effect-kind-keybinding--retract
     (state-id)
-  "Remove keybinding effect STATE-ID if the binding has not diverged."
+  "Remove keybinding effect STATE-ID if the binding has not diverged.
+Return `:retracted' when the record was cleaned up, `:diverged' when the
+current binding changed outside Hypervisor and was left in place."
   (let ((state
          (gethash state-id
                   emacs-hypervisor-effect-kind-keybinding--states)))
@@ -133,13 +155,8 @@
              key
              operator)))
       (unwind-protect
-          (if (equal current definition)
-              (progn
-                (emacs-hypervisor-effect-kind-keybinding--unset
-                 map
-                 key
-                 operator)
-                t)
+          (cond
+           ((not (equal current definition))
             (display-warning
              'emacs-hypervisor
              (format
@@ -147,7 +164,18 @@
               key
               (or (plist-get state :unit) "anonymous-unit"))
              :warning)
-            nil)
+            :diverged)
+           ((emacs-hypervisor-effect-kind-keybinding--other-live-owner-p
+             state-id state)
+            ;; Another active record still wants this exact binding; drop
+            ;; only this record and leave the key bound for the other owner.
+            :retracted)
+           (t
+            (emacs-hypervisor-effect-kind-keybinding--unset
+             map
+             key
+             operator)
+            :retracted))
         (remhash
          state-id
          emacs-hypervisor-effect-kind-keybinding--states)))))

@@ -8,14 +8,44 @@
 (defun emacs-hypervisor-selective-reload-unit-after (entry)
   (copy-sequence (plist-get entry :after)))
 
+(defun emacs-hypervisor-selective-reload--strip-effect-source (form)
+  "Return FORM with constructed `:source' keyword arguments replaced by nil.
+Effect rewrites bake the unit's own source line into rewritten register
+calls inside `:body' (see `emacs-hypervisor-effect-aware-reload'), so line
+drift above a unit would otherwise change its identity.  The provenance
+value appears as `(quote PLIST)' in freshly rewritten forms and as a
+canonicalized `(list ...)' constructor in exported entries; both are
+stripped.  The original FORM is never mutated; improper tails and non-cons
+values pass through as-is."
+  (cl-labels
+      ((strip (node)
+         (cond
+          ((not (consp node)) node)
+          ((and (eq (car node) :source)
+                (consp (cdr node))
+                (consp (cadr node))
+                (memq (car (cadr node)) '(quote list)))
+           (cons :source (cons nil (strip (cddr node)))))
+          (t
+           (cons (strip (car node)) (strip (cdr node)))))))
+    (strip form)))
+
 (defun emacs-hypervisor-selective-reload--identity-entry (entry)
   "Return ENTRY without the keys that never participate in unit identity.
 `:source' is provenance: editing text above a unit shifts its line numbers
-without changing the unit.  `:index' is declaration order bookkeeping."
+without changing the unit.  `:index' is declaration order bookkeeping.
+Embedded effect `:source' provenance inside `:body' is stripped for the
+same reason."
   (let (identity)
     (cl-loop for (key value) on entry by #'cddr
              unless (memq key '(:source :index))
-             do (setq identity (append identity (list key value))))
+             do (setq identity
+                      (append identity
+                              (list key
+                                    (if (eq key :body)
+                                        (emacs-hypervisor-selective-reload--strip-effect-source
+                                         value)
+                                      value)))))
     identity))
 
 (defun emacs-hypervisor-selective-reload-unit-equal-p (previous current)

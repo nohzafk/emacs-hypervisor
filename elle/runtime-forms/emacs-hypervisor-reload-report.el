@@ -36,7 +36,8 @@
    (t (format "%S" value))))
 
 (defun emacs-hypervisor--reload-effect-source-form (effect)
-  (plist-get effect :source-form))
+  "Return the original config form recorded in EFFECT's `:source' plist."
+  (plist-get (plist-get effect :source) :form))
 
 (defun emacs-hypervisor--reload-effect-target (effect)
   (or (plist-get effect :target)
@@ -71,9 +72,6 @@
                  (fmt (plist-get metadata :map))
                  (fmt (plist-get metadata :key))
                  (fmt (emacs-hypervisor--reload-effect-function effect))))
-        (:generated-function
-         (format "generated function %s"
-                 (fmt (emacs-hypervisor--reload-effect-function effect))))
         (kind
          (format "%s effect" (fmt kind)))))))
 
@@ -82,6 +80,11 @@
     (dolist (effect (plist-get cleanup :cleaned))
       (emacs-hypervisor--reload-log
        "Reload cleaned %s for %s"
+       (emacs-hypervisor--reload-format-effect effect)
+       name))
+    (dolist (effect (plist-get cleanup :diverged))
+      (emacs-hypervisor--reload-log
+       "Reload left %s in place for %s; live state changed outside Hypervisor"
        (emacs-hypervisor--reload-format-effect effect)
        name))
     (dolist (effect (plist-get cleanup :failed))

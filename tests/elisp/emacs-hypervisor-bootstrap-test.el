@@ -945,6 +945,8 @@ Return a cons cell of (STATUS . OUTPUT)."
           (make-hash-table :test 'equal))
          (emacs-hypervisor-effect-kind-keybinding--state-counter 0)
          previous
+         reports
+         report
          warnings)
     (emacs-hypervisor-reset-declarations)
     (config-unit! keybinding-unit
@@ -960,14 +962,25 @@ Return a cons cell of (STATUS . OUTPUT)."
     (cl-letf (((symbol-function 'display-warning)
                (lambda (type message &optional level buffer-name)
                  (push (list type message level buffer-name) warnings))))
-      (emacs-hypervisor--reload-unit-reports
-       (emacs-hypervisor-selective-reload-diff-units previous nil)
-       nil))
+      (setq reports
+            (emacs-hypervisor--reload-unit-reports
+             (emacs-hypervisor-selective-reload-diff-units previous nil)
+             nil)))
+    (setq report (emacs-hypervisor-test--report reports "keybinding-unit"))
     (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
                 #'emacs-hypervisor-test-command-external))
     (should (equal (caar warnings) 'emacs-hypervisor))
     (should (string-match-p "Skipped keybinding cleanup"
-                            (cadar warnings)))))
+                            (cadar warnings)))
+    ;; The record that was left in place must not be reported as cleaned.
+    (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count
+                (plist-get report :cleanup))
+               0))
+    (should (= (length (plist-get (plist-get report :cleanup) :diverged)) 1))
+    (should (eq (plist-get
+                 (car (plist-get (plist-get report :cleanup) :diverged))
+                 :status)
+                :diverged))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-global-set-key-records-keybinding-effect ()
   (let* ((key "C-c H g")
@@ -1026,6 +1039,49 @@ Return a cons cell of (STATUS . OUTPUT)."
                   #'emacs-hypervisor-test-command-old))
       (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h b")
                   #'emacs-hypervisor-test-command-new)))))
+
+(ert-deftest emacs-hypervisor-effect-keybinding-shared-binding-survives-first-retraction ()
+  (let* ((emacs-hypervisor-test-keymap (make-sparse-keymap))
+         (emacs-hypervisor-effect-registry-current nil)
+         (emacs-hypervisor-effect-registry--instance-counter 0)
+         (emacs-hypervisor-effect-kind-keybinding--states
+          (make-hash-table :test 'equal))
+         (emacs-hypervisor-effect-kind-keybinding--state-counter 0))
+    (emacs-hypervisor-reset-declarations)
+    (config-unit! shared-binding-unit-a
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (config-unit! shared-binding-unit-b
+      :config
+      (keymap-set emacs-hypervisor-test-keymap
+                  "C-c h"
+                  #'emacs-hypervisor-test-command-old))
+    (dolist (unit (emacs-hypervisor-export-config-units))
+      (eval (plist-get unit :body) t))
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-old))
+    ;; Retracting the first owner keeps the binding for the still-active
+    ;; second owner while the record itself counts as cleaned.
+    (let ((cleanup (emacs-hypervisor-effect-registry-retract-unit
+                    "shared-binding-unit-a")))
+      (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
+                 1))
+      (should (null (plist-get cleanup :diverged))))
+    (should (eq (keymap-lookup emacs-hypervisor-test-keymap "C-c h")
+                #'emacs-hypervisor-test-command-old))
+    ;; Retracting the last owner removes the binding without a warning.
+    (let ((cleanup (emacs-hypervisor-effect-registry-retract-unit
+                    "shared-binding-unit-b")))
+      (should (= (emacs-hypervisor-effect-aware-reload-cleanup-count cleanup)
+                 1))
+      (should (null (plist-get cleanup :diverged))))
+    (should-not
+     (emacs-hypervisor-effect-kind-keybinding--lookup
+      emacs-hypervisor-test-keymap
+      "C-c h"
+      'keymap-set))))
 
 (ert-deftest emacs-hypervisor-effect-aware-reload-does-not-synthesize-opaque-effects ()
   (let* ((emacs-hypervisor-test-runtime-value nil)
@@ -3337,6 +3393,82 @@ Return a cons cell of (STATUS . OUTPUT)."
      (emacs-hypervisor-selective-reload-unit-equal-p
       previous
       (plist-put (copy-sequence current) :body '(progn 2 t))))))
+
+(ert-deftest emacs-hypervisor-selective-reload-ignores-embedded-effect-source ()
+  (let (previous current changed)
+    ;; The same unit declared at different source lines embeds different
+    ;; :source provenance into its rewritten effect call.
+    (emacs-hypervisor-reset-declarations)
+    (let ((emacs-hypervisor--current-source
+           '(:file "config.org" :heading "Hooks" :line 4)))
+      (eval '(config-unit! hooked-unit
+               :config
+               (add-hook 'emacs-hypervisor-test-drift-hook #'ignore))
+            t))
+    (setq previous (emacs-hypervisor-export-config-units))
+    (emacs-hypervisor-reset-declarations)
+    (let ((emacs-hypervisor--current-source
+           '(:file "config.org" :heading "Hooks" :line 90)))
+      (eval '(config-unit! hooked-unit
+               :config
+               (add-hook 'emacs-hypervisor-test-drift-hook #'ignore))
+            t))
+    (setq current (emacs-hypervisor-export-config-units))
+    ;; Sanity: line drift really is baked into the exported bodies.
+    (should-not (equal (plist-get (car previous) :body)
+                       (plist-get (car current) :body)))
+    (should (emacs-hypervisor-selective-reload-unit-equal-p
+             (car previous) (car current)))
+    (should (equal (mapcar #'emacs-hypervisor-selective-reload-diff-action
+                           (emacs-hypervisor-selective-reload-diff-units
+                            previous current))
+                   '(:unchanged)))
+    ;; A genuinely different hook target still dirties the unit.
+    (emacs-hypervisor-reset-declarations)
+    (let ((emacs-hypervisor--current-source
+           '(:file "config.org" :heading "Hooks" :line 90)))
+      (eval '(config-unit! hooked-unit
+               :config
+               (add-hook 'emacs-hypervisor-test-other-drift-hook #'ignore))
+            t))
+    (setq changed (emacs-hypervisor-export-config-units))
+    (should-not (emacs-hypervisor-selective-reload-unit-equal-p
+                 (car previous) (car changed)))
+    (should (equal (mapcar #'emacs-hypervisor-selective-reload-diff-action
+                           (emacs-hypervisor-selective-reload-diff-units
+                            previous changed))
+                   '(:changed)))))
+
+(ert-deftest emacs-hypervisor-report-refresh-preserves-point-when-unchanged ()
+  (emacs-hypervisor-reset)
+  (setq emacs-hypervisor--last-progress-message
+        '(:progress :phase :planning :step :plans-emitted :done 5 :total 10))
+  (unwind-protect
+      (progn
+        (emacs-hypervisor--render-report-buffer)
+        (with-current-buffer (emacs-hypervisor-report-buffer)
+          (should (> (point-max) 5))
+          (goto-char 5)
+          (emacs-hypervisor--render-report-buffer)
+          (should (= (point) 5))))
+    (when-let ((buffer (get-buffer emacs-hypervisor--report-buffer-name)))
+      (kill-buffer buffer))))
+
+(ert-deftest emacs-hypervisor-reload-format-effect-falls-back-to-source-form ()
+  ;; A synthetic record carrying only :source exercises the documented
+  ;; fallback path for future effect kinds.
+  (let ((hook-effect
+         '(:kind :hook
+           :source (:form (add-hook 'my-hook #'my-fn)
+                    :file "config.org" :line 4)))
+        (advice-effect
+         '(:kind :advice
+           :source (:form (advice-add 'my-fn :around #'my-advice)
+                    :file "config.org" :line 9))))
+    (should (equal (emacs-hypervisor--reload-format-effect hook-effect)
+                   "hook my-hook -> #'my-fn"))
+    (should (equal (emacs-hypervisor--reload-format-effect advice-effect)
+                   "advice my-fn :around -> #'my-advice"))))
 
 (ert-deftest emacs-hypervisor-effect-record-source-carries-file-and-line ()
   (emacs-hypervisor-reset-declarations)

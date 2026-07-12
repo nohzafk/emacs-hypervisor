@@ -149,14 +149,19 @@
    emacs-hypervisor-effect-registry-current))
 
 (defun emacs-hypervisor-effect-registry-retract (effect)
-  "Retract EFFECT and return the retracted record."
+  "Retract EFFECT and return the updated record.
+A retract form may evaluate to `:diverged' to signal that the live state
+changed outside Hypervisor and was deliberately left in place; the record
+is then marked `:status :diverged' instead of `:retracted'.  Any other
+result counts as a successful retraction."
   (let ((retract (plist-get effect :retract)))
     (unless (and (plist-get effect :reversible) retract)
       (error "Effect is not reversible: %S" effect))
-    (eval retract)
-    (let ((retracted (plist-put (copy-sequence effect) :status :retracted)))
-      (emacs-hypervisor-effect-registry--replace-effect effect retracted)
-      retracted)))
+    (let* ((result (eval retract t))
+           (status (if (eq result :diverged) :diverged :retracted))
+           (updated (plist-put (copy-sequence effect) :status status)))
+      (emacs-hypervisor-effect-registry--replace-effect effect updated)
+      updated)))
 
 (defun emacs-hypervisor-effect-registry-retract-unit (unit)
   "Retract active effects for UNIT.
@@ -165,6 +170,7 @@ Return a cleanup plist compatible with
 `emacs-hypervisor-effect-aware-reload-cleanup-count'."
   (let ((effects (emacs-hypervisor-effect-registry-effects-for-unit unit))
         cleaned
+        diverged
         unsupported
         failures)
     (dolist (effect (reverse effects))
@@ -172,8 +178,11 @@ Return a cleanup plist compatible with
                (plist-get effect :reversible)
                (plist-get effect :retract))
           (condition-case err
-              (push (emacs-hypervisor-effect-registry-retract effect)
-                    cleaned)
+              (let ((updated (emacs-hypervisor-effect-registry-retract
+                              effect)))
+                (if (eq (plist-get updated :status) :diverged)
+                    (push updated diverged)
+                  (push updated cleaned)))
             (error
              (push (append effect
                            (list :error (format "%S" err)))
@@ -181,6 +190,7 @@ Return a cleanup plist compatible with
         (push effect unsupported)))
     (list :effects effects
           :cleaned (nreverse cleaned)
+          :diverged (nreverse diverged)
           :unsupported (nreverse unsupported)
           :failed (nreverse failures))))
 

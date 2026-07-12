@@ -773,12 +773,16 @@
           (with-current-buffer target
             (let ((inhibit-read-only t)
                   (rendered (with-current-buffer source (buffer-string))))
+              ;; Preserve point across refreshes: unchanged content is left
+              ;; alone entirely, and `replace-buffer-contents' keeps point by
+              ;; design.  Only the erase/insert fallback genuinely loses
+              ;; point and needs the explicit reset.
               (unless (equal (buffer-string) rendered)
                 (if (fboundp 'replace-buffer-contents)
                     (replace-buffer-contents source)
                   (erase-buffer)
-                  (insert rendered)))
-              (goto-char (point-min)))))
+                  (insert rendered)
+                  (goto-char (point-min)))))))
       (when (buffer-live-p source)
         (kill-buffer source))))
   nil)
