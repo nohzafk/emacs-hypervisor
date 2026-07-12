@@ -3,6 +3,15 @@
 (require 'emacs-hypervisor-config-paths)
 (require 'emacs-hypervisor-declarations)
 
+;; `ob-tangle' is only loaded inside the tangle function to keep org out of
+;; non-literate startups.  Forward-declare its special variables so the
+;; let-bindings below stay dynamic under standalone byte-compilation.
+(defvar org-babel-default-header-args)
+(defvar org-babel-tangle-comment-format-beg)
+(defvar org-babel-tangle-comment-format-end)
+(declare-function org-babel-merge-params "ob-core")
+(declare-function org-babel-tangle-file "ob-tangle")
+
 (defconst emacs-hypervisor--config-org-elisp-lang-regexp
   (rx string-start (or "elisp" "emacs-lisp") string-end)
   "Org Babel language tags accepted for Emacs Lisp config blocks.")

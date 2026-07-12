@@ -220,6 +220,11 @@ source checkout has already been removed."
   "Return the declared `:ref' or `:tag' for ENTRY, or nil."
   (or (plist-get entry :ref) (plist-get entry :tag)))
 
+(defun emacs-hypervisor-bridge--lock-marker (entry)
+  "Return the concrete revision marker of a lock ENTRY.
+VC entries carry `:rev'; archive entries carry `:version'."
+  (or (plist-get entry :rev) (plist-get entry :version)))
+
 (defun emacs-hypervisor-bridge--lockable-p (entry)
   "Return non-nil when ENTRY's lock entry may drive revision resolution.
 Local paths are inherently unlocked; their lock entries are informational."
@@ -409,6 +414,10 @@ that are not on any archive."
          (dir (emacs-hypervisor-bridge--clone-dir entry))
          (pkg-dir (emacs-hypervisor-bridge--package-dir entry)))
     (unless (package-installed-p sym)
+      ;; A leftover clone from an interrupted install may sit at an arbitrary
+      ;; commit; enforce the declared pin or locked revision before building
+      ;; so adoption is idempotent regardless of how the clone got here.
+      (emacs-hypervisor-bridge--checkout-ref entry)
       ;; Fetch submodules and build any compiled artifact in the checkout before
       ;; package-vc symlinks and byte-compiles it.
       (emacs-hypervisor-bridge--prepare-checkout entry)
@@ -566,9 +575,12 @@ Used by rebuild (before reinstalling) and prune (without reinstalling)."
       (ignore-errors
         (when desc
           (package-delete desc t t))))
-    ;; 3. Delete staging clone and package directories.
+    ;; 3. Delete staging clone and package directories.  Tolerate filesystem
+    ;; errors (locked files, permissions) like the other purge steps so one
+    ;; stubborn path does not abort the purge.
     (dolist (dir (list clone-dir pkg-dir))
-      (emacs-hypervisor-bridge--delete-cache-path dir))
+      (ignore-errors
+        (emacs-hypervisor-bridge--delete-cache-path dir)))
     ;; 4. Purge stale native-compiled .eln files.
     (emacs-hypervisor-bridge--purge-eln-cache name)
     ;; 5. Clear in-memory package.el state.

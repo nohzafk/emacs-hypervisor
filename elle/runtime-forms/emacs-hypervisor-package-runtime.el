@@ -2,6 +2,15 @@
 
 (require 'cl-lib)
 (require 'emacs-hypervisor-declarations)
+(require 'emacs-hypervisor-session-base)
+(require 'emacs-hypervisor-package-lock)
+(require 'emacs-hypervisor-package-bridge)
+
+(declare-function emacs-hypervisor-report-note-package-event
+                  "emacs-hypervisor-report")
+;; Provided by the trusted kernel (emacs-hypervisor-sexp-rpc.el), which is
+;; always loaded before the session helpers are installed.
+(declare-function emacs-hypervisor-send-event "emacs-hypervisor-sexp-rpc")
 
 (defvar emacs-hypervisor-runtime-packages-installation-active nil)
 (defvar emacs-hypervisor-runtime-packages-finished-sent nil)
@@ -166,45 +175,83 @@ any config unit that depends on it."
   "List of (:name NAME :previous-rev R1 :current-rev R2 :status S) plists
 from the most recent upgrade operation, most recent first.")
 
-(defun emacs-hypervisor-runtime--upgrade-entry (entry)
+(defun emacs-hypervisor-runtime--lock-marker (name)
+  "Return the current lock revision marker for package NAME, or nil."
+  (emacs-hypervisor-bridge--lock-marker
+   (emacs-hypervisor-package-lock-entry name)))
+
+(defun emacs-hypervisor-runtime--archive-upgrade-candidate-p (entry)
+  "Return non-nil when ENTRY is an unpinned archive package.
+Only these entries need a fresh archive index before an upgrade."
+  (and (not (emacs-hypervisor-bridge--vc-entry-p entry))
+       (not (emacs-hypervisor-bridge--declared-pin entry))))
+
+(defun emacs-hypervisor-runtime--refresh-archive-index ()
+  "Refresh archive contents; return nil on success or the error string."
+  (condition-case err
+      (progn
+        (package-refresh-contents)
+        nil)
+    (error (format "%S" err))))
+
+(defun emacs-hypervisor-runtime--upgrade-entry (entry &optional refresh-error)
   "Upgrade declared ENTRY, ignoring the lockfile.  Return a report plist.
-A declared `:ref' or `:tag' pins the package; upgrade is then a no-op."
+A declared `:ref' or `:tag' pins the package; upgrade is then a no-op.
+REFRESH-ERROR is the failure string of an earlier archive-index refresh;
+archive entries are reported `:failed' with it instead of rebuilding.
+The caller is responsible for refreshing the archive index when ENTRY is
+an unpinned archive package (see
+`emacs-hypervisor-runtime--refresh-archive-index')."
   (let* ((name (plist-get entry :name))
-         (previous (plist-get (emacs-hypervisor-package-lock-entry name) :rev))
+         (previous (emacs-hypervisor-runtime--lock-marker name))
          report)
-    (if (emacs-hypervisor-bridge--declared-pin entry)
-        (progn
-          (message "[Hypervisor] %s is pinned by declaration, skipped." name)
-          (setq report (list :name name :status :pinned
-                             :previous-rev previous :current-rev previous)))
-      (unless (emacs-hypervisor-bridge--vc-entry-p entry)
-        ;; Archive upgrade needs a fresh index to see newer versions.
-        (package-refresh-contents))
+    (cond
+     ((emacs-hypervisor-bridge--declared-pin entry)
+      (message "[Hypervisor] %s is pinned by declaration, skipped." name)
+      (setq report (list :name name :status :pinned
+                         :previous-rev previous :current-rev previous)))
+     ((and refresh-error
+           (emacs-hypervisor-runtime--archive-upgrade-candidate-p entry))
+      ;; Without a fresh index the archive upgrade cannot see newer
+      ;; versions; report the network failure instead of rebuilding blind.
+      (setq report (list :name name :status :failed
+                         :previous-rev previous
+                         :reason refresh-error)))
+     (t
       (let ((emacs-hypervisor-bridge-ignore-lock t)
             failure-reason)
-        (emacs-hypervisor-bridge-rebuild
-         entry
-         (lambda (_installed-name))
-         (lambda (_failed-name reason)
-           (unless failure-reason (setq failure-reason reason))))
+        (condition-case err
+            (emacs-hypervisor-bridge-rebuild
+             entry
+             (lambda (_installed-name))
+             (lambda (_failed-name reason)
+               (unless failure-reason (setq failure-reason reason))))
+          (error
+           (unless failure-reason (setq failure-reason (format "%S" err)))))
         (if failure-reason
             (setq report (list :name name :status :failed
                                :previous-rev previous
                                :reason failure-reason))
-          (let ((current (plist-get
-                          (emacs-hypervisor-package-lock-entry name) :rev)))
+          (let ((current (emacs-hypervisor-runtime--lock-marker name)))
             (message "[Hypervisor] Upgraded %s: %s -> %s"
                      name (or previous "?") (or current "?"))
             (setq report (list :name name :status :ok
                                :previous-rev previous
-                               :current-rev current))))))
+                               :current-rev current)))))))
     (push report emacs-hypervisor-last-upgrade-report)
     report))
+
+(defun emacs-hypervisor-runtime--upgrade-entry-with-refresh (entry)
+  "Upgrade a single ENTRY, refreshing the archive index when needed."
+  (emacs-hypervisor-runtime--upgrade-entry
+   entry
+   (and (emacs-hypervisor-runtime--archive-upgrade-candidate-p entry)
+        (emacs-hypervisor-runtime--refresh-archive-index))))
 
 (defun emacs-hypervisor-runtime-upgrade-package (name)
   "Upgrade declared package NAME during startup, driven by the host.
 Signals on failure so the host derives the report from the eval response."
-  (let ((report (emacs-hypervisor-runtime--upgrade-entry
+  (let ((report (emacs-hypervisor-runtime--upgrade-entry-with-refresh
                  (emacs-hypervisor-runtime--package-entry name))))
     (if (eq (plist-get report :status) :failed)
         (error "%s" (plist-get report :reason))
@@ -218,7 +265,7 @@ Provides interactive completion for all declared packages."
    (list (completing-read "Upgrade package: "
                           (mapcar (lambda (e) (plist-get e :name))
                                   emacs-hypervisor-packages))))
-  (let ((report (emacs-hypervisor-runtime--upgrade-entry
+  (let ((report (emacs-hypervisor-runtime--upgrade-entry-with-refresh
                  (emacs-hypervisor-runtime--package-entry name))))
     (when (eq (plist-get report :status) :failed)
       (error "Package %s upgrade failed: %s"
@@ -226,13 +273,22 @@ Provides interactive completion for all declared packages."
     report))
 
 (defun emacs-hypervisor-upgrade-all-packages ()
-  "Upgrade every declared package to its declaration target."
+  "Upgrade every declared package to its declaration target.
+The archive index is refreshed once for the whole batch; a refresh failure
+fails the archive entries with the network reason while VC entries still
+upgrade.  A per-package failure never aborts the rest of the batch."
   (interactive)
   (setq emacs-hypervisor-last-upgrade-report nil)
-  (let ((reports
-         (mapcar (lambda (entry)
-                   (emacs-hypervisor-runtime--upgrade-entry entry))
-                 (emacs-hypervisor-export-packages))))
+  (let* ((entries (emacs-hypervisor-export-packages))
+         (refresh-error
+          (when (cl-some #'emacs-hypervisor-runtime--archive-upgrade-candidate-p
+                         entries)
+            (emacs-hypervisor-runtime--refresh-archive-index)))
+         (reports
+          (mapcar (lambda (entry)
+                    (emacs-hypervisor-runtime--upgrade-entry
+                     entry refresh-error))
+                  entries)))
     (message "[Hypervisor] Upgrade finished: %d ok, %d pinned, %d failed."
              (cl-count :ok reports :key (lambda (r) (plist-get r :status)))
              (cl-count :pinned reports :key (lambda (r) (plist-get r :status)))
@@ -254,10 +310,23 @@ packages, so archive dependencies are never pruned.  Asks for confirmation."
                      (length orphans)
                      (if (cdr orphans) "s" "")
                      (string-join orphans ", ")))
-        (dolist (name orphans)
-          (emacs-hypervisor-bridge-remove-package name))
-        (message "[Hypervisor] Pruned %d package%s."
-                 (length orphans) (if (cdr orphans) "s" ""))))
+        (let (failures)
+          (dolist (name orphans)
+            (condition-case err
+                (emacs-hypervisor-bridge-remove-package name)
+              (error
+               (push (cons name (format "%S" err)) failures))))
+          (setq failures (nreverse failures))
+          (if failures
+              (message "[Hypervisor] Pruned %d of %d packages; failed: %s"
+                       (- (length orphans) (length failures))
+                       (length orphans)
+                       (mapconcat (lambda (failure)
+                                    (format "%s (%s)"
+                                            (car failure) (cdr failure)))
+                                  failures ", "))
+            (message "[Hypervisor] Pruned %d package%s."
+                     (length orphans) (if (cdr orphans) "s" ""))))))
     orphans))
 
 (setq emacs-hypervisor-runtime-packages-installation-active nil)

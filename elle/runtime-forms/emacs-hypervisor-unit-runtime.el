@@ -2,6 +2,10 @@
 
 (require 'cl-lib)
 (require 'emacs-hypervisor-declarations)
+(require 'emacs-hypervisor-session-base)
+
+(declare-function emacs-hypervisor-report-note-unit-event
+                  "emacs-hypervisor-report")
 
 (defun emacs-hypervisor-runtime--unit-entry (name)
   (cl-find name emacs-hypervisor-config-units

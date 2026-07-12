@@ -49,12 +49,11 @@ Return a cons cell of (STATUS . OUTPUT)."
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(defvar emacs-hypervisor-installed-packages nil)
-(defvar emacs-hypervisor-execution-events nil)
 (defvar emacs-hypervisor-test-runtime-value nil)
 (defvar emacs-hypervisor-test-unchanged-counter nil)
 (defvar emacs-hypervisor-home-directory nil)
 
+(require 'emacs-hypervisor-session-base)
 (require 'emacs-hypervisor-package-bridge)
 (require 'emacs-hypervisor-package-runtime)
 (require 'emacs-hypervisor-effect-registry)
@@ -2975,6 +2974,80 @@ Return a cons cell of (STATUS . OUTPUT)."
          (progn ,@body)
        (delete-directory lock-dir t))))
 
+(ert-deftest emacs-hypervisor-session-base-defines-and-resets-session-vars ()
+  (should (featurep 'emacs-hypervisor-session-base))
+  (should (boundp 'emacs-hypervisor-execution-events))
+  (should (boundp 'emacs-hypervisor-installed-packages))
+  ;; The module is (re)evaluated at every session start; loading it again
+  ;; must reset the session accumulators.
+  (let ((emacs-hypervisor-execution-events '(:stale-event))
+        (emacs-hypervisor-installed-packages '("stale-package")))
+    (load "emacs-hypervisor-session-base" nil t)
+    (should (null emacs-hypervisor-execution-events))
+    (should (null emacs-hypervisor-installed-packages))))
+
+(ert-deftest emacs-hypervisor-bridge-adopt-enforces-locked-revision ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "locked-rev"))
+    (let ((entry '(:name "vc-tool" :repo "example/vc-tool"))
+          operations)
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-init)
+                 (lambda () :ready))
+                ((symbol-function 'emacs-hypervisor-bridge--installed-p)
+                 (lambda (_entry) nil))
+                ((symbol-function 'package-installed-p)
+                 (lambda (_package &optional _min-version) nil))
+                ((symbol-function 'emacs-hypervisor-bridge--clone-present-p)
+                 (lambda (_entry) t))
+                ((symbol-function 'emacs-hypervisor-bridge--checkout-ref)
+                 (lambda (checkout-entry)
+                   (push (list :checkout
+                               (emacs-hypervisor-bridge--resolved-rev
+                                checkout-entry))
+                         operations)))
+                ((symbol-function 'emacs-hypervisor-bridge--prepare-checkout)
+                 (lambda (_entry) (push '(:prepare) operations)))
+                ((symbol-function 'emacs-hypervisor-bridge--delete-cache-path)
+                 (lambda (_path) nil))
+                ((symbol-function 'package-vc-install-from-checkout)
+                 (lambda (_dir _name) (push '(:install) operations)))
+                ((symbol-function 'emacs-hypervisor-bridge--record-vc-lock)
+                 (lambda (_entry) "locked-rev"))
+                ((symbol-function 'emacs-hypervisor-bridge--note-present)
+                 (lambda (_entry) nil)))
+        (emacs-hypervisor-bridge-install-batch
+         (list entry)
+         (lambda (_name))
+         (lambda (name reason)
+           (ert-fail (format "install failed for %s: %s" name reason))))
+        ;; A pre-existing clone is adopted at the locked revision, before
+        ;; the build step runs.
+        (should (equal (nreverse operations)
+                       '((:checkout "locked-rev")
+                         (:prepare)
+                         (:install))))))))
+
+(ert-deftest emacs-hypervisor-package-lock-rejects-mismatched-schema ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "zeta" :kind :vc :rev "aaa"))
+    (should (emacs-hypervisor-package-lock-read))
+    ;; Rewrite the lockfile with a bumped schema version.
+    (with-temp-file (emacs-hypervisor-package-lock--file)
+      (insert (format "%S"
+                      (list :schema-version
+                            (1+ emacs-hypervisor-package-lock-schema-version)
+                            :entries '((:name "zeta" :kind :vc :rev "aaa"))
+                            :future-field :do-not-destroy))))
+    (let (warnings)
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (_type msg &rest _args) (push msg warnings))))
+        (should (null (emacs-hypervisor-package-lock-read)))
+        (should (null (emacs-hypervisor-package-lock-entry "zeta")))
+        (should warnings)
+        (should (string-match-p "schema version" (car warnings)))))))
+
 (ert-deftest emacs-hypervisor-package-lock-roundtrip-is-sorted ()
   (emacs-hypervisor-test--with-temp-lock
     (should (null (emacs-hypervisor-package-lock-read)))
@@ -3057,6 +3130,106 @@ Return a cons cell of (STATUS . OUTPUT)."
           (should (eq (plist-get report :status) :ok))
           (should (equal (plist-get report :previous-rev) "old-rev"))
           (should (equal (plist-get report :current-rev) "new-rev")))))))
+
+(ert-deftest emacs-hypervisor-upgrade-reports-archive-version-delta ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "archive-tool" :kind :archive :version (1 0)))
+    (let ((entry '(:name "archive-tool")))
+      (cl-letf (((symbol-function 'package-refresh-contents)
+                 (lambda (&rest _args) t))
+                ((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (_entry on-installed _on-failed)
+                   (emacs-hypervisor-package-lock-put
+                    '(:name "archive-tool" :kind :archive :version (2 0)))
+                   (funcall on-installed "archive-tool"))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry-with-refresh
+                       entry)))
+          (should (eq (plist-get report :status) :ok))
+          (should (equal (plist-get report :previous-rev) '(1 0)))
+          (should (equal (plist-get report :current-rev) '(2 0))))))))
+
+(ert-deftest emacs-hypervisor-upgrade-all-refreshes-archive-index-once ()
+  (emacs-hypervisor-test--with-temp-lock
+    (let ((refresh-count 0)
+          rebuilt)
+      (cl-letf (((symbol-function 'emacs-hypervisor-export-packages)
+                 (lambda () '((:name "archive-a") (:name "archive-b"))))
+                ((symbol-function 'package-refresh-contents)
+                 (lambda (&rest _args) (cl-incf refresh-count)))
+                ((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (entry on-installed _on-failed)
+                   (push (plist-get entry :name) rebuilt)
+                   (funcall on-installed (plist-get entry :name)))))
+        (emacs-hypervisor-upgrade-all-packages)
+        (should (= refresh-count 1))
+        (should (equal (nreverse rebuilt) '("archive-a" "archive-b")))))))
+
+(ert-deftest emacs-hypervisor-upgrade-all-survives-archive-refresh-failure ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "old-rev"))
+    (let (rebuilt)
+      (cl-letf (((symbol-function 'emacs-hypervisor-export-packages)
+                 (lambda () '((:name "archive-tool")
+                              (:name "vc-tool" :repo "owner/vc-tool"))))
+                ((symbol-function 'package-refresh-contents)
+                 (lambda (&rest _args) (error "network down")))
+                ((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (entry on-installed _on-failed)
+                   (push (plist-get entry :name) rebuilt)
+                   (when (equal (plist-get entry :name) "vc-tool")
+                     (emacs-hypervisor-package-lock-put
+                      '(:name "vc-tool" :kind :vc :rev "new-rev")))
+                   (funcall on-installed (plist-get entry :name)))))
+        (let* ((reports (emacs-hypervisor-upgrade-all-packages))
+               (archive-report
+                (cl-find "archive-tool" reports
+                         :key (lambda (r) (plist-get r :name)) :test #'equal))
+               (vc-report
+                (cl-find "vc-tool" reports
+                         :key (lambda (r) (plist-get r :name)) :test #'equal)))
+          ;; The archive entry fails with the network reason, is never
+          ;; rebuilt blind, and the VC entry still upgrades.
+          (should (eq (plist-get archive-report :status) :failed))
+          (should (string-match-p "network down"
+                                  (plist-get archive-report :reason)))
+          (should (equal rebuilt '("vc-tool")))
+          (should (eq (plist-get vc-report :status) :ok))
+          (should (equal (plist-get vc-report :current-rev) "new-rev")))))))
+
+(ert-deftest emacs-hypervisor-upgrade-entry-failure-yields-failed-report ()
+  (emacs-hypervisor-test--with-temp-lock
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool")))
+      (cl-letf (((symbol-function 'emacs-hypervisor-bridge-rebuild)
+                 (lambda (_entry _on-installed _on-failed)
+                   (error "purge exploded"))))
+        (let ((report (emacs-hypervisor-runtime--upgrade-entry entry)))
+          (should (eq (plist-get report :status) :failed))
+          (should (string-match-p "purge exploded"
+                                  (plist-get report :reason))))))))
+
+(ert-deftest emacs-hypervisor-prune-continues-after-removal-failure ()
+  (let ((emacs-hypervisor-packages nil)
+        removed
+        messages)
+    (cl-letf (((symbol-function 'emacs-hypervisor-bridge-orphaned-packages)
+               (lambda (_declared) '("bad-orphan" "good-orphan")))
+              ((symbol-function 'yes-or-no-p) (lambda (_prompt) t))
+              ((symbol-function 'emacs-hypervisor-bridge-remove-package)
+               (lambda (name)
+                 (if (equal name "bad-orphan")
+                     (error "locked file")
+                   (push name removed))))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) messages))))
+      (emacs-hypervisor-prune-packages))
+    (should (equal removed '("good-orphan")))
+    (should (cl-some (lambda (m) (string-match-p "Pruned 1 of 2" m))
+                     messages))
+    (should (cl-some (lambda (m) (string-match-p "bad-orphan" m))
+                     messages))))
 
 (ert-deftest emacs-hypervisor-prune-keep-set-includes-requires-closure ()
   (let* ((temp-home (make-temp-file "hypervisor-prune-test" t))

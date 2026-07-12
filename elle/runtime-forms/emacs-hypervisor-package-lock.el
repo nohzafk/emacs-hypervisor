@@ -20,16 +20,29 @@
                         (emacs-hypervisor--config-directory))))
 
 (defun emacs-hypervisor-package-lock-read ()
-  "Return the parsed lock plist, or nil when absent or unreadable."
+  "Return the parsed lock plist, or nil when absent or unreadable.
+A lockfile written with a different schema version is treated as
+unreadable: adopting it would rewrite the file and destroy fields this
+code does not know about."
   (let ((file (emacs-hypervisor-package-lock--file)))
     (when (file-readable-p file)
       (condition-case nil
           (with-temp-buffer
             (insert-file-contents file)
-            (let ((data (read (current-buffer))))
-              (and (listp data)
-                   (plist-get data :schema-version)
-                   data)))
+            (let* ((data (read (current-buffer)))
+                   (version (and (listp data)
+                                 (plist-get data :schema-version))))
+              (cond
+               ((null version) nil)
+               ((not (equal version
+                             emacs-hypervisor-package-lock-schema-version))
+                (display-warning
+                 'emacs-hypervisor
+                 (format "Ignoring lockfile %s: schema version %S, expected %S"
+                         file version
+                         emacs-hypervisor-package-lock-schema-version))
+                nil)
+               (t data))))
         (error nil)))))
 
 (defun emacs-hypervisor-package-lock-entries ()
@@ -74,7 +87,9 @@
 (defun emacs-hypervisor-package-lock-remove (name)
   "Remove the lock entry for package NAME when present."
   (let ((entries (emacs-hypervisor-package-lock-entries)))
-    (when (emacs-hypervisor-package-lock-entry name)
+    (when (cl-find name entries
+                   :key (lambda (e) (plist-get e :name))
+                   :test #'equal)
       (emacs-hypervisor-package-lock--write
        (cl-remove name entries
                   :key (lambda (e) (plist-get e :name))
