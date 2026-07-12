@@ -77,8 +77,7 @@ check-docs:
         --exclude-dir=.elle-mcp \
         --exclude-dir=.agent-shell \
         --exclude-dir=.agents \
-        --exclude-dir=target \
-        --exclude-dir=improvements; then
+        --exclude-dir=target; then
       echo "error: machine-specific /Users/ paths found in markdown" >&2
       exit 1
     fi
