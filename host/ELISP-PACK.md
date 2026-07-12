@@ -52,32 +52,22 @@ Elle treats each static Elisp module as a spec with:
 - `:forms` or `:source` --- exactly one; `:forms` is the packed path,
   `:source` is the raw embedded source fallback
 
-Currently `session-base` uses packed `:forms` loading. The remaining static
-modules still use source-backed loading. The packer is ready for wider
-`:forms` rollout.
+Currently **all** modules load via `:source`: `elle/runtime-forms.lisp`
+builds `{:path path :source source}` for every manifest entry, and
+`host/build.rs` does not call `elisp_pack`. The packer is implemented and
+unit-tested (`cargo test --manifest-path host/elisp_pack/Cargo.toml`), but it
+is not wired into the host build; the `:forms` rollout is pending.
 
 ## Scope
 
-Packable files (all under `elle/runtime-forms/`):
+The packable-file inventory is `elle/runtime-forms/modules.manifest` — the
+same manifest the host build reads to embed module sources, so packer
+coverage stays aligned with the runtime inventory. Examples of entries:
 
 ```text
-modules.manifest                         # embedded runtime module inventory
-emacs-hypervisor-session-base.el        # session lifecycle
 emacs-hypervisor-declarations.el        # package!/config-unit! macros
 emacs-hypervisor-package-bridge.el      # package.el/package-vc bridge
-emacs-hypervisor-package-runtime.el     # package event handling
-emacs-hypervisor-unit-runtime.el        # unit execution helpers
-emacs-hypervisor-selective-reload.el    # reload diffing + scheduling
-emacs-hypervisor-config-loader.el       # startup/reload config loading
-emacs-hypervisor-reload-policy.el       # Emacs-resident soft reload policy
-emacs-hypervisor-reload-report.el       # reload reports and log formatting
 emacs-hypervisor-effect-registry.el     # generic effect records
-emacs-hypervisor-effect-aware-reload.el # effect rewrite dispatcher + cleanup
-emacs-hypervisor-effect-kind-hook.el    # add-hook effect kind
-emacs-hypervisor-effect-kind-advice.el  # advice-add effect kind
-emacs-hypervisor-effect-kind-keybinding.el # keybinding effect kind
-emacs-hypervisor-compose.el             # wires reload into M-x command
-emacs-hypervisor-report-core.el         # report data structures
 emacs-hypervisor-report.el              # startup report rendering
 ```
 

@@ -470,7 +470,6 @@ startup session.
 | `emacs-hypervisor-display-initial-buffer-on-finish` | `t` | When the startup report is hidden, display `initial-buffer-choice` after a clean startup. |
 | `emacs-hypervisor-clone-concurrency` | `8` | Maximum number of parallel git clones during initial package install. |
 | `emacs-hypervisor-default-host` | `"github"` | Host assumed for `:repo` shorthand when no `:host` is given. |
-| `emacs-hypervisor-extensions` | `nil` | Comma-separated extension features to enable, for example `"mermaid"` or `"mermaid,egui"`; `nil` disables extensions. |
 
 ## Extension Design
 
@@ -479,10 +478,19 @@ typed requests over the existing `sexp-rpc` pipe. They are local-only: no
 network listener is opened, and Emacs sends data payloads rather than remote
 `:eval` forms.
 
+Extensions activate automatically: when an extension's backing native plugin
+is embedded in the binary and loads successfully, its handler is registered
+and the extension is available for the whole session. There is no opt-in
+option and no startup validation step — if a plugin fails to import, its
+extension key is simply absent from the handler registry, and any later
+`:extension-call` request for it receives a per-request
+`extension-unavailable` error.
+
 The extension layer is intentionally separate from individual extension features:
 
-- `emacs-hypervisor-extensions.el` owns the generic extension list option and
-  feature settings registration.
+- `emacs-hypervisor-extensions.el` owns extension feature settings
+  registration (feature modules contribute settings plists that travel to
+  Elle in the session data).
 - `elle/extensions.lisp` owns extension request dispatch and handler lookup.
 - Each extension feature adds its own Emacs runtime module and Elle handler module.
 
@@ -495,13 +503,10 @@ dispatcher.
 
 The first extension feature renders Mermaid diagrams in Markdown buffers through
 the Elle [`mmdflux`](https://github.com/kevinswiber/mmdflux#readme) plugin.
-Enable it from `config.org` or `config.el`:
+Mermaid rendering is available once the binary is built with the `mmdflux`
+plugin (`just build`) — no configuration required.
 
-```elisp
-(setq emacs-hypervisor-extensions "mermaid")
-```
-
-When enabled, Hypervisor installs `emacs-hypervisor-markdown-mermaid-mode` for
+Hypervisor installs `emacs-hypervisor-markdown-mermaid-mode` for
 `markdown-mode`, `markdown-ts-mode`, and `gfm-mode`. The mode renders a bounded
 preview below fenced Mermaid blocks natively as a vector SVG image, falling back to ASCII art
 otherwise. Previews display the compatible SVG returned by mmdflux directly. The inline image preview is capped by
@@ -637,8 +642,10 @@ idempotently across ref changes.
 
 | Document | Topic |
 |---|---|
-| [`PROTOCOL.md`](PROTOCOL.md) | sexp-rpc message shape and failure payloads |
+| [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | sexp-rpc message shape and failure payloads |
 | [`docs/architecture.md`](docs/architecture.md) | Three-stage bootstrap, Lisp-to-Lisp data flow, source map |
+| [`docs/architecture-mermaid.md`](docs/architecture-mermaid.md) | Architecture diagrams (Mermaid) |
+| [`docs/emacs-image-horizontal-scroll.md`](docs/emacs-image-horizontal-scroll.md) | Horizontal scrolling over inline image previews |
 | [`docs/reload.md`](docs/reload.md) | Selective reload design, effect-aware reload API |
 | [`docs/effect-system.md`](docs/effect-system.md) | Effect registry contract, adding new effect kinds |
 | [`docs/spec-lockfile-check-source-map.md`](docs/spec-lockfile-check-source-map.md) | Lockfile, `check`, and source-mapping design and status |

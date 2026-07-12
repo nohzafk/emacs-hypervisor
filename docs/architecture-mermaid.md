@@ -50,7 +50,7 @@ Discovery order at startup:
 1. `EMACS_HYPERVISOR_EMBEDDED_ELLE_PLUGIN_MMDFLUX_PATH` environment variable (set by the host binary when embedding)
 2. Fallback string `"plugin/mmdflux"`
 
-The Elle `(import spec)` call is wrapped in `(protect ...)`. If the import fails, `load-mmdflux` returns `nil` and `make-handler` returns `nil`, causing `register` to skip adding `:mermaid` to the handler map. The extension is effectively absent; if the session has `mermaid` listed in its extensions, `unsupported-extensions` will detect the mismatch and the runtime will raise an error.
+The Elle `(import spec)` call is wrapped in `(protect ...)`. If the import fails, `load-mmdflux` returns `nil` and `make-handler` returns `nil`, causing `register` to skip adding `:mermaid` to the handler map. The extension is then simply absent for the session: any later `:extension-call` request for `:mermaid` receives a per-request `extension-unavailable` error from the generic dispatcher (`elle/extensions.lisp`). There is no startup validation step.
 
 Exported functions used by the extension:
 

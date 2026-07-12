@@ -12,50 +12,43 @@ The current project direction is:
 - Emacs role: minimal trusted kernel + declaration/export + evaluation surface
 - Elle role: graph resolution, boot policy, orchestration, and runtime code generation
 
-This repository is still in spike mode.
 The current implementation history lives in
-[PROJECT-LOG.md](/Users/randall/projects/emacs-hypervisor/PROJECT-LOG.md).
+[PROJECT-LOG.md](PROJECT-LOG.md).
 The current architecture target lives in
-[README.md](/Users/randall/projects/emacs-hypervisor/README.md).
+[README.md](README.md).
 
 ## Layout
 
-- [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
+- [README.md](README.md)
   - current architecture target and Lisp-to-Lisp runtime boundary
-- [config.org](/Users/randall/projects/emacs-hypervisor/config.org)
-  - primary repo literate config declarations source used when provisioning a test home
-- [config](/Users/randall/projects/emacs-hypervisor/config)
-  - repo-local support files loaded by the test config
-- [env](/Users/randall/projects/emacs-hypervisor/env)
-  - optional env snapshot example in the same Lisp format emitted by `emacs-hypervisor env`
-- [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
-  - install-time trusted Emacs kernel template: process, framing, async filter, RPC dispatch
-- [elle/runtime-forms/emacs-hypervisor-declarations.el](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms/emacs-hypervisor-declarations.el)
+- test config and env snapshots are generated, not checked in:
+  [scripts/emacs-home-e2e](scripts/emacs-home-e2e) provisions a throwaway
+  Emacs home with a generated `config.org` (or copies one from
+  `--config-source PATH`), and `emacs-hypervisor env` writes an env snapshot
+  into the provisioned home
+- [host/emacs-kernel/emacs-hypervisor-bootstrap.el](host/emacs-kernel/emacs-hypervisor-bootstrap.el)
+  - install-time trusted Emacs kernel: process, framing, async filter, RPC dispatch
+- [elle/runtime-forms/emacs-hypervisor-declarations.el](elle/runtime-forms/emacs-hypervisor-declarations.el)
   - `package!` and `config-unit!` declaration/export surface
-- [elle](/Users/randall/projects/emacs-hypervisor/elle)
+- [elle](elle)
   - shared Elle protocol, graph, preflight, planning, execution, and hypervisor modules
   - this is the intended long-term home for orchestration and runtime policy
-- [elle/runtime-forms.lisp](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms.lisp)
+- [elle/runtime-forms.lisp](elle/runtime-forms.lisp)
   - coordinator for Elle-emitted transient Emacs helper forms
-- [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
+- [elle/runtime-forms](elle/runtime-forms)
   - split emitted runtime modules sent into Emacs at session startup
   - includes shared base state, package bridge/runtime (package-vc-install), and unit execution helpers
-- [elle/hypervisor.lisp](/Users/randall/projects/emacs-hypervisor/elle/hypervisor.lisp)
-  - non-spike Elle backend entrypoint using the shared runtime modules
-- [tests/elle/hypervisor-runtime.lisp](/Users/randall/projects/emacs-hypervisor/tests/elle/hypervisor-runtime.lisp)
+- [elle/hypervisor.lisp](elle/hypervisor.lisp)
+  - Elle backend entrypoint using the shared runtime modules
+- [tests/elle/hypervisor-runtime.lisp](tests/elle/hypervisor-runtime.lisp)
   - regression coverage for boot policy, planning, and execution semantics extracted from the old spikes
-- [tests/elisp/emacs-hypervisor-bootstrap-test.el](/Users/randall/projects/emacs-hypervisor/tests/elisp/emacs-hypervisor-bootstrap-test.el)
+- [tests/elisp/emacs-hypervisor-bootstrap-test.el](tests/elisp/emacs-hypervisor-bootstrap-test.el)
   - batch ERT coverage for the trusted Emacs kernel, env injection, and package runtime callbacks
-- [PROTOCOL.md](/Users/randall/projects/emacs-hypervisor/PROTOCOL.md)
+- [docs/PROTOCOL.md](docs/PROTOCOL.md)
   - protocol notes and current message semantics
-- [bin](/Users/randall/projects/emacs-hypervisor/bin)
-  - user-facing helper entrypoints
-  - includes `bin/hypervisor-env` to scrape the current shell environment into
-    repo-root `env`
-- [scripts](/Users/randall/projects/emacs-hypervisor/scripts)
+- [scripts](scripts)
   - developer analysis programs and MCP/tooling wrappers
-- [experiments/README.md](/Users/randall/projects/emacs-hypervisor/experiments/README.md)
-  - archive note mapping removed spike code to the current regression coverage
+  - env snapshots are produced by the `emacs-hypervisor env` subcommand
 
 ## Home Environment Injection
 
@@ -97,15 +90,18 @@ For this codebase, an agent should use them in this order:
 3. Prefer compile-aware refactoring tools over blind text edits when changing Elle code at scale.
 4. Re-analyze after edits so the semantic graph matches source reality.
 
+Documentation hygiene: `just check-docs` fails when a machine-specific
+home-directory absolute path appears in tracked markdown; it runs as part
+of `just test`.
+
 ### Local Analysis
 
 Use local analysis first when working on shared files under
-[elle](/Users/randall/projects/emacs-hypervisor/elle). Historical numbered
-spikes no longer live in the repo as runnable sources; use
-[experiments/README.md](/Users/randall/projects/emacs-hypervisor/experiments/README.md)
-for the archive mapping and
-[tests/elle/hypervisor-runtime.lisp](/Users/randall/projects/emacs-hypervisor/tests/elle/hypervisor-runtime.lisp)
-for the preserved behavioral checks.
+[elle](elle). Historical numbered spikes no longer live in the repo as
+runnable sources; use
+[tests/elle/hypervisor-runtime.lisp](tests/elle/hypervisor-runtime.lisp) and
+[tests/elisp/emacs-hypervisor-bootstrap-test.el](tests/elisp/emacs-hypervisor-bootstrap-test.el)
+for the preserved spike regression coverage.
 
 Typical upstream pattern:
 
@@ -130,7 +126,7 @@ just analyze-runtime
 ```
 
 This runs Elle local analysis over the shared modules under
-[elle](/Users/randall/projects/emacs-hypervisor/elle).
+[elle](elle).
 
 ### MCP / Knowledge Graph
 
@@ -190,15 +186,15 @@ Verified on this machine:
 - MCP `initialize`
 - `tools/list`
 - `tools/call` with `analyze_file` against
-  [elle/boot-policy.lisp](/Users/randall/projects/emacs-hypervisor/elle/boot-policy.lisp)
+  [elle/boot-policy.lisp](elle/boot-policy.lisp)
 - `tools/call` with `analyze_file` against
-  [elle/execution.lisp](/Users/randall/projects/emacs-hypervisor/elle/execution.lisp)
+  [elle/execution.lisp](elle/execution.lisp)
 - `tools/call` with `analyze_file` against
-  [elle/planning.lisp](/Users/randall/projects/emacs-hypervisor/elle/planning.lisp)
+  [elle/planning.lisp](elle/planning.lisp)
 - `tools/call` with `impact` against `execute-package-entry-plan-tracker` in
-  [elle/execution.lisp](/Users/randall/projects/emacs-hypervisor/elle/execution.lisp)
+  [elle/execution.lisp](elle/execution.lisp)
 - `tools/call` with `impact` against `derive-package-plan` in
-  [elle/planning.lisp](/Users/randall/projects/emacs-hypervisor/elle/planning.lisp)
+  [elle/planning.lisp](elle/planning.lisp)
 
 Examples of MCP tools that matter here:
 
@@ -217,12 +213,12 @@ Use normal repo editing for small, clearly bounded changes.
 Reach for Elle analysis/MCP when:
 
 - changing shared helpers in
-  [elle/protocol.lisp](/Users/randall/projects/emacs-hypervisor/elle/protocol.lisp),
-  [elle/graph.lisp](/Users/randall/projects/emacs-hypervisor/elle/graph.lisp),
-  [elle/preflight.lisp](/Users/randall/projects/emacs-hypervisor/elle/preflight.lisp), or
-  [elle/boot-policy.lisp](/Users/randall/projects/emacs-hypervisor/elle/boot-policy.lisp), or
-  [elle/planning.lisp](/Users/randall/projects/emacs-hypervisor/elle/planning.lisp), or
-  [elle/execution.lisp](/Users/randall/projects/emacs-hypervisor/elle/execution.lisp)
+  [elle/protocol.lisp](elle/protocol.lisp),
+  [elle/graph.lisp](elle/graph.lisp),
+  [elle/preflight.lisp](elle/preflight.lisp), or
+  [elle/boot-policy.lisp](elle/boot-policy.lisp), or
+  [elle/planning.lisp](elle/planning.lisp), or
+  [elle/execution.lisp](elle/execution.lisp)
 - renaming exported helper functions used by multiple spikes
 - checking whether a refactor changes signal/capture behavior
 - tracing Elle behavior into Rust primitives while debugging Elle semantics
@@ -239,13 +235,13 @@ The working rule is:
 The current implementation direction is:
 
 1. keep the trusted Emacs kernel boundary small around
-   [host/templates/lisp/emacs-hypervisor-bootstrap.el](/Users/randall/projects/emacs-hypervisor/host/templates/lisp/emacs-hypervisor-bootstrap.el)
+   [host/emacs-kernel/emacs-hypervisor-bootstrap.el](host/emacs-kernel/emacs-hypervisor-bootstrap.el)
 2. keep package/config execution policy in
-   [elle](/Users/randall/projects/emacs-hypervisor/elle)
+   [elle](elle)
    and
-   [elle/runtime-forms](/Users/randall/projects/emacs-hypervisor/elle/runtime-forms)
+   [elle/runtime-forms](elle/runtime-forms)
 3. preserve the Lisp-to-Lisp config-unit body path described in
-   [README.md](/Users/randall/projects/emacs-hypervisor/README.md)
+   [README.md](README.md)
 4. keep using provisioned Emacs homes during testing
 5. keep generated `init.el` as thin startup glue and avoid re-growing resident Emacs wrappers
 6. keep using local analysis and MCP before structural changes to shared Elle modules
@@ -260,4 +256,3 @@ stable plugin ABI (the `elle-plugin` crate); the canonical example is the
 * **Role:** Compile native Rust crates that extend the Lisp evaluation runtime. By registering new Rust primitives, the Lisp compiler (`elle`) can call native Rust APIs directly.
 * **Embedding:** For a zero-dependency distribution, each plugin `cdylib` is embedded as bytes inside the `emacs-hypervisor` executable at build time, then extracted to a cache dir and `dlopen`ed at runtime — no separate `.dylib`/`.so` files to ship.
 * **Build Loop:** Managed by the Cargo workspace and the `just build` recipes.
-

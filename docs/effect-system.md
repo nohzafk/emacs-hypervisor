@@ -8,7 +8,7 @@ information to undo it on the next reload.
 **Attention Conservation Notice.** For contributors adding new effect kinds,
 debugging retraction, or understanding the registry contract. Skip if you only
 need the user-facing reload behavior — see the
-[README](../README.md#effect-aware-reload) and [docs/reload.md](reload.md).
+[README](../README.md#reload) and [docs/reload.md](reload.md).
 
 ## Effect Record Contract
 

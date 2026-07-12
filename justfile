@@ -54,15 +54,37 @@ install-hooks:
     git config core.hooksPath .githooks
 
 [group('Test')]
-test: build
+test: build check-docs
     ABBR_TIPS_PROMPT= cargo test --offline --locked --manifest-path host/elisp_pack/Cargo.toml
     ./.elle/target/release/elle tests/elle/hypervisor-runtime.lisp
     emacs --batch -Q \
+      --eval '(setq native-comp-enable-subr-trampolines nil)' \
       -L host/emacs-kernel \
       -L elle/runtime-forms \
       -L tests/elisp \
       -l tests/elisp/emacs-hypervisor-bootstrap-test.el \
       -f ert-run-tests-batch-and-exit
+
+# Fail when machine-specific absolute paths appear in tracked markdown.
+[group('Test')]
+check-docs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # PROJECT-LOG.md is an append-only historical log and is exempt;
+    # .agent-shell/.agents hold untracked local transcripts.
+    if grep -rn --include='*.md' '/Users/' . \
+        --exclude-dir=.git \
+        --exclude-dir=.elle \
+        --exclude-dir=.elle-mcp \
+        --exclude-dir=.agent-shell \
+        --exclude-dir=.agents \
+        --exclude-dir=target \
+        --exclude-dir=improvements \
+        --exclude=PROJECT-LOG.md; then
+      echo "error: machine-specific /Users/ paths found in markdown" >&2
+      exit 1
+    fi
+    echo "check-docs: ok"
 
 [group('Emacs')]
 emacs-home-e2e: build

@@ -276,14 +276,16 @@ emacs-hypervisor/
 │
 ├── scripts/
 │   ├── analyze-runtime.lisp           # compile-aware analysis source
-│   └── analyze-runtime-modules        # repo-local analysis runner
+│   ├── analyze-runtime-modules        # repo-local analysis runner
+│   └── emacs-home-e2e                 # provisions a throwaway Emacs home,
+│                                      #   generating config.org on the fly or
+│                                      #   copying from --config-source PATH
 │
 ├── patches/
 │   └── elle/                          # repo-maintained fixes applied to the
 │                                      #   pinned .elle checkout by bootstrap-elle
 │
-├── config.org                         # repo test configuration
-├── config/                            # repo-local support files for config.org
-├── early-init.el                      # repo test early-init
+├── early-init.el                      # currently unused; kept for reference,
+│                                      #   not part of the generated-home bootstrap
 └── justfile                           # build, test, and dev commands
 ```
