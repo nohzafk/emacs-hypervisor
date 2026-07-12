@@ -9,17 +9,7 @@ struct RuntimeModule {
     ready_marker: String,
 }
 
-fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
-fn fnv1a64_digest(bytes: &[u8]) -> String {
-    format!("fnv1a64:{:016x}", fnv1a64_update(0xcbf29ce484222325, bytes))
-}
+include!("src/hash.rs");
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR should be set"))
@@ -81,7 +71,7 @@ fn plugin_artifact_path(repo_dir: &Path, plugin_name: &str) -> PathBuf {
 
 fn embedded_plugins_source(repo_dir: &Path) -> Result<String, String> {
     let plugins = runtime_plugin_names(repo_dir)?;
-    let mut set_hash = 0xcbf29ce484222325u64;
+    let mut set_hash = FNV1A64_OFFSET;
     let mut output = String::new();
 
     output.push_str(
@@ -292,6 +282,11 @@ fn main() {
         let path = repo_dir.join(rel_path);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {}", rel_path, error));
+        // Validate every embedded module at build time so a malformed .el
+        // fails `cargo build` instead of surfacing as a serve-time VM error.
+        elisp_pack::pack_source(&source, rel_path).unwrap_or_else(|error| {
+            panic!("embedded Elisp module failed to parse: {}", error)
+        });
         elisp_output.push_str(&format!(
             "pub const EMBEDDED_{}_SOURCE: &str = {:?};\n",
             module.const_name, source

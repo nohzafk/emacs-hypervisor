@@ -19,27 +19,39 @@
 
 (defun emacs-hypervisor-load-envvars-file (file &optional noerror)
   "Read and set envvars from FILE.
-If NOERROR is non-nil, don't throw an error if the file doesn't exist or is
-unreadable. Returns the names of envvars that were changed."
+If NOERROR is non-nil, don't signal when the file doesn't exist, is
+unreadable, or is malformed; record a warning and return nil instead.
+Return the parsed env entry list (\"KEY=VALUE\" strings) on success."
   (if (null (file-exists-p file))
       (unless noerror
         (signal 'file-error (list "No envvar file exists" file)))
-    (with-temp-buffer
-      (insert-file-contents file)
-      (when-let ((env (read (current-buffer))))
-        (let ((tz (getenv-internal "TZ")))
-          (setq-default
-           process-environment
-           (append env (default-value 'process-environment))
-           exec-path
-           (append (split-string (getenv "PATH") path-separator t)
-                   (list exec-directory)))
-          (setq emacs-hypervisor-loaded-env-file (expand-file-name file)
-                emacs-hypervisor-loaded-env-vars env)
-          (when-let ((newtz (getenv-internal "TZ")))
-            (unless (equal tz newtz)
-              (set-time-zone-rule newtz))))
-        env))))
+    (condition-case err
+        (with-temp-buffer
+          (insert-file-contents file)
+          (let ((env (read (current-buffer))))
+            (setq emacs-hypervisor-loaded-env-file (expand-file-name file)
+                  emacs-hypervisor-loaded-env-vars env)
+            (when env
+              (let ((tz (getenv-internal "TZ")))
+                (setq-default
+                 process-environment
+                 (append env (default-value 'process-environment))
+                 exec-path
+                 (append (split-string (getenv "PATH") path-separator t)
+                         (list exec-directory)))
+                (when-let ((newtz (getenv-internal "TZ")))
+                  (unless (equal tz newtz)
+                    (set-time-zone-rule newtz)))))
+            env))
+      (error
+       (if (not noerror)
+           (signal (car err) (cdr err))
+         (display-warning
+          'emacs-hypervisor
+          (format "Ignoring unreadable env file %s: %s"
+                  file (error-message-string err))
+          :warning)
+         nil)))))
 
 (defun emacs-hypervisor--normalize-process-event (event)
   (replace-regexp-in-string "[\r\n]+\\'" "" event))
@@ -59,6 +71,9 @@ unreadable. Returns the names of envvars that were changed."
       (erase-buffer))
     (with-current-buffer (emacs-hypervisor-details-buffer)
       (erase-buffer))
+    ;; A stale finish flag from a previous session would suppress the
+    ;; finish notification for this one.
+    (setq emacs-hypervisor--finish-notified nil)
     (setq emacs-hypervisor--state :starting)
     (emacs-hypervisor--report-call 'emacs-hypervisor-report-session-started)
     (setq emacs-hypervisor--process

@@ -14,6 +14,8 @@ mod embedded {
     pub const EMBEDDED_EARLY_INIT_ELISP: &str = include_str!("../emacs-kernel/early-init.el");
 }
 
+mod hash;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,6 +30,13 @@ use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 const HOME_STARTUP_ELISP: &str = include_str!("../emacs-kernel/home-startup.el");
 const HOME_EARLY_INIT_ELISP: &str = embedded::EMBEDDED_EARLY_INIT_ELISP;
 const ELLE_PLUGIN_CACHE_ENV: &str = "EMACS_HYPERVISOR_ELLE_PLUGIN_CACHE_DIR";
+const ELLE_HOME_ENV: &str = "EMACS_HYPERVISOR_ELLE_HOME";
+
+const HOME_ARG_HELP: &str =
+    "Emacs home directory (default: ~/.config/emacs or XDG_CONFIG_HOME/emacs)";
+const HOME_DEFAULT_AFTER_HELP: &str = "Default `--home`:
+- `$XDG_CONFIG_HOME/emacs` when `XDG_CONFIG_HOME` is set
+- otherwise `$HOME/.config/emacs`";
 
 #[derive(Parser, Debug)]
 #[command(name = "emacs-hypervisor")]
@@ -80,11 +89,7 @@ Exit codes:
   1  invalid or failed planned items, or any finding under --strict
   2  harness error (Emacs missing, home not initialized, no shutdown)")]
 struct CheckArgs {
-    #[arg(
-        long,
-        value_name = "DIR",
-        help = "Emacs home directory (default: ~/.config/emacs or XDG_CONFIG_HOME/emacs)"
-    )]
+    #[arg(long, value_name = "DIR", help = HOME_ARG_HELP)]
     home: Option<PathBuf>,
 
     #[arg(long, value_name = "PATH", help = "Emacs executable (default: emacs on PATH)")]
@@ -138,15 +143,9 @@ fn run_check(args: CheckArgs) -> Result<i32, String> {
 }
 
 #[derive(Args, Debug)]
-#[command(after_help = "Default `--home`:
-- `$XDG_CONFIG_HOME/emacs` when `XDG_CONFIG_HOME` is set
-- otherwise `$HOME/.config/emacs`")]
+#[command(after_help = HOME_DEFAULT_AFTER_HELP)]
 struct InitArgs {
-    #[arg(
-        long,
-        value_name = "DIR",
-        help = "Emacs home directory (default: ~/.config/emacs or XDG_CONFIG_HOME/emacs)"
-    )]
+    #[arg(long, value_name = "DIR", help = HOME_ARG_HELP)]
     home: Option<PathBuf>,
 
     #[arg(
@@ -157,15 +156,9 @@ struct InitArgs {
 }
 
 #[derive(Args, Debug)]
-#[command(after_help = "Default `--home`:
-- `$XDG_CONFIG_HOME/emacs` when `XDG_CONFIG_HOME` is set
-- otherwise `$HOME/.config/emacs`")]
+#[command(after_help = HOME_DEFAULT_AFTER_HELP)]
 struct EnvArgs {
-    #[arg(
-        long,
-        value_name = "DIR",
-        help = "Emacs home directory (default: ~/.config/emacs or XDG_CONFIG_HOME/emacs)"
-    )]
+    #[arg(long, value_name = "DIR", help = HOME_ARG_HELP)]
     home: Option<PathBuf>,
 
     #[arg(
@@ -175,6 +168,13 @@ struct EnvArgs {
         help = "Write the env snapshot to FILE instead of HOME/env"
     )]
     output: Option<PathBuf>,
+
+    #[arg(
+        long = "include",
+        value_name = "NAME",
+        help = "Include an env var that the secret-name filter would skip (repeatable)"
+    )]
+    include: Vec<String>,
 }
 
 fn default_config_root() -> Result<PathBuf, String> {
@@ -202,12 +202,41 @@ fn xdg_config_home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn repo_root() -> PathBuf {
+/// The repository root captured at compile time.  Only meaningful on the
+/// build machine; never assume it exists at runtime.  (Distinct from the
+/// `repo_root()` helper in build.rs, which runs during the build.)
+fn build_time_repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-fn default_elle_home_path() -> PathBuf {
-    repo_root().join(".elle")
+/// Resolve the Elle home (module resolution root) at runtime.
+///
+/// Order: explicit Elle config (`ELLE_HOME`, handled by `Config::default`),
+/// then `EMACS_HYPERVISOR_ELLE_HOME`, then the compile-time repo checkout
+/// when it still exists.  A copied/installed binary on another machine must
+/// get a clear error instead of a phantom build-machine path.
+fn resolve_elle_home() -> Result<PathBuf, String> {
+    if let Some(value) = env::var_os(ELLE_HOME_ENV).filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(value);
+        if path.is_dir() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "{} points at a missing directory: {}",
+            ELLE_HOME_ENV,
+            path.display()
+        ));
+    }
+    let build_time = build_time_repo_root().join(".elle");
+    if build_time.is_dir() {
+        return Ok(build_time);
+    }
+    Err(format!(
+        "could not resolve the Elle home: ELLE_HOME and {} are unset and the \
+         build-time checkout {} does not exist on this machine",
+        ELLE_HOME_ENV,
+        build_time.display()
+    ))
 }
 
 fn install_elisp_modules() -> Result<(), String> {
@@ -348,7 +377,8 @@ fn run_serve() {
 
     let mut config = Config::default();
     if config.home.is_none() {
-        config.home = Some(default_elle_home_path().display().to_string());
+        let elle_home = resolve_elle_home().unwrap_or_else(|error| fail(error));
+        config.home = Some(elle_home.display().to_string());
     }
     if let Some(plugin_dir) = embedded_plugin_dir {
         config.path = Some(prepend_elle_path(config.path.take(), &plugin_dir));
@@ -378,6 +408,11 @@ fn run_serve() {
     clear_symbol_table();
 }
 
+/// Entries that do not make a directory "non-empty" for `init`:
+/// Finder droppings and a fresh dotfiles-repo `.git` are both fine to
+/// initialize around.
+const HOME_NOISE_ENTRIES: &[&str] = &[".DS_Store", ".git", ".gitignore"];
+
 fn ensure_home_is_empty(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -388,12 +423,24 @@ fn ensure_home_is_empty(path: &Path) -> Result<(), String> {
             path.display()
         ));
     }
-    let mut entries = fs::read_dir(path)
+    let entries = fs::read_dir(path)
         .map_err(|error| format!("failed to read {}: {}", path.display(), error))?;
-    if entries.next().is_some() {
+    let mut blocking = Vec::new();
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("failed to read {}: {}", path.display(), error))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !HOME_NOISE_ENTRIES.contains(&name.as_str()) {
+            blocking.push(name);
+        }
+    }
+    if !blocking.is_empty() {
+        blocking.sort();
         return Err(format!(
-            "refusing to initialize non-empty Emacs home: {}",
-            path.display()
+            "refusing to initialize non-empty Emacs home: {} (found: {}; ignored entries would be: {})",
+            path.display(),
+            blocking.join(", "),
+            HOME_NOISE_ENTRIES.join(", ")
         ));
     }
     Ok(())
@@ -432,12 +479,7 @@ fn append_bundled_elisp_section(output: &mut String, name: &str, contents: &str)
 }
 
 fn stable_content_hash(contents: &str) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for byte in contents.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("fnv1a64:{:016x}", hash)
+    hash::fnv1a64_digest(contents.as_bytes())
 }
 
 fn generated_init_body() -> String {
@@ -587,8 +629,31 @@ fn run_init_upgrade(home: PathBuf) -> Result<(), String> {
         .map(|contents| contents != &new_early_init)
         .unwrap_or(true);
 
-    write_file(&init_path, &new_init)?;
-    write_file(&early_init_path, &new_early_init)?;
+    // Stage both files first, then rename into place, so a failure between
+    // the two writes cannot leave init.el and early-init.el inconsistent
+    // with the previous contents already destroyed.
+    let init_temp = home.join(format!(".init.el.{}.tmp", process::id()));
+    let early_init_temp = home.join(format!(".early-init.el.{}.tmp", process::id()));
+    let staged = write_file(&init_temp, &new_init)
+        .and_then(|()| write_file(&early_init_temp, &new_early_init));
+    if let Err(error) = staged {
+        let _ = fs::remove_file(&init_temp);
+        let _ = fs::remove_file(&early_init_temp);
+        return Err(error);
+    }
+    fs::rename(&init_temp, &init_path).map_err(|error| {
+        let _ = fs::remove_file(&init_temp);
+        let _ = fs::remove_file(&early_init_temp);
+        format!("failed to install {}: {}", init_path.display(), error)
+    })?;
+    fs::rename(&early_init_temp, &early_init_path).map_err(|error| {
+        let _ = fs::remove_file(&early_init_temp);
+        format!(
+            "failed to install {}: {}",
+            early_init_path.display(),
+            error
+        )
+    })?;
 
     println!("Upgraded Emacs Hypervisor home at {}", home.display());
     println!("- init.el hash: {} -> {}", old_hash, new_hash);
@@ -620,21 +685,53 @@ fn escape_lisp_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn build_env_entries(vars: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
-    let mut entries = vars
-        .into_iter()
-        .filter(|(name, _)| valid_env_name(name))
-        .filter(|(name, _)| name != "SHELL")
-        .map(|(name, value)| format!("{}={}", name, value))
-        .collect::<Vec<_>>();
+/// Name patterns whose values are almost certainly credentials.  The env
+/// snapshot is a plain file in the Emacs home; secrets stay out of it
+/// unless re-included deliberately with `--include NAME`.
+const SECRET_NAME_SUFFIXES: &[&str] =
+    &["_TOKEN", "_KEY", "_SECRET", "_PASSWORD", "_CREDENTIALS"];
+const SECRET_NAME_PREFIXES: &[&str] = &["AWS_"];
 
-    entries.sort();
-    entries
+fn secret_env_name(name: &str) -> bool {
+    SECRET_NAME_SUFFIXES
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+        || SECRET_NAME_PREFIXES
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
 }
 
-fn build_env_file_contents() -> String {
-    let entries = build_env_entries(env::vars());
+struct EnvEntries {
+    entries: Vec<String>,
+    skipped_secrets: Vec<String>,
+}
 
+fn build_env_entries(
+    vars: impl IntoIterator<Item = (String, String)>,
+    include: &[String],
+) -> EnvEntries {
+    let mut entries = Vec::new();
+    let mut skipped_secrets = Vec::new();
+    for (name, value) in vars {
+        if !valid_env_name(&name) || name == "SHELL" {
+            continue;
+        }
+        if secret_env_name(&name) && !include.iter().any(|included| included == &name) {
+            skipped_secrets.push(name);
+            continue;
+        }
+        entries.push(format!("{}={}", name, value));
+    }
+
+    entries.sort();
+    skipped_secrets.sort();
+    EnvEntries {
+        entries,
+        skipped_secrets,
+    }
+}
+
+fn build_env_file_contents(entries: &[String]) -> String {
     let mut contents = String::from(";; -*- mode: lisp-interaction; coding: utf-8-unix; -*-\n");
     contents.push_str(
         ";; ---------------------------------------------------------------------------\n",
@@ -646,17 +743,43 @@ fn build_env_file_contents() -> String {
     contents.push_str(";;\n;; Emacs Hypervisor loads this file before user config.\n\n(\n");
     for entry in entries {
         contents.push_str(" \"");
-        contents.push_str(&escape_lisp_string(&entry));
+        contents.push_str(&escape_lisp_string(entry));
         contents.push_str("\"\n");
     }
     contents.push_str(")\n");
     contents
 }
 
-fn run_env(home: PathBuf, output: Option<PathBuf>) -> Result<(), String> {
+fn restrict_file_permissions(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("failed to chmod {}: {}", path.display(), error))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+fn run_env(home: PathBuf, output: Option<PathBuf>, include: Vec<String>) -> Result<(), String> {
     let output = output.unwrap_or_else(|| home.join("env"));
-    write_file(&output, &build_env_file_contents())?;
+    let env_entries = build_env_entries(env::vars(), &include);
+    write_file(&output, &build_env_file_contents(&env_entries.entries))?;
+    restrict_file_permissions(&output)?;
     println!("Generated environment file: {}", output.display());
+    if !env_entries.skipped_secrets.is_empty() {
+        println!(
+            "Skipped {} secret-like entr{} ({}); use --include NAME to re-include one deliberately.",
+            env_entries.skipped_secrets.len(),
+            if env_entries.skipped_secrets.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            env_entries.skipped_secrets.join(", ")
+        );
+    }
     Ok(())
 }
 
@@ -678,7 +801,7 @@ fn main() {
             let home = args
                 .home
                 .unwrap_or_else(|| default_config_root().unwrap_or_else(|error| fail(error)));
-            if let Err(error) = run_env(home, args.output) {
+            if let Err(error) = run_env(home, args.output, args.include) {
                 eprintln!("emacs-hypervisor env: {}", error);
                 process::exit(1);
             }
@@ -867,13 +990,134 @@ mod tests {
 
     #[test]
     fn env_entries_skip_shell() {
-        let entries = build_env_entries(vec![
-            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
-            ("SHELL".to_string(), "/bin/zsh".to_string()),
-            ("USER".to_string(), "randall".to_string()),
-        ]);
+        let env_entries = build_env_entries(
+            vec![
+                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+                ("SHELL".to_string(), "/bin/zsh".to_string()),
+                ("USER".to_string(), "randall".to_string()),
+            ],
+            &[],
+        );
 
-        assert!(!entries.contains(&"SHELL=/bin/zsh".to_string()));
-        assert!(entries.contains(&"USER=randall".to_string()));
+        assert!(!env_entries
+            .entries
+            .contains(&"SHELL=/bin/zsh".to_string()));
+        assert!(env_entries.entries.contains(&"USER=randall".to_string()));
+        assert!(env_entries.skipped_secrets.is_empty());
+    }
+
+    #[test]
+    fn env_entries_skip_secret_names() {
+        let env_entries = build_env_entries(
+            vec![
+                ("ANTHROPIC_API_KEY".to_string(), "sk-secret".to_string()),
+                ("AWS_SECRET_ACCESS_KEY".to_string(), "aws-secret".to_string()),
+                ("GITHUB_TOKEN".to_string(), "gh-secret".to_string()),
+                ("DB_PASSWORD".to_string(), "hunter2".to_string()),
+                ("GOOGLE_CREDENTIALS".to_string(), "blob".to_string()),
+                ("CLIENT_SECRET".to_string(), "shh".to_string()),
+                ("PATH".to_string(), "/usr/bin".to_string()),
+            ],
+            &[],
+        );
+
+        assert_eq!(env_entries.entries, vec!["PATH=/usr/bin".to_string()]);
+        assert_eq!(
+            env_entries.skipped_secrets,
+            vec![
+                "ANTHROPIC_API_KEY",
+                "AWS_SECRET_ACCESS_KEY",
+                "CLIENT_SECRET",
+                "DB_PASSWORD",
+                "GITHUB_TOKEN",
+                "GOOGLE_CREDENTIALS",
+            ]
+        );
+    }
+
+    #[test]
+    fn env_entries_include_reinstates_named_secret() {
+        let env_entries = build_env_entries(
+            vec![
+                ("GITHUB_TOKEN".to_string(), "gh-secret".to_string()),
+                ("ANTHROPIC_API_KEY".to_string(), "sk-secret".to_string()),
+            ],
+            &["GITHUB_TOKEN".to_string()],
+        );
+
+        assert_eq!(
+            env_entries.entries,
+            vec!["GITHUB_TOKEN=gh-secret".to_string()]
+        );
+        assert_eq!(env_entries.skipped_secrets, vec!["ANTHROPIC_API_KEY"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_env_writes_owner_only_file_without_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = unique_test_home();
+        fs::create_dir_all(&home).expect("test should create home");
+        env::set_var("EMACS_HYPERVISOR_TEST_FAKE_TOKEN", "fake-secret");
+
+        run_env(home.clone(), None, Vec::new()).expect("env snapshot should succeed");
+
+        let output = home.join("env");
+        let contents = fs::read_to_string(&output).expect("env file should be readable");
+        assert!(!contents.contains("fake-secret"));
+        let mode = fs::metadata(&output)
+            .expect("env file metadata should be readable")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+
+        env::remove_var("EMACS_HYPERVISOR_TEST_FAKE_TOKEN");
+        fs::remove_dir_all(&home).expect("test home cleanup should succeed");
+    }
+
+    #[test]
+    fn ensure_home_is_empty_ignores_noise_entries() {
+        let home = unique_test_home();
+        fs::create_dir_all(home.join(".git")).expect("test should create .git");
+        fs::write(home.join(".DS_Store"), b"finder noise").expect("test should write .DS_Store");
+
+        assert!(ensure_home_is_empty(&home).is_ok());
+
+        fs::write(home.join("init.el"), ";; existing\n").expect("test should write init");
+        let error = ensure_home_is_empty(&home).expect_err("real entries must still refuse");
+        assert!(error.contains("init.el"));
+        assert!(error.contains(".DS_Store"));
+
+        fs::remove_dir_all(&home).expect("test home cleanup should succeed");
+    }
+
+    #[test]
+    fn init_accepts_home_with_only_noise_entries() {
+        let home = unique_test_home();
+        fs::create_dir_all(&home).expect("test should create home");
+        fs::write(home.join(".DS_Store"), b"finder noise").expect("test should write .DS_Store");
+
+        run_init(home.clone(), false).expect("init should ignore noise entries");
+        assert!(home.join("init.el").is_file());
+
+        fs::remove_dir_all(&home).expect("test home cleanup should succeed");
+    }
+
+    #[test]
+    fn init_upgrade_leaves_no_temp_files() {
+        let home = unique_test_home();
+        run_init(home.clone(), false).expect("initial init should succeed");
+        run_init(home.clone(), true).expect("upgrade should succeed");
+
+        let leftovers = fs::read_dir(&home)
+            .expect("home should be readable")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect::<Vec<_>>();
+        assert!(leftovers.is_empty(), "leftover temp files: {:?}", leftovers);
+
+        fs::remove_dir_all(&home).expect("test home cleanup should succeed");
     }
 }

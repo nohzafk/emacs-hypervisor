@@ -7,9 +7,8 @@
 (defconst emacs-hypervisor-protocol-name :sexp-rpc)
 (defconst emacs-hypervisor-protocol-version 1)
 
-(defvar emacs-hypervisor--process nil)
-(defvar emacs-hypervisor--hello-message nil)
-(defvar emacs-hypervisor--state :idle)
+;; Shared session variables (`emacs-hypervisor--process', `--state',
+;; `--hello-message', ...) are owned by emacs-hypervisor-session-state.el.
 (defvar emacs-hypervisor--next-request-id 100000)
 (defvar emacs-hypervisor--pending-responses nil)
 (defvar emacs-hypervisor-context-function nil)
@@ -122,64 +121,70 @@ Return the request id."
     id))
 
 (defun emacs-hypervisor--dispatch-rpc-eval (id form)
-  (condition-case err
-      (let ((value
-             (with-current-buffer (emacs-hypervisor-details-buffer)
-               (let ((standard-output (current-buffer)))
-                 (eval form)))))
-        (emacs-hypervisor-send-response id value))
-    (error
-     (emacs-hypervisor-send-error-response
-      id
-      (concat
-       (format "%S" err)
-       "\n"
-       (with-output-to-string
-         (backtrace)))))))
+  (let (signal-backtrace)
+    (condition-case err
+        (let ((value
+               (with-current-buffer (emacs-hypervisor-details-buffer)
+                 (let ((standard-output (current-buffer)))
+                   (if (fboundp 'handler-bind)
+                       ;; Emacs 30+: capture the backtrace at signal time,
+                       ;; before unwinding, so it includes the frames from
+                       ;; inside FORM.  A `condition-case' handler runs after
+                       ;; unwinding and would only see its own frames.
+                       (handler-bind
+                           ((error (lambda (_err)
+                                     (setq signal-backtrace
+                                           (with-output-to-string
+                                             (backtrace))))))
+                         (eval form))
+                     (eval form))))))
+          (emacs-hypervisor-send-response id value))
+      (error
+       (emacs-hypervisor-send-error-response
+        id
+        (concat
+         (format "%S" err)
+         "\n"
+         (or signal-backtrace
+             (with-output-to-string
+               (backtrace)))))))))
 
 (defun emacs-hypervisor--dispatch-rpc-request (message)
   (let* ((id (emacs-hypervisor--rpc-id message))
          (op (emacs-hypervisor--rpc-op message))
          (payload (emacs-hypervisor--rpc-payload message))
-         (started-at (float-time))
-         handled)
-    (setq handled
-          (pcase op
-            (:hello
-             (setq emacs-hypervisor--hello-message message)
-             (setq emacs-hypervisor--state :running)
-             (emacs-hypervisor-send-response
-              id
-              (list :protocol emacs-hypervisor-protocol-name
-                    :version emacs-hypervisor-protocol-version
-                    :mode :session-scoped-subprocess
-                    :transport :s-expression))
-             t)
-            (:boot-context
-             (if (functionp emacs-hypervisor-context-function)
-                 (emacs-hypervisor-send-response
-                  id
-                  (or (funcall emacs-hypervisor-context-function) nil))
-               (emacs-hypervisor-send-response id nil))
-             t)
-            (:session-data
-             (if (functionp emacs-hypervisor-session-data-function)
-                 (let* ((fields (plist-get payload :fields))
-                        (session-data
-                         (funcall emacs-hypervisor-session-data-function fields)))
-                   (emacs-hypervisor-send-response id session-data))
-               (emacs-hypervisor-send-response id nil))
-             t)
-            (:eval
-             (emacs-hypervisor--dispatch-rpc-eval id (plist-get payload :form))
-             t)
-            (_
-             (emacs-hypervisor-send-error-response
-              id
-              (format "Unknown sexp-rpc op: %S" op))
-             t)))
+         (started-at (float-time)))
+    (pcase op
+      (:hello
+       (setq emacs-hypervisor--hello-message message)
+       (setq emacs-hypervisor--state :running)
+       (emacs-hypervisor-send-response
+        id
+        (list :protocol emacs-hypervisor-protocol-name
+              :version emacs-hypervisor-protocol-version
+              :mode :session-scoped-subprocess
+              :transport :s-expression)))
+      (:boot-context
+       (if (functionp emacs-hypervisor-context-function)
+           (emacs-hypervisor-send-response
+            id
+            (or (funcall emacs-hypervisor-context-function) nil))
+         (emacs-hypervisor-send-response id nil)))
+      (:session-data
+       (if (functionp emacs-hypervisor-session-data-function)
+           (let* ((fields (plist-get payload :fields))
+                  (session-data
+                   (funcall emacs-hypervisor-session-data-function fields)))
+             (emacs-hypervisor-send-response id session-data))
+         (emacs-hypervisor-send-response id nil)))
+      (:eval
+       (emacs-hypervisor--dispatch-rpc-eval id (plist-get payload :form)))
+      (_
+       (emacs-hypervisor-send-error-response
+        id
+        (format "Unknown sexp-rpc op: %S" op))))
     (emacs-hypervisor-events-record-rpc-metric id op payload started-at)
-    handled))
+    t))
 
 (defun emacs-hypervisor--dispatch-rpc-event (message)
   (let* ((topic (emacs-hypervisor--rpc-topic message))
@@ -240,12 +245,31 @@ Signal an error when TIMEOUT seconds elapse."
     (:response (emacs-hypervisor--dispatch-rpc-response message))
     (_ nil)))
 
+(defun emacs-hypervisor--record-dispatch-error (message err)
+  "Record a dispatch failure for MESSAGE without propagating ERR.
+Dispatch errors must never escape the process filter: they would discard
+buffered messages and blow up `accept-process-output' loops such as
+`emacs-hypervisor-wait-for-completion'."
+  (let ((text (format "Hypervisor event dispatch failed: %s (message %S)"
+                      (error-message-string err)
+                      message)))
+    (setq emacs-hypervisor--last-error-message text)
+    (push (list :log :level :error :message text)
+          emacs-hypervisor--log-messages)
+    (unless noninteractive
+      (message "[Hypervisor] %s" text))))
+
 (defun emacs-hypervisor--consume-input ()
   (let ((input-buffer (current-buffer))
         value
         done)
     (while (not done)
       (goto-char (point-min))
+      ;; Two distinct failure domains: a `read' failure means the buffered
+      ;; bytes are unusable framing garbage, so the buffer is erased and the
+      ;; error propagates.  A failure inside `emacs-hypervisor--dispatch' is
+      ;; a handler bug for one message; it is recorded and the loop continues
+      ;; so complete messages queued behind it are still processed.
       (condition-case err
           (progn
             (setq value (read (current-buffer)))
@@ -253,16 +277,22 @@ Signal an error when TIMEOUT seconds elapse."
             (skip-chars-forward " \t\r\n")
             ;; Dispatch can run `accept-process-output', so remove the complete
             ;; message first to prevent reentrant filters from re-reading it.
-            (delete-region (point-min) (point))
-            (emacs-hypervisor--dispatch value)
-            (set-buffer input-buffer))
+            (delete-region (point-min) (point)))
         (end-of-file
          (set-buffer input-buffer)
          (setq done t))
         (error
          (set-buffer input-buffer)
          (erase-buffer)
-         (signal (car err) (cdr err)))))))
+         (signal (car err) (cdr err))))
+      (unless done
+        (condition-case err
+            (progn
+              (emacs-hypervisor--dispatch value)
+              (set-buffer input-buffer))
+          (error
+           (set-buffer input-buffer)
+           (emacs-hypervisor--record-dispatch-error value err)))))))
 
 (defun emacs-hypervisor-sexp-rpc-filter (_proc output)
   (with-current-buffer (get-buffer-create emacs-hypervisor--buffer-name)

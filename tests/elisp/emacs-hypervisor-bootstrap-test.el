@@ -1742,6 +1742,183 @@ Return a cons cell of (STATUS . OUTPUT)."
       (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
         (kill-buffer buffer)))))
 
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-continues-after-dispatch-error ()
+  (emacs-hypervisor-reset)
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (poison (emacs-hypervisor-test--event :warning '(:message "boom")))
+         (shutdown (emacs-hypervisor-test--event
+                    :shutdown '(:reason :hypervisor-session-complete)))
+         (wire (concat (emacs-hypervisor--sexp-string poison) "\n"
+                       (emacs-hypervisor--sexp-string shutdown) "\n")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'emacs-hypervisor-events--handle-warning)
+                   (lambda (_payload) (error "handler exploded"))))
+          ;; The poisoned handler must not destroy the queued :shutdown.
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (should emacs-hypervisor--completed)
+          (should (eq emacs-hypervisor--state :completed))
+          (should (string-match-p "handler exploded"
+                                  emacs-hypervisor--last-error-message))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string)))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-tolerates-stray-non-rpc-text ()
+  (emacs-hypervisor-reset)
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (message (emacs-hypervisor-test--event
+                   :log '(:level :info :message "after-stray")))
+         (wire (concat "(stray output)\n"
+                       (emacs-hypervisor--sexp-string message) "\n")))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (should (equal emacs-hypervisor--last-log-message
+                         '(:log :level :info :message "after-stray"))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-sexp-rpc-filter-recovers-after-framing-garbage ()
+  (emacs-hypervisor-reset)
+  (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
+         (message (emacs-hypervisor-test--event
+                   :log '(:level :info :message "after-garbage")))
+         (wire (concat (emacs-hypervisor--sexp-string message) "\n")))
+    (unwind-protect
+        (progn
+          ;; Unreadable framing garbage still erases the buffer and signals.
+          (should-error (emacs-hypervisor-sexp-rpc-filter nil ")(\n"))
+          (with-current-buffer (get-buffer emacs-hypervisor--buffer-name)
+            (should (string-empty-p (buffer-string))))
+          ;; A later well-formed message is processed normally.
+          (emacs-hypervisor-sexp-rpc-filter nil wire)
+          (should (equal emacs-hypervisor--last-log-message
+                         '(:log :level :info :message "after-garbage"))))
+      (when-let ((buffer (get-buffer emacs-hypervisor--buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest emacs-hypervisor-eventless-crash-reports-failed-readiness ()
+  (emacs-hypervisor-reset)
+  (should (eq (emacs-hypervisor-readiness) 'loading))
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_process) nil)))
+    (emacs-hypervisor--sentinel :fake-process "segmentation fault\n"))
+  (should (eq emacs-hypervisor--state :failed))
+  (should (eq emacs-hypervisor--shutdown-reason :process-exited))
+  (should (eq (emacs-hypervisor-readiness) 'failed)))
+
+(ert-deftest emacs-hypervisor-unknown-event-topic-is-logged ()
+  (emacs-hypervisor-reset)
+  (emacs-hypervisor--dispatch
+   (emacs-hypervisor-test--event :mystery-topic '(:x 1)))
+  (should (string-match-p
+           "Unhandled Hypervisor event topic"
+           (plist-get (cdr emacs-hypervisor--last-log-message) :message))))
+
+(ert-deftest emacs-hypervisor-load-envvars-file-tolerates-malformed-file ()
+  (let ((file (make-temp-file "emacs-hypervisor-env" nil nil "((\"BAD"))
+        warnings)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'display-warning)
+                     (lambda (_type msg &rest _args) (push msg warnings))))
+            (should (null (emacs-hypervisor-load-envvars-file file t)))
+            (should warnings)
+            (should (string-match-p "env file" (car warnings))))
+          ;; Without NOERROR the malformed file still signals.
+          (should-error (emacs-hypervisor-load-envvars-file file)))
+      (delete-file file))))
+
+(ert-deftest emacs-hypervisor-load-envvars-file-records-file-for-empty-list ()
+  (let ((file (make-temp-file "emacs-hypervisor-env" nil nil "()"))
+        (emacs-hypervisor-loaded-env-file nil)
+        (emacs-hypervisor-loaded-env-vars :unset))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-load-envvars-file file t)
+          (should (equal emacs-hypervisor-loaded-env-file
+                         (expand-file-name file)))
+          (should (null emacs-hypervisor-loaded-env-vars)))
+      (delete-file file))))
+
+(defun emacs-hypervisor-test--explode ()
+  (error "kaboom"))
+
+(ert-deftest emacs-hypervisor-rpc-eval-error-backtrace-includes-failing-frame ()
+  (let (sent)
+    (cl-letf (((symbol-function 'emacs-hypervisor-send)
+               (lambda (message) (push message sent))))
+      (emacs-hypervisor--dispatch-rpc-eval
+       77 '(emacs-hypervisor-test--explode)))
+    (let* ((response (car sent))
+           (error-text (plist-get (cdr response) :error)))
+      (should (null (plist-get (cdr response) :ok)))
+      (should (string-match-p "kaboom" error-text))
+      (when (fboundp 'handler-bind)
+        ;; The signal-time backtrace names the function inside the form.
+        (should (string-match-p "emacs-hypervisor-test--explode"
+                                error-text))))))
+
+(ert-deftest emacs-hypervisor-env-file-overrides-binary-resolution ()
+  (emacs-hypervisor-test--eval-home-startup-functions)
+  ;; A post-env-file EMACS_HYPERVISOR_BIN wins over a stale pre-env hit.
+  (let ((process-environment
+         (cons "EMACS_HYPERVISOR_BIN=/env/bin/emacs-hypervisor"
+               process-environment)))
+    (should (equal (emacs-hypervisor--resolve-binary-after-env-load
+                    "/stale/emacs-hypervisor")
+                   "/env/bin/emacs-hypervisor")))
+  ;; When the env file adds nothing, the pre-env result is kept.
+  (cl-letf (((symbol-function 'emacs-hypervisor-resolve-binary-now)
+             (lambda () nil)))
+    (should (equal (emacs-hypervisor--resolve-binary-after-env-load
+                    "/stale/emacs-hypervisor")
+                   "/stale/emacs-hypervisor"))))
+
+(ert-deftest emacs-hypervisor-env-file-bin-override-flows-to-resolution ()
+  (emacs-hypervisor-test--eval-home-startup-functions)
+  (let ((file (make-temp-file
+               "emacs-hypervisor-env" nil nil
+               "(\"EMACS_HYPERVISOR_BIN=/env/bin/emacs-hypervisor\")"))
+        (original-process-environment
+         (default-value 'process-environment))
+        (original-exec-path (default-value 'exec-path)))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-load-envvars-file file t)
+          (should (equal (emacs-hypervisor-resolve-binary-now)
+                         "/env/bin/emacs-hypervisor")))
+      (setq-default process-environment original-process-environment)
+      (setq-default exec-path original-exec-path)
+      (delete-file file))))
+
+(ert-deftest emacs-hypervisor-early-init-isolates-user-early-init-errors ()
+  (let* ((config-root (make-temp-file "emacs-hypervisor-early-init" t))
+         (config-dir (expand-file-name "emacs-hypervisor" config-root))
+         (early-init-source
+          (expand-file-name "../../host/emacs-kernel/early-init.el"
+                            emacs-hypervisor-test--source-directory))
+         (user-emacs-directory
+          (file-name-as-directory
+           (expand-file-name "emacs-home" config-root)))
+         (package-user-dir package-user-dir)
+         (process-environment
+          (cons (concat "XDG_CONFIG_HOME=" config-root)
+                process-environment)))
+    (unwind-protect
+        (progn
+          (make-directory config-dir t)
+          (with-temp-file (expand-file-name "early-init.el" config-dir)
+            (insert "(error \"user early-init boom\")\n"))
+          (setq emacs-hypervisor-early-init-error nil)
+          ;; The trusted early-init must survive a signaling user early-init
+          ;; and record the failure for the session report.
+          (load early-init-source nil t)
+          (should (bound-and-true-p emacs-hypervisor-early-init-error))
+          (should (string-match-p "user early-init boom"
+                                  emacs-hypervisor-early-init-error)))
+      (delete-directory config-root t))))
+
 (ert-deftest emacs-hypervisor-rpc-eval-routes-details-away-from-transport-buffer ()
   (let* ((emacs-hypervisor--buffer-name " *emacs-hypervisor-filter-test*")
          (emacs-hypervisor--details-buffer-name

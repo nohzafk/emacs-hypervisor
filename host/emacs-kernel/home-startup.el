@@ -7,7 +7,9 @@
    (or load-file-name buffer-file-name user-init-file user-emacs-directory)))
 
 (defun emacs-hypervisor--xdg-config-home ()
-  "Return the XDG config home directory with HOME/.config fallback."
+  "Return the XDG config home directory with HOME/.config fallback.
+early-init.el duplicates this logic inline because it runs before this
+file loads; keep the two in sync."
   (let ((xdg-config-home (getenv "XDG_CONFIG_HOME")))
     (if (and xdg-config-home (not (equal xdg-config-home "")))
         xdg-config-home
@@ -46,7 +48,8 @@
 ;; 1. Prefer EMACS_HYPERVISOR_BIN when already set.
 ;; 2. Otherwise try PATH from the original Emacs launch environment.
 ;; 3. Load the optional env file.
-;; 4. If still unresolved, try EMACS_HYPERVISOR_BIN / PATH again.
+;; 4. Re-run resolution: an env file that sets EMACS_HYPERVISOR_BIN or PATH
+;;    overrides a pre-env-file hit (logged when the result changes).
 ;; 5. Cache the absolute path before starting the subprocess.
 ;; This means the env file can help, but is not required for bootstrap.
 
@@ -54,6 +57,18 @@
   "Resolve `emacs-hypervisor' from the current process environment."
   (or (getenv "EMACS_HYPERVISOR_BIN")
       (executable-find emacs-hypervisor-binary-name)))
+
+(defun emacs-hypervisor--resolve-binary-after-env-load (pre-env-binary)
+  "Combine PRE-ENV-BINARY with a fresh resolution pass after env-file load.
+The env file may set EMACS_HYPERVISOR_BIN or extend PATH; its result wins
+over a stale pre-env-file hit.  Return the binary to cache, or nil."
+  (let ((post-env-binary (emacs-hypervisor-resolve-binary-now)))
+    (when (and pre-env-binary
+               post-env-binary
+               (not (equal pre-env-binary post-env-binary)))
+      (message "[Hypervisor] env file changed binary resolution: %s -> %s"
+               pre-env-binary post-env-binary))
+    (or post-env-binary pre-env-binary)))
 
 (defun emacs-hypervisor-resolve-binary ()
   "Resolve and cache the installed `emacs-hypervisor' binary."
@@ -229,7 +244,13 @@
         (or emacs-hypervisor-binary
             (emacs-hypervisor-resolve-binary-now)))
   (emacs-hypervisor-reset)
+  (when (bound-and-true-p emacs-hypervisor-early-init-error)
+    (emacs-hypervisor-record-startup-warning
+     :early-init emacs-hypervisor-early-init-error))
   (emacs-hypervisor-load-envvars-file emacs-hypervisor-env-file t)
+  (setq emacs-hypervisor-binary
+        (emacs-hypervisor--resolve-binary-after-env-load
+         emacs-hypervisor-binary))
   (emacs-hypervisor-resolve-binary)
   (setq emacs-hypervisor-context-function
         (lambda ()

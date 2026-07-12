@@ -53,10 +53,12 @@ Elle treats each static Elisp module as a spec with:
   `:source` is the raw embedded source fallback
 
 Currently **all** modules load via `:source`: `elle/runtime-forms.lisp`
-builds `{:path path :source source}` for every manifest entry, and
-`host/build.rs` does not call `elisp_pack`. The packer is implemented and
-unit-tested (`cargo test --manifest-path host/elisp_pack/Cargo.toml`), but it
-is not wired into the host build; the `:forms` rollout is pending.
+builds `{:path path :source source}` for every manifest entry. The packer is
+implemented and unit-tested (`cargo test --manifest-path
+host/elisp_pack/Cargo.toml`), and `host/build.rs` uses it to **validate**
+every embedded module at build time — a malformed `.el` fails `cargo build`
+instead of surfacing as a serve-time VM error. Loading through packed
+`:forms` is still pending rollout.
 
 ## Scope
 

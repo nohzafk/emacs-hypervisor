@@ -1,20 +1,9 @@
 ;;; emacs-hypervisor-events.el --- Hypervisor event topic handlers -*- lexical-binding: t; -*-
 
+;; All shared session variables (`emacs-hypervisor--state', `--completed',
+;; `--ready', message lists, ...) are owned by
+;; emacs-hypervisor-session-state.el, required above.
 (require 'emacs-hypervisor-session-state)
-
-(defvar emacs-hypervisor--process nil)
-(defvar emacs-hypervisor--plan-messages nil)
-(defvar emacs-hypervisor--progress-messages nil)
-(defvar emacs-hypervisor--log-messages nil)
-(defvar emacs-hypervisor--report-messages nil)
-(defvar emacs-hypervisor--state :idle)
-(defvar emacs-hypervisor--last-progress-message nil)
-(defvar emacs-hypervisor--last-log-message nil)
-(defvar emacs-hypervisor--last-error-message nil)
-(defvar emacs-hypervisor--shutdown-reason nil)
-(defvar emacs-hypervisor--shutdown-payload nil)
-(defvar emacs-hypervisor--completed nil)
-(defvar emacs-hypervisor--ready nil)
 
 (declare-function emacs-hypervisor--notify-session-finished "emacs-hypervisor-session-state")
 (declare-function emacs-hypervisor--report-call "emacs-hypervisor-session-state")
@@ -161,9 +150,20 @@ to report a later abnormal exit as `:failed'."
   t)
 
 (defun emacs-hypervisor-events-handle (topic payload)
-  "Dispatch event TOPIC and PAYLOAD to the registered topic handler."
+  "Dispatch event TOPIC and PAYLOAD to the registered topic handler.
+An unknown topic is recorded in the session log instead of being dropped
+silently; it usually means a host/kernel version skew.  A registered
+handler whose function is not loaded stays a deliberate no-op."
   (let ((handler (alist-get topic emacs-hypervisor-events--handlers)))
-    (when (and handler (fboundp handler))
-      (funcall handler payload))))
+    (cond
+     ((null handler)
+      (emacs-hypervisor-events--handle-log
+       (list :level :warning
+             :message (format "Unhandled Hypervisor event topic %S" topic)
+             :topic topic))
+      nil)
+     ((fboundp handler)
+      (funcall handler payload))
+     (t nil))))
 
 (provide 'emacs-hypervisor-events)

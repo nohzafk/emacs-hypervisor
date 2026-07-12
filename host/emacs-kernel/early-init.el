@@ -6,6 +6,14 @@
 
 (setq package-user-dir (expand-file-name "packages/" user-emacs-directory))
 
+(defvar emacs-hypervisor-early-init-error nil
+  "Error message from loading the user-owned early-init file, or nil.
+Recorded here so the session startup can surface it as a warning; an
+error in user early-init must not crash the trusted stage.")
+
+;; XDG resolution is duplicated from home-startup.el's
+;; `emacs-hypervisor--xdg-config-home' because this file runs before the
+;; kernel loads; keep the two in sync.
 (let* ((xdg-config-home (getenv "XDG_CONFIG_HOME"))
        (config-base
         (if (and xdg-config-home (not (equal xdg-config-home "")))
@@ -16,4 +24,10 @@
        (user-early-init
         (expand-file-name "early-init.el" hypervisor-config-directory)))
   (when (file-exists-p user-early-init)
-    (load user-early-init nil t)))
+    (condition-case err
+        (load user-early-init nil t)
+      (error
+       (setq emacs-hypervisor-early-init-error
+             (format "user early-init failed: %s: %s"
+                     user-early-init (error-message-string err)))
+       (message "[Hypervisor] %s" emacs-hypervisor-early-init-error)))))
