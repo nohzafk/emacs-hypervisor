@@ -70,7 +70,6 @@ test: build check-docs
 check-docs:
     #!/usr/bin/env bash
     set -euo pipefail
-    # PROJECT-LOG.md is an append-only historical log and is exempt;
     # .agent-shell/.agents hold untracked local transcripts.
     if grep -rn --include='*.md' '/Users/' . \
         --exclude-dir=.git \
@@ -79,8 +78,7 @@ check-docs:
         --exclude-dir=.agent-shell \
         --exclude-dir=.agents \
         --exclude-dir=target \
-        --exclude-dir=improvements \
-        --exclude=PROJECT-LOG.md; then
+        --exclude-dir=improvements; then
       echo "error: machine-specific /Users/ paths found in markdown" >&2
       exit 1
     fi

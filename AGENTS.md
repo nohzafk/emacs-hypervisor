@@ -12,8 +12,7 @@ The current project direction is:
 - Emacs role: minimal trusted kernel + declaration/export + evaluation surface
 - Elle role: graph resolution, boot policy, orchestration, and runtime code generation
 
-The current implementation history lives in
-[PROJECT-LOG.md](PROJECT-LOG.md).
+The implementation history lives in the git log.
 The current architecture target lives in
 [README.md](README.md).
 

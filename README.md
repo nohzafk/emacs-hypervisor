@@ -652,4 +652,3 @@ idempotently across ref changes.
 | [`docs/rfc-extension-manifest.md`](docs/rfc-extension-manifest.md) | Manifest-based extension packaging (discussion draft) |
 | [`host/README.md`](host/README.md) | Generated-home bootstrap rules |
 | [`host/ELISP-PACK.md`](host/ELISP-PACK.md) | Static Elisp packing boundary |
-| [`PROJECT-LOG.md`](PROJECT-LOG.md) | Historical implementation context |
