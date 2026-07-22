@@ -17,8 +17,6 @@
 (include-file "../../elle/reporting.lisp")
 (include-file "../../elle/planning.lisp")
 (include-file "../../elle/execution.lisp")
-(include-file "../../elle/extensions.lisp")
-(include-file "../../elle/extension-mermaid.lisp")
 (include-file "../../elle/runtime-forms/module-loader.lisp")
 
 (def graph (emacs-hypervisor-graph-module))
@@ -89,8 +87,6 @@
 (def reporting (emacs-hypervisor-reporting-module protocol policy))
 (def planning (emacs-hypervisor-planning-module protocol graph))
 (def execution (emacs-hypervisor-execution-module protocol graph mailbox benchmark))
-(def extensions (emacs-hypervisor-extensions-module protocol))
-(def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
 (def runtime-module-loader (emacs-hypervisor-runtime-forms-module-loader-module))
 (def benchmark-enabled-module (emacs-hypervisor-benchmark-module protocol true))
 (def benchmark-disabled-module (emacs-hypervisor-benchmark-module protocol false))
@@ -846,126 +842,7 @@
 (println "  4b. env package list trimming: ok")
 
 # ============================================================================
-# 5. Extension dispatch returns plugin-backed Mermaid render payloads.
-# ============================================================================
-
-(def fake-mmdflux
-  {:render-ascii-fit (fn [source opts] (string "+-- width=" (get opts :max-width) " " source " --+"))
-   :render-svg (fn [source opts]
-                 (string "<svg data-layout=\"" (get opts :layout-engine) "\" data-simplify=\""
-                         (get opts :path-simplification) "\"><text>" source "</text></svg>"))})
-
-(defn extension-request [id extension method args]
-  {:kind :request :id id :op :extension-call :payload {:extension extension :method method :args args}})
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {}
-                                    {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 90 :mermaid
-                                                       :render {:source "flowchart LR\n  A -- \"label\" --> B"
-                                                       :style :ascii
-                                                       :viewport {:width 42}}))
-(let* [response (get stub-sent-responses 0)
-       payload (wire-protocol:from-wire (get response :payload))]
-  (assert (= (get response :id) 90) "extension ASCII response id")
-  (assert (= (get payload :ok) true) "extension ASCII payload ok")
-  (assert (= (get payload :kind) :text) "extension ASCII payload kind")
-  (assert (= (get payload :mime) "text/plain") "extension ASCII payload mime")
-  (assert (string/contains? (get payload :text) "width=42") "extension ASCII forwards viewport width")
-  (assert (string/contains? (get payload :text) "A -- \"label\" --> B")
-          "extension ASCII passes Mermaid source through to mmdflux")
-  (assert (= (get payload :renderer) :mmdflux) "extension ASCII payload renderer"))
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {}
-                                    {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 91 :mermaid :render {:source "flowchart TD; A-->B" :style :ascii}))
-(let* [payload (wire-protocol:from-wire (get (get stub-sent-responses 0) :payload))]
-  (assert (= (get payload :kind) :text) "extension ASCII payload kind")
-  (assert (= (get payload :mime) "text/plain") "extension ASCII payload mime")
-  (assert (string/contains? (get payload :text) "flowchart TD; A-->B") "extension ASCII payload includes source"))
-
-(def wide-ascii-source
-  "flowchart LR
-    subgraph S1[\"Stage 1 — Stable Kernel\"]
-        direction TB
-        A[\"Emacs home\"] --> B[\"load generated init.el\"]
-        B --> C[\"kernel boots\"]
-    end
-
-    subgraph S2[\"Stage 2 — Control Plane\"]
-        direction TB
-        D[\"launch emacs-hypervisor serve\"]
-        D --> E[\"sexp-rpc session established\"]
-    end
-
-    subgraph S3[\"Stage 3 — Session Runtime\"]
-        direction TB
-        F[\"emit runtime forms\"]
-        F --> G[\"package planning\"]
-        G --> H[\"config-unit execution\"]
-        H --> I[\"reload + reports ready\"]
-    end
-
-    S1 --> S2 --> S3
-")
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {}
-                                    {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 92 :mermaid
-                                                       :render {:source wide-ascii-source
-                                                       :style :ascii
-                                                       :viewport {:width 80}}))
-(let* [payload (wire-protocol:from-wire (get (get stub-sent-responses 0) :payload))]
-  (assert (string/contains? (get payload :text) "width=80") "wide ASCII forwards viewport width"))
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {}
-                                    {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 95 :mermaid
-                                                       :render {:source "flowchart TD; A-->B"
-                                                       :style :svg
-                                                       :options {:layout-engine "mermaid-layered"
-                                                       :path-simplification "lossy"}}))
-(let* [payload (wire-protocol:from-wire (get (get stub-sent-responses 0) :payload))]
-  (assert (= (get payload :kind) :image) "extension SVG payload kind")
-  (assert (= (get payload :mime) "image/svg+xml") "extension SVG payload mime")
-  (assert (string/contains? (get payload :svg) "<svg") "extension SVG payload includes svg")
-  (assert (string/contains? (get payload :svg) "mermaid-layered") "extension SVG forwards render options")
-  (assert (= (get payload :renderer) :mmdflux) "extension SVG payload renderer"))
-
-(defn assert-mermaid-style-kind [style kind]
-  (let [payload (mermaid-extension:render fake-mmdflux {:source "flowchart TD; A-->B" :style style})]
-    (assert (= (get payload :kind) kind) "extension normalizes style variants")))
-
-(assert-mermaid-style-kind :svg :image)
-(assert-mermaid-style-kind 'svg :image)
-(assert-mermaid-style-kind "svg" :image)
-(assert-mermaid-style-kind :ascii :text)
-(assert-mermaid-style-kind 'ascii :text)
-(assert-mermaid-style-kind "ascii" :text)
-(assert-mermaid-style-kind nil :text)
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {}
-                                    {:mermaid {:render (fn [args] (mermaid-extension:render fake-mmdflux args))}})
-                                    (extension-request 94 :mermaid :render {:source "flowchart LR; A-->B" :style :png}))
-(let* [payload (wire-protocol:from-wire (get (get stub-sent-responses 0) :payload))]
-  (assert (= (get payload :ok) false) "extension invalid style returns payload error")
-  (assert (= (get payload :error) :invalid-request) "extension invalid style error kind"))
-
-(reset-stub-state)
-(extensions:dispatch-extension-call (extensions:make-registry {} {})
-                                    (extension-request 93 :mermaid :render {:source "flowchart LR; A-->B" :style :ascii}))
-(let [response (get stub-sent-responses 0)]
-  (assert (= (get response :ok) false) "extension unavailable sends RPC error")
-  (assert (string/contains? (get response :error) "mermaid") "extension unavailable names extension"))
-
-(println "  5. extension dispatch: ok")
-
-# ============================================================================
-# 6. Runtime form loaders emit Elisp list bindings, not vectors.
+# 5. Runtime form loaders emit Elisp list bindings, not vectors.
 # ============================================================================
 
 (let* [form (runtime-module-loader:load-module-form {:path "report-core.el" :source "(provide 'report-core)"}
@@ -1026,7 +903,7 @@
 
 (let [manifest-names (manifest-module-names)
       install-names (runtime-forms-install-order)]
-  (assert (= (length manifest-names) 23) "modules.manifest entry count")
+  (assert (= (length manifest-names) 21) "modules.manifest entry count")
   (assert (= install-names manifest-names) "runtime-forms.lisp installs modules in modules.manifest order"))
 (println "  8. runtime form module order: ok")
 

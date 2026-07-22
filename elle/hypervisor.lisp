@@ -16,20 +16,12 @@
 (include-file "reporting.lisp")
 (include-file "planning.lisp")
 (include-file "execution.lisp")
-(include-file "extensions.lisp")
-(include-file "extension-mermaid.lisp")
 (include-file "runtime-forms.lisp")
 
 (def protocol (emacs-hypervisor-protocol-module))
 (def mailbox (protocol:make-mailbox))
 (def graph (emacs-hypervisor-graph-module))
 (def runtime-forms (emacs-hypervisor-runtime-forms-module))
-(def extensions (emacs-hypervisor-extensions-module protocol))
-(def mermaid-extension (emacs-hypervisor-mermaid-extension-module extensions))
-
-(defn emacs-hypervisor-extension-registry [settings]
-  (let [handlers (mermaid-extension:register settings {})]
-    (extensions:make-registry settings handlers)))
 
 (defn emacs-hypervisor-runtime-module-manifest []
   (let [source (sys/env "EMACS_HYPERVISOR_EMBEDDED_RUNTIME_MODULES")]
@@ -42,12 +34,6 @@
 (defn emacs-hypervisor-send-shutdown [payload]
   (protocol:send-event :shutdown payload)
   (sys/exit 0))
-
-## Startup-complete travels on its own topic: the process keeps running to
-## serve extension calls, so :shutdown stays reserved for actual termination
-## and the Emacs sentinel can still mark a post-startup crash as failed.
-(defn emacs-hypervisor-send-startup-complete [payload]
-  (protocol:send-event :session-ready payload))
 
 (defn emacs-hypervisor-check-report-problem? [report]
   (not (= (get report :status) :ok)))
@@ -212,7 +198,6 @@
                                                raw-packages (get session-data :packages)
                                                raw-units (get session-data :units)
                                                raw-env (get session-data :env)
-                                               extension-settings (or (get session-data :extensions) {})
                                                packages (or raw-packages ())
                                                units (or raw-units ())
                                                env (or raw-env ())
@@ -294,9 +279,7 @@
                                             :done 9 :total 10))
                                             (protocol:send-event :progress '(:phase :shutdown :step :ready :done 10
                                             :total 10))
-                                            (emacs-hypervisor-send-startup-complete '(:reason :startup-complete :status
-                                            :ready))
-                                            (extensions:run-extension-actor mailbox
-                                            (emacs-hypervisor-extension-registry extension-settings)))))
+                                            (emacs-hypervisor-send-shutdown '(:reason :startup-complete :status
+                                            :ready)))))
                                       (emacs-hypervisor-handle-config-load-failure config-load-result config-file
                                       config-org-file))))))
