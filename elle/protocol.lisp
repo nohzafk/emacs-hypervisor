@@ -43,13 +43,7 @@
     (put mailbox :responses responses))
 
   (defn sexp-sequence-string [values]
-    (match values
-      () ""
-      (item & rest)
-        (let [head (sexp-string item)
-              tail (sexp-sequence-string rest)]
-          (if (= tail "") head (string head " " tail)))
-      _ ""))
+    (string/join (map sexp-string values) " "))
 
   (defn sexp-string [value]
     (let [value (if (= (type-of value) :syntax) (syntax->datum value) value)]
