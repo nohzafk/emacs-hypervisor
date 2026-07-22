@@ -3,7 +3,7 @@
 (defvar emacs-hypervisor--buffer-name " *emacs-hypervisor*")
 (defvar emacs-hypervisor--details-buffer-name " *emacs-hypervisor details*")
 (defvar emacs-hypervisor--process nil)
-(defvar emacs-hypervisor--message-log nil)
+(defvar emacs-hypervisor--message-count 0)
 (defvar emacs-hypervisor--runtime-dispatch-function nil)
 (defvar emacs-hypervisor--hello-message nil)
 (defvar emacs-hypervisor--plan-messages nil)
@@ -55,7 +55,7 @@
 
 (defun emacs-hypervisor-reset ()
   (setq emacs-hypervisor--process nil)
-  (setq emacs-hypervisor--message-log nil)
+  (setq emacs-hypervisor--message-count 0)
   (setq emacs-hypervisor--runtime-dispatch-function nil)
   (setq emacs-hypervisor--hello-message nil)
   (setq emacs-hypervisor--plan-messages nil)
@@ -80,8 +80,8 @@
   (setq emacs-hypervisor-process-sentinel-function nil)
   (emacs-hypervisor--report-call 'emacs-hypervisor-report-reset))
 
-(defun emacs-hypervisor--record (direction payload)
-  (push (cons direction payload) emacs-hypervisor--message-log))
+(defun emacs-hypervisor--record (_direction _payload)
+  (setq emacs-hypervisor--message-count (1+ emacs-hypervisor--message-count)))
 
 (defun emacs-hypervisor-live-p ()
   "Return non-nil when the Hypervisor process is live."
@@ -182,7 +182,7 @@ that should not prevent local config reloads."
    :warnings (reverse (copy-sequence emacs-hypervisor--startup-warnings))
    :timings (emacs-hypervisor-startup-metrics)
    :reports (length emacs-hypervisor--report-messages)
-   :messages (length emacs-hypervisor--message-log)))
+   :messages emacs-hypervisor--message-count))
 
 (defun emacs-hypervisor-readiness ()
   "Return the public readiness state for external launchers.
