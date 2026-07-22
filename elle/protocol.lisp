@@ -45,6 +45,14 @@
   (defn sexp-sequence-string [values]
     (string/join (map sexp-string values) " "))
 
+  (defn sexp-struct-kv-parts [ks value]
+    (match ks
+      () ()
+      (k & rest) (pair (sexp-string k)
+                        (pair (sexp-string (get value k))
+                              (sexp-struct-kv-parts rest value)))
+      _ ()))
+
   (defn sexp-string [value]
     (let [value (if (= (type-of value) :syntax) (syntax->datum value) value)]
       (if (nil? value)
@@ -55,6 +63,10 @@
             (string "[" (sexp-sequence-string (->list value)) "]")
           :@array
             (string "[" (sexp-sequence-string (->list value)) "]")
+          :struct
+            (string "(" (string/join (sexp-struct-kv-parts (->list (keys value)) value) " ") ")")
+          :@struct
+            (string "(" (string/join (sexp-struct-kv-parts (->list (keys value)) value) " ") ")")
           :string (json/serialize value)
           :integer (string value)
           :float (string value)
@@ -64,7 +76,7 @@
           (error (string "cannot serialize value of type " (string (type-of value)) " as an S-expression"))))))
 
   (defn send-message [message]
-    (println (sexp-string (to-wire message))))
+    (println (sexp-string message)))
 
   (defn plist-get [xs key]
     (match xs
