@@ -2850,6 +2850,104 @@ Return a cons cell of (STATUS . OUTPUT)."
     (should (null (emacs-hypervisor-bridge--locked-rev
                    '(:name "mytool" :repo "~/projects/mytool"))))))
 
+(ert-deftest emacs-hypervisor-bridge-checkout-stale-lock-is-recoverable ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "stale-rev"))
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool"))
+          captured-args)
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (&rest args)
+                   (setq captured-args args)
+                   (with-current-buffer (nth 2 args)
+                     (insert "fatal: unable to read tree stale-rev"))
+                   1)))
+        (should-error (emacs-hypervisor-bridge--checkout-ref entry)
+                      :type 'emacs-hypervisor-stale-package-lock)
+        (should (equal (car captured-args) "git"))
+        (should (equal (car (last captured-args)) "stale-rev"))))))
+
+(ert-deftest emacs-hypervisor-bridge-checkout-declared-pin-stays-strict ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "locked-rev"))
+    (let ((entry '(:name "vc-tool" :repo "owner/vc-tool" :ref "declared-rev")))
+      (cl-letf (((symbol-function 'call-process)
+                 (lambda (&rest args)
+                   (with-current-buffer (nth 2 args)
+                     (insert "fatal: unable to read tree declared-rev"))
+                   1)))
+        (condition-case err
+            (progn
+              (emacs-hypervisor-bridge--checkout-ref entry)
+              (ert-fail "declared pin checkout unexpectedly succeeded"))
+          (emacs-hypervisor-stale-package-lock
+           (ert-fail (format "declared pin was treated as stale lock: %S" err)))
+          (error
+           (should (string-match-p "git checkout declared-rev failed"
+                                   (error-message-string err)))))))))
+
+(ert-deftest emacs-hypervisor-bridge-adopt-recovers-stale-lock-by-recloning ()
+  (emacs-hypervisor-test--with-temp-lock
+    (emacs-hypervisor-package-lock-put
+     '(:name "vc-tool" :kind :vc :rev "old-rev"))
+    (let* ((home-dir (make-temp-file "hypervisor-stale-lock-home" t))
+           (user-emacs-directory home-dir)
+           (package-user-dir (expand-file-name "hypervisor/packages/" home-dir))
+           (package-alist nil)
+           (package-activated-list nil)
+           (package-vc-selected-packages nil)
+           (emacs-hypervisor-bridge-ignored-locks nil)
+           (entry '(:name "vc-tool" :repo "owner/vc-tool" :branch "main"))
+           operations
+           warnings)
+      (unwind-protect
+          (cl-letf (((symbol-function 'package-installed-p)
+                     (lambda (_package &optional _min-version) nil))
+                    ((symbol-function 'emacs-hypervisor-bridge--checkout-ref)
+                     (lambda (_entry)
+                       (signal 'emacs-hypervisor-stale-package-lock
+                               '("old-rev" "fatal: unable to read tree old-rev"))))
+                    ((symbol-function 'emacs-hypervisor-bridge--clone-sync)
+                     (lambda (clone-entry)
+                       (push (list :clone
+                                   (plist-get clone-entry :name)
+                                   (emacs-hypervisor-bridge--resolved-rev
+                                    clone-entry)
+                                   (emacs-hypervisor-bridge--clone-command
+                                    clone-entry))
+                             operations)
+                       :ok))
+                    ((symbol-function 'emacs-hypervisor-bridge--prepare-checkout)
+                     (lambda (_entry) (push '(:prepare) operations)))
+                    ((symbol-function 'emacs-hypervisor-bridge--delete-cache-path)
+                     (lambda (_path) nil))
+                    ((symbol-function 'package-vc-install-from-checkout)
+                     (lambda (_dir name) (push (list :install name) operations)))
+                    ((symbol-function 'emacs-hypervisor-bridge--record-vc-lock)
+                     (lambda (_entry)
+                       (emacs-hypervisor-package-lock-put
+                        '(:name "vc-tool" :kind :vc :rev "new-rev"))))
+                    ((symbol-function 'emacs-hypervisor-bridge--note-present)
+                     (lambda (_entry) (push '(:present) operations)))
+                    ((symbol-function 'display-warning)
+                     (lambda (_type message &rest _args)
+                       (push message warnings))))
+            (emacs-hypervisor-bridge--adopt entry)
+            (let ((clone (car (last (nreverse operations) 4))))
+              (should (equal (car clone) :clone))
+              ;; The stale lock is ignored before recloning, so the fallback
+              ;; clone follows the declaration's branch/default target.
+              (should (null (nth 2 clone)))
+              (should (member "--depth" (nth 3 clone))))
+            (should (equal (plist-get (emacs-hypervisor-package-lock-entry
+                                       "vc-tool")
+                                      :rev)
+                           "new-rev"))
+            (should warnings)
+            (should (assoc "vc-tool" emacs-hypervisor-bridge-ignored-locks)))
+        (delete-directory home-dir t)))))
+
 (ert-deftest emacs-hypervisor-upgrade-pinned-package-skips-rebuild ()
   (emacs-hypervisor-test--with-temp-lock
     (let ((entry '(:name "vc-tool" :repo "owner/vc-tool" :tag "v1.0"))

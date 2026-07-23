@@ -21,10 +21,20 @@
 (defvar emacs-hypervisor-bridge-ignore-lock nil
   "Non-nil skips lockfile revision resolution.  Bound during upgrades.")
 
+(defvar emacs-hypervisor-bridge-ignored-locks nil
+  "Alist of lockfile revisions ignored during this session.
+Each entry is (NAME :rev REV :reason REASON).  This is used when an
+unpinned moving-branch package has a lockfile revision that the upstream
+remote no longer serves.")
+
 (defvar emacs-hypervisor-bridge-last-install-info nil
   "Alist of package name to (:rev REV :locked HOW) for this session.
 HOW is :pinned (declared :ref/:tag), :hit (lockfile revision), or
 :miss (no lock entry; branch or default HEAD was used).")
+
+(define-error 'emacs-hypervisor-stale-package-lock
+  "Package lock revision is no longer available upstream"
+  'error)
 
 (defun emacs-hypervisor-bridge--note-install-info (name info)
   (setf (alist-get name emacs-hypervisor-bridge-last-install-info
@@ -235,11 +245,36 @@ Local paths are inherently unlocked; their lock entries are informational."
   "Return the lockfile revision for ENTRY when it should drive resolution."
   (when (and (not emacs-hypervisor-bridge-ignore-lock)
              (not (emacs-hypervisor-bridge--declared-pin entry))
-             (emacs-hypervisor-bridge--lockable-p entry))
+             (emacs-hypervisor-bridge--lockable-p entry)
+             (not (assoc (plist-get entry :name)
+                         emacs-hypervisor-bridge-ignored-locks)))
     (let ((locked (emacs-hypervisor-package-lock-entry
                    (plist-get entry :name))))
       (and (eq (plist-get locked :kind) :vc)
            (plist-get locked :rev)))))
+
+(defun emacs-hypervisor-bridge--lock-checkout-p (entry ref)
+  "Return non-nil when REF came from ENTRY's lockfile, not its declaration."
+  (and ref
+       (not (emacs-hypervisor-bridge--declared-pin entry))
+       (let ((locked (emacs-hypervisor-package-lock-entry
+                      (plist-get entry :name))))
+         (and (eq (plist-get locked :kind) :vc)
+              (equal ref (plist-get locked :rev))))))
+
+(defun emacs-hypervisor-bridge--ignore-stale-lock (entry rev reason)
+  "Ignore ENTRY's stale lock REV for the remainder of this session."
+  (let ((name (plist-get entry :name))
+        (summary (car (split-string (string-trim (or reason "")) "[\r\n]+" t))))
+    (unless (assoc name emacs-hypervisor-bridge-ignored-locks)
+      (push (list name :rev rev :reason summary)
+            emacs-hypervisor-bridge-ignored-locks)
+      (display-warning
+       'emacs-hypervisor
+       (format "Ignoring stale lock for %s at %s; using declaration target%s"
+               name rev
+               (if summary (format " (%s)" summary) "")))))
+  :ignored)
 
 (defun emacs-hypervisor-bridge--resolved-rev (entry)
   "Return the revision to check out for ENTRY: declared pin, then lock."
@@ -278,8 +313,37 @@ Local paths are inherently unlocked; their lock entries are informational."
         (unless (zerop status)
           (let ((output (with-current-buffer buffer (buffer-string))))
             (kill-buffer buffer)
-            (error "git checkout %s failed: %s" ref output)))
+            (if (emacs-hypervisor-bridge--lock-checkout-p entry ref)
+                (signal 'emacs-hypervisor-stale-package-lock
+                        (list ref output))
+              (error "git checkout %s failed: %s" ref output))))
         (kill-buffer buffer)))))
+
+(defun emacs-hypervisor-bridge--clone-sync (entry)
+  "Clone ENTRY synchronously into its staging directory."
+  (let* ((name (plist-get entry :name))
+         (buffer (get-buffer-create (format " *hypervisor-clone-%s*" name)))
+         (command (emacs-hypervisor-bridge--clone-command entry))
+         (dir (emacs-hypervisor-bridge--clone-dir entry))
+         status output)
+    (emacs-hypervisor-bridge--delete-cache-path dir)
+    (with-current-buffer buffer (erase-buffer))
+    (setq status (apply #'call-process (car command) nil buffer nil (cdr command)))
+    (setq output (with-current-buffer buffer (buffer-string)))
+    (kill-buffer buffer)
+    (unless (zerop status)
+      (error "git clone exited %d: %s" status (string-trim output)))
+    :ok))
+
+(defun emacs-hypervisor-bridge--recover-stale-lock (entry condition)
+  "Recover ENTRY after CONDITION reported a stale lock checkout."
+  (let ((rev (cadr condition))
+        (output (caddr condition)))
+    (emacs-hypervisor-bridge--ignore-stale-lock entry rev output)
+    ;; A pre-existing staging checkout may be at an arbitrary commit.  Reclone
+    ;; after ignoring the stale lock so the declaration's branch/default HEAD
+    ;; becomes the concrete install target.
+    (emacs-hypervisor-bridge--clone-sync entry)))
 
 (defun emacs-hypervisor-bridge--start-clone (entry on-done)
   "Spawn an async clone for ENTRY. Calls ON-DONE with :ok or (:error REASON)."
@@ -301,7 +365,11 @@ Local paths are inherently unlocked; their lock entries are informational."
            (if (zerop code)
                (condition-case err
                    (progn
-                     (emacs-hypervisor-bridge--checkout-ref entry)
+                     (condition-case checkout-err
+                         (emacs-hypervisor-bridge--checkout-ref entry)
+                       (emacs-hypervisor-stale-package-lock
+                        (emacs-hypervisor-bridge--ignore-stale-lock
+                         entry (cadr checkout-err) (caddr checkout-err))))
                      (when (buffer-live-p buffer)
                        (kill-buffer buffer))
                      (funcall on-done :ok))
@@ -417,7 +485,10 @@ that are not on any archive."
       ;; A leftover clone from an interrupted install may sit at an arbitrary
       ;; commit; enforce the declared pin or locked revision before building
       ;; so adoption is idempotent regardless of how the clone got here.
-      (emacs-hypervisor-bridge--checkout-ref entry)
+      (condition-case err
+          (emacs-hypervisor-bridge--checkout-ref entry)
+        (emacs-hypervisor-stale-package-lock
+         (emacs-hypervisor-bridge--recover-stale-lock entry err)))
       ;; Fetch submodules and build any compiled artifact in the checkout before
       ;; package-vc symlinks and byte-compiles it.
       (emacs-hypervisor-bridge--prepare-checkout entry)
