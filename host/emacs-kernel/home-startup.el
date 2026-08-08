@@ -26,7 +26,34 @@ file loads; keep the two in sync."
   (expand-file-name "config.el" (emacs-hypervisor--config-directory)))
 
 (defvar emacs-hypervisor-config-org-file
-  (expand-file-name "config.org" (emacs-hypervisor--config-directory)))
+  (expand-file-name "config.org" (emacs-hypervisor--config-directory))
+  "Literate config source, as one path or an ordered list of paths.
+A list is tangled in list order and concatenated into one shadow file, so
+a large config can live in several org files without an `#+INCLUDE' step.
+List order is config load order.")
+
+(defun emacs-hypervisor--config-org-file-list ()
+  "Return `emacs-hypervisor-config-org-file' normalized to a list."
+  (cond
+   ((null emacs-hypervisor-config-org-file) nil)
+   ((stringp emacs-hypervisor-config-org-file)
+    (list emacs-hypervisor-config-org-file))
+   (t emacs-hypervisor-config-org-file)))
+
+(defun emacs-hypervisor--existing-config-org-file ()
+  "Return the first literate config source that exists, or nil.
+Names the config in boot context and startup messages.  Presence of any
+source is what selects the literate startup path.
+
+Written without `seq' or `cl-lib' because this file is the trusted kernel
+and runs before the runtime modules load."
+  (let ((files (emacs-hypervisor--config-org-file-list))
+        found)
+    (while (and files (not found))
+      (when (file-exists-p (car files))
+        (setq found (car files)))
+      (setq files (cdr files)))
+    found))
 
 (defvar emacs-hypervisor-env-file
   (expand-file-name
@@ -267,8 +294,9 @@ over a stale pre-env-file hit.  Return the binary to cache, or nil."
              init-metadata
              (when (emacs-hypervisor--check-mode-p)
                (list :check t))
-             (when (file-exists-p emacs-hypervisor-config-org-file)
-               (list :config-org-file emacs-hypervisor-config-org-file))))))
+             (let ((org-file (emacs-hypervisor--existing-config-org-file)))
+               (when org-file
+                 (list :config-org-file org-file)))))))
   (setq emacs-hypervisor-session-data-function
         (lambda (&optional fields)
           (or (and (fboundp 'emacs-hypervisor-export-session-data)
@@ -294,7 +322,7 @@ over a stale pre-env-file hit.  Return the binary to cache, or nil."
    "emacs-hypervisor-init"))
 
 (cond
- ((file-exists-p emacs-hypervisor-config-org-file)
+ ((emacs-hypervisor--existing-config-org-file)
   (when (file-exists-p emacs-hypervisor-config-file)
     (message "[Hypervisor] both config.org and config.el found; using config.org (config.el is ignored)"))
   (emacs-hypervisor-start-home-session)

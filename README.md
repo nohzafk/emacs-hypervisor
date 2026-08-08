@@ -142,6 +142,38 @@ Tangling uses Emacs's built-in `org-babel-tangle-file` with a language filter
 for `elisp` and `emacs-lisp`. The typical overhead is under 200ms for a
 2000-line config.
 
+### Splitting a large literate config
+
+`emacs-hypervisor-config-org-file` accepts an ordered list of paths as well as
+a single path. Each file is tangled separately and the results are
+concatenated in list order into one `.config.tangled.el`, so a config that has
+outgrown one file can be split without an Org `#+INCLUDE` step:
+
+```elisp
+;; In the Hypervisor config early-init.el
+(setq emacs-hypervisor-config-org-file
+      (mapcar (lambda (name)
+                (expand-file-name name "~/.config/emacs-hypervisor/chapters/"))
+              '("00-overview.org"
+                "10-editor.org"
+                "20-languages.org")))
+```
+
+List order is load order. Hypervisor does not scan a directory for you: a
+literate config is order-sensitive, because `package!` must be declared before
+the `config-unit!` that requires it, so the order is worth stating explicitly
+rather than deriving from file names.
+
+Hypervisor has no notion of what the files represent. Split them however suits
+the config; the names above are only an example.
+
+Every block keeps provenance to the file it was written in, so a failing unit
+reports and jumps to the right source file rather than to a merged whole. The
+shadow `.config.tangled.el` is written beside the first file in the list.
+
+Presence of any listed file selects the literate startup path. Files that do
+not exist are skipped, so a list may name optional, machine-specific chapters.
+
 ## Why Eager Loading
 
 Lazy loading is the default tradeoff in most Emacs configs: defer everything to
@@ -449,7 +481,7 @@ Set these in the Hypervisor config `early-init.el` before the generated
 | Variable | Default | Purpose |
 |---|---|---|
 | `emacs-hypervisor-config-file` | `config.el` in Hypervisor config directory | Plain config file to load when `config.org` is absent |
-| `emacs-hypervisor-config-org-file` | `config.org` in Hypervisor config directory | Literate config file to tangle and load when present |
+| `emacs-hypervisor-config-org-file` | `config.org` in Hypervisor config directory | Literate config to tangle and load when present. One path, or an ordered list of paths tangled in list order |
 | `emacs-hypervisor-env-file` | `env` in Emacs home | Env snapshot file (or `EMACS_HYPERVISOR_ENV_FILE`) |
 | `emacs-hypervisor-binary-name` | `"emacs-hypervisor"` | Binary name for `PATH` lookup |
 | `emacs-hypervisor-open-buffer-on-abnormal-exit` | `t` | Show process buffer on abnormal exit |

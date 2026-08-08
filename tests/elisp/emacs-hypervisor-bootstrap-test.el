@@ -3459,3 +3459,177 @@ Return a cons cell of (STATUS . OUTPUT)."
   (should (equal (emacs-hypervisor--format-reason-and-details
                   :duplicate-name '(:occurrences 2))
                  "declared 2 times")))
+
+;;; Multi-file literate config
+;;
+;; `emacs-hypervisor-config-org-file' accepts an ordered list so a large
+;; literate config can live in several org files.  Hypervisor holds no
+;; opinion on how the files are split or named; the list is the user's
+;; explicit load order.
+
+(defun emacs-hypervisor-test--exported-unit (units name)
+  "Return the exported unit called NAME from UNITS."
+  (cl-find name units
+           :key (lambda (unit) (plist-get unit :name))
+           :test #'equal))
+
+(ert-deftest emacs-hypervisor-config-org-files-normalizes-path-and-list ()
+  (let ((emacs-hypervisor-config-org-file "/tmp/only.org"))
+    (should (equal (emacs-hypervisor--config-org-files) '("/tmp/only.org")))
+    (should (equal (emacs-hypervisor--config-org-file) "/tmp/only.org")))
+  (let ((emacs-hypervisor-config-org-file '("/tmp/a.org" "/tmp/b.org")))
+    (should (equal (emacs-hypervisor--config-org-files)
+                   '("/tmp/a.org" "/tmp/b.org")))
+    ;; The representative path is the first source, never a truncation the
+    ;; tangle path could act on.
+    (should (equal (emacs-hypervisor--config-org-file) "/tmp/a.org")))
+  (let ((emacs-hypervisor-config-org-file nil))
+    (should-not (emacs-hypervisor--config-org-files))
+    (should-not (emacs-hypervisor--config-org-file)))
+  (let ((emacs-hypervisor-config-org-file '("/tmp/a.org" 42)))
+    (should-error (emacs-hypervisor--config-org-files)))
+  (let ((emacs-hypervisor-config-org-file 42))
+    (should-error (emacs-hypervisor--config-org-files))))
+
+(ert-deftest emacs-hypervisor-existing-config-org-files-skips-missing ()
+  (let* ((config-dir (make-temp-file "hypervisor-existing-org" t))
+         (present (expand-file-name "present.org" config-dir))
+         (absent (expand-file-name "absent.org" config-dir))
+         (emacs-hypervisor-config-org-file (list absent present)))
+    (unwind-protect
+        (progn
+          (with-temp-file present (insert "* Present\n"))
+          (should (equal (emacs-hypervisor--existing-config-org-files)
+                         (list present))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-tangle-multiple-org-files-keeps-per-file-provenance ()
+  (let* ((config-dir (make-temp-file "hypervisor-multi-org" t))
+         (first-org (expand-file-name "00-first.org" config-dir))
+         (second-org (expand-file-name "10-second.org" config-dir))
+         (emacs-hypervisor-config-org-file (list first-org second-org)))
+    (unwind-protect
+        (progn
+          (with-temp-file first-org
+            (insert "* First\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    "(config-unit! first-unit\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 1))\n"
+                    "#+end_src\n"))
+          ;; Prose of a different length in each file, so a marker that
+          ;; resolved against the wrong file would land on the wrong line
+          ;; instead of coincidentally matching.
+          (with-temp-file second-org
+            (insert "* Second\n\n"
+                    "Prose that pushes this block further down the file.\n\n"
+                    "More prose.\n\n"
+                    "#+begin_src emacs-lisp\n"
+                    "(config-unit! second-unit\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value 2))\n"
+                    "#+end_src\n"))
+          (emacs-hypervisor-reset-declarations)
+          (let ((tangled (emacs-hypervisor--tangle-config-org-files
+                          (list first-org second-org))))
+            ;; The shadow file lands beside the first source.
+            (should (equal tangled
+                           (expand-file-name ".config.tangled.el" config-dir)))
+            (emacs-hypervisor--load-with-source-map tangled))
+          (let* ((units (emacs-hypervisor-export-config-units))
+                 (first-unit (emacs-hypervisor-test--exported-unit units "first-unit"))
+                 (second-unit (emacs-hypervisor-test--exported-unit units "second-unit")))
+            (should first-unit)
+            (should second-unit)
+            ;; Each block points at the file it was written in, not at a
+            ;; single merged config.
+            (should (equal (plist-get (plist-get first-unit :source) :file)
+                           first-org))
+            (should (equal (plist-get (plist-get first-unit :source) :heading)
+                           "First"))
+            (should (equal (plist-get (plist-get first-unit :source) :line) 4))
+            (should (equal (plist-get (plist-get second-unit :source) :file)
+                           second-org))
+            (should (equal (plist-get (plist-get second-unit :source) :heading)
+                           "Second"))
+            ;; heading 1, blank 2, prose 3, blank 4, prose 5, blank 6,
+            ;; begin_src 7, (config-unit! 8.
+            (should (equal (plist-get (plist-get second-unit :source) :line) 8))))
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-tangle-multiple-org-files-concatenates-in-list-order ()
+  (let* ((config-dir (make-temp-file "hypervisor-multi-order" t))
+         (first-org (expand-file-name "00-first.org" config-dir))
+         (second-org (expand-file-name "10-second.org" config-dir))
+         (emacs-hypervisor-config-org-file (list first-org second-org)))
+    (unwind-protect
+        (progn
+          (with-temp-file first-org
+            (insert "#+begin_src emacs-lisp\n(setq order-marker 'first)\n#+end_src\n"))
+          (with-temp-file second-org
+            (insert "#+begin_src emacs-lisp\n(setq order-marker 'second)\n#+end_src\n"))
+          (let ((tangled (emacs-hypervisor--tangle-config-org-files
+                          (list first-org second-org))))
+            (with-temp-buffer
+              (insert-file-contents tangled)
+              (let ((first-pos (progn (goto-char (point-min))
+                                      (search-forward "'first" nil t)))
+                    (second-pos (progn (goto-char (point-min))
+                                       (search-forward "'second" nil t))))
+                (should first-pos)
+                (should second-pos)
+                (should (< first-pos second-pos)))))
+          ;; Reversing the list reverses the tangled order, so order is the
+          ;; list's and not the file system's.
+          (let ((tangled (emacs-hypervisor--tangle-config-org-files
+                          (list second-org first-org))))
+            (with-temp-buffer
+              (insert-file-contents tangled)
+              (let ((first-pos (progn (goto-char (point-min))
+                                      (search-forward "'first" nil t)))
+                    (second-pos (progn (goto-char (point-min))
+                                       (search-forward "'second" nil t))))
+                (should (< second-pos first-pos))))))
+      (delete-directory config-dir t))))
+
+(ert-deftest emacs-hypervisor-reload-config-tangles-multiple-org-files ()
+  (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload-multi" t))
+         (config-file (expand-file-name "config.el" temp-dir))
+         (first-org (expand-file-name "00-first.org" temp-dir))
+         (second-org (expand-file-name "10-second.org" temp-dir))
+         (tangled-file (expand-file-name ".config.tangled.el" temp-dir))
+         (env-file (expand-file-name "env" temp-dir))
+         (emacs-hypervisor-config-file config-file)
+         (emacs-hypervisor-config-org-file (list first-org second-org))
+         (emacs-hypervisor-env-file env-file)
+         (emacs-hypervisor--process nil)
+         (emacs-hypervisor-test-runtime-value 0))
+    (unwind-protect
+        (progn
+          (emacs-hypervisor-reset-declarations)
+          (with-temp-file first-org
+            (insert "#+begin_src elisp\n"
+                    "(config-unit! from-first\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value\n"
+                    "        (+ emacs-hypervisor-test-runtime-value 1)))\n"
+                    "#+end_src\n"))
+          (with-temp-file second-org
+            (insert "#+begin_src emacs-lisp\n"
+                    "(config-unit! from-second\n"
+                    "  :config\n"
+                    "  (setq emacs-hypervisor-test-runtime-value\n"
+                    "        (+ emacs-hypervisor-test-runtime-value 41)))\n"
+                    "#+end_src\n"))
+          (should-not (file-exists-p tangled-file))
+          (let ((report (emacs-hypervisor-reload-config)))
+            (should (eq (plist-get report :kind) :config-reload))
+            (should (file-exists-p tangled-file))
+            (should (emacs-hypervisor-test--report
+                     (plist-get report :reports) "from-first"))
+            (should (emacs-hypervisor-test--report
+                     (plist-get report :reports) "from-second"))
+            (should (= emacs-hypervisor-test-runtime-value 42))))
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory temp-dir t))))

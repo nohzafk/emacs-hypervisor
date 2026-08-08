@@ -2,6 +2,7 @@
 
 (require 'emacs-hypervisor-config-paths)
 (require 'emacs-hypervisor-declarations)
+(require 'seq)
 
 ;; `ob-tangle' is only loaded inside the tangle function to keep org out of
 ;; non-literate startups.  Forward-declare its special variables so the
@@ -9,6 +10,7 @@
 (defvar org-babel-default-header-args)
 (defvar org-babel-tangle-comment-format-beg)
 (defvar org-babel-tangle-comment-format-end)
+(defvar org-babel-tangle-use-relative-file-links)
 (declare-function org-babel-merge-params "ob-core")
 (declare-function org-babel-tangle-file "ob-tangle")
 
@@ -30,26 +32,65 @@
   "^;;+ hypervisor-block-begin file:\\(.*\\) line:\\([0-9]+\\) name:\\(.*\\)$"
   "Regexp matching the begin marker emitted into the tangled file.")
 
+(defun emacs-hypervisor--tangle-one-config-org-file (config-org-file target)
+  "Tangle CONFIG-ORG-FILE to TARGET and return TARGET.
+Injects `:comments link' so each tangled block carries an org provenance
+marker; blocks that set `:comments' explicitly keep their own setting.
+
+`org-babel-tangle-use-relative-file-links' is bound to nil so each marker
+records an absolute source path.  Org otherwise writes the path relative
+to the org file's own directory, which collapses to a bare file name and
+cannot be resolved back to the right file once several sources tangle
+into one shadow file."
+  (require 'ob-tangle)
+  (let ((org-babel-default-header-args
+         (org-babel-merge-params org-babel-default-header-args
+                                 '((:comments . "link"))))
+        (org-babel-tangle-comment-format-beg
+         emacs-hypervisor--tangle-comment-format-beg)
+        (org-babel-tangle-comment-format-end
+         emacs-hypervisor--tangle-comment-format-end)
+        (org-babel-tangle-use-relative-file-links nil))
+    (org-babel-tangle-file
+     config-org-file target
+     emacs-hypervisor--config-org-elisp-lang-regexp))
+  target)
+
+(defun emacs-hypervisor--tangle-config-org-files (config-org-files)
+  "Tangle CONFIG-ORG-FILES in order and return the generated load target.
+Each source tangles separately, so every block keeps provenance to the
+file it was written in.  The per-source output is concatenated in list
+order into a single shadow file, which stays the unit Hypervisor loads."
+  (let* ((sources (if (listp config-org-files)
+                      config-org-files
+                    (list config-org-files)))
+         ;; Beside the first source, which for a single-file config is the
+         ;; same directory `config.org' has always tangled into.
+         (tangled-file (expand-file-name
+                        ".config.tangled.el"
+                        (file-name-directory (car sources))))
+         (staging (make-temp-file "emacs-hypervisor-tangle" t)))
+    (unwind-protect
+        (let ((parts
+               (seq-map-indexed
+                (lambda (source index)
+                  (emacs-hypervisor--tangle-one-config-org-file
+                   source
+                   (expand-file-name (format "%03d.el" index) staging)))
+                sources)))
+          (with-temp-file tangled-file
+            (dolist (part parts)
+              (when (file-exists-p part)
+                (insert-file-contents part)
+                (goto-char (point-max))
+                (unless (bolp) (insert "\n"))))))
+      (delete-directory staging t))
+    tangled-file))
+
 (defun emacs-hypervisor--tangle-config-org-file (config-org-file)
   "Tangle CONFIG-ORG-FILE and return the generated load target.
-Injects `:comments link' so each tangled block carries an org provenance
-marker; blocks that set `:comments' explicitly keep their own setting."
-  (let ((tangled-file
-         (expand-file-name
-          ".config.tangled.el"
-          (file-name-directory config-org-file))))
-    (require 'ob-tangle)
-    (let ((org-babel-default-header-args
-           (org-babel-merge-params org-babel-default-header-args
-                                   '((:comments . "link"))))
-          (org-babel-tangle-comment-format-beg
-           emacs-hypervisor--tangle-comment-format-beg)
-          (org-babel-tangle-comment-format-end
-           emacs-hypervisor--tangle-comment-format-end))
-      (org-babel-tangle-file
-       config-org-file tangled-file
-       emacs-hypervisor--config-org-elisp-lang-regexp))
-    tangled-file))
+CONFIG-ORG-FILE may be one path or an ordered list of paths."
+  (emacs-hypervisor--tangle-config-org-files config-org-file))
 
 (defun emacs-hypervisor--source-name-heading (name)
   "Return the heading label from a tangle marker NAME.
@@ -125,23 +166,26 @@ Declarations evaluated during the load capture their `config.org' (or
 
 (defun emacs-hypervisor-config-loader-prepare-load-target
     (&optional config-file config-org-file)
-  "Return the config file to load, tangling CONFIG-ORG-FILE when present."
-  (let ((config-file (or config-file (emacs-hypervisor--config-file)))
-        (config-org-file
-         (or config-org-file
-             (let ((path (emacs-hypervisor--config-org-file)))
-               (and (file-exists-p path) path)))))
-    (if config-org-file
-        (emacs-hypervisor--tangle-config-org-file config-org-file)
+  "Return the config file to load, tangling CONFIG-ORG-FILE when present.
+CONFIG-ORG-FILE may be one path or an ordered list of paths.  When it is
+omitted, the configured literate sources that exist on disk are used."
+  (let* ((config-file (or config-file (emacs-hypervisor--config-file)))
+         (sources
+          (if config-org-file
+              (if (listp config-org-file) config-org-file (list config-org-file))
+            (emacs-hypervisor--existing-config-org-files))))
+    (if sources
+        (emacs-hypervisor--tangle-config-org-files sources)
       config-file)))
 
 (defun emacs-hypervisor-tangle-config ()
-  "Tangle repo-root config.org into the shadow tangled file."
+  "Tangle the configured literate config sources into the shadow file."
   (interactive)
-  (let ((config-org-file (emacs-hypervisor--config-org-file)))
-    (unless (and config-org-file (file-exists-p config-org-file))
-      (user-error "No config.org at %s" config-org-file))
-    (emacs-hypervisor--tangle-config-org-file config-org-file)))
+  (let ((sources (emacs-hypervisor--existing-config-org-files)))
+    (unless sources
+      (user-error "No literate config found at %s"
+                  (string-join (emacs-hypervisor--config-org-files) ", ")))
+    (emacs-hypervisor--tangle-config-org-files sources)))
 
 (defun emacs-hypervisor-load-startup-config (&optional config-file config-org-file)
   "Reset declarations and load CONFIG-FILE or tangled CONFIG-ORG-FILE.

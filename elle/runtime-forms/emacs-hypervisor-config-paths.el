@@ -7,6 +7,14 @@
 ;; `emacs-hypervisor-config-file', `emacs-hypervisor-config-org-file', and
 ;; `emacs-hypervisor-env-file' (declared in `home-startup.el') override the
 ;; defaults when bound.
+;;
+;; `emacs-hypervisor-config-org-file' holds either one path or an ordered
+;; list of paths.  A list lets a large literate config live in several files
+;; without an org `#+INCLUDE' step; the files are tangled in list order and
+;; their blocks are concatenated into one shadow file.  Hypervisor has no
+;; opinion on how the list is split or what the files are called.
+
+(require 'seq)
 
 (defun emacs-hypervisor--repo-file (name)
   (expand-file-name name user-emacs-directory))
@@ -30,13 +38,46 @@
       emacs-hypervisor-config-file
     (expand-file-name "config.el" (emacs-hypervisor--config-directory))))
 
+(defun emacs-hypervisor--config-org-files ()
+  "Return the configured literate config sources as an ordered list.
+
+`emacs-hypervisor-config-org-file' may hold one path or a list of paths.
+List order is tangle order, and therefore config load order, so it is the
+user's explicit declaration rather than a directory scan."
+  (let ((configured
+         (if (boundp 'emacs-hypervisor-config-org-file)
+             emacs-hypervisor-config-org-file
+           (expand-file-name "config.org"
+                             (emacs-hypervisor--config-directory)))))
+    (cond
+     ((null configured) nil)
+     ((stringp configured) (list configured))
+     ((consp configured)
+      (unless (seq-every-p #'stringp configured)
+        (error "`emacs-hypervisor-config-org-file' list must hold paths: %S"
+               configured))
+      (copy-sequence configured))
+     (t
+      (error "`emacs-hypervisor-config-org-file' must be a path or list: %S"
+             configured)))))
+
+(defun emacs-hypervisor--existing-config-org-files ()
+  "Return the configured literate config sources that exist on disk."
+  (seq-filter #'file-exists-p (emacs-hypervisor--config-org-files)))
+
 (defun emacs-hypervisor--config-org-file ()
-  (if (boundp 'emacs-hypervisor-config-org-file)
-      emacs-hypervisor-config-org-file
-    (expand-file-name "config.org" (emacs-hypervisor--config-directory))))
+  "Return one representative literate config source, or nil.
+
+This is the first configured source.  It names the config in boot context
+and load-failure messages; anything that tangles must use
+`emacs-hypervisor--config-org-files' so a multi-file config is not
+silently truncated to its first file."
+  (car (emacs-hypervisor--config-org-files)))
 
 (defun emacs-hypervisor--config-tangled-file ()
-  "Return the shadow file path for tangled config.org output."
+  "Return the shadow file path for tangled literate config output.
+Anchored beside the first configured source, so a single-file config puts
+the shadow next to its `config.org' exactly as before."
   (let ((org-file (emacs-hypervisor--config-org-file)))
     (when org-file
       (expand-file-name ".config.tangled.el"

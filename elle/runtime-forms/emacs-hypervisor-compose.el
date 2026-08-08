@@ -24,18 +24,22 @@ previous changed or removed units before applying new bodies."
   (let ((emacs-hypervisor--reload-logging-active t))
     (emacs-hypervisor--reload-log "Reload started")
     (let* ((config-file (emacs-hypervisor--config-file))
-           (config-org-file (emacs-hypervisor--config-org-file))
-           (use-org (and config-org-file (file-exists-p config-org-file)))
+           ;; Every existing literate source, not just the first: a
+           ;; multi-file config must reload as a whole.
+           (config-org-files (emacs-hypervisor--existing-config-org-files))
+           (use-org (and config-org-files t))
            (previous-packages (emacs-hypervisor--declared-package-names))
            (previous-units (emacs-hypervisor-export-config-units)))
       (when use-org
         (setq config-file
               (emacs-hypervisor-config-loader-prepare-load-target
                config-file
-               config-org-file)))
+               config-org-files)))
       (unless (file-exists-p config-file)
         (error "No config file found at %s"
-               (if use-org config-org-file config-file)))
+               (if use-org
+                   (string-join config-org-files ", ")
+                 config-file)))
       (emacs-hypervisor-load-envvars-file (emacs-hypervisor--env-file) t)
       (emacs-hypervisor-reset-declarations)
       (load-file config-file)
