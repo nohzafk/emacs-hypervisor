@@ -1433,10 +1433,17 @@ Return a cons cell of (STATUS . OUTPUT)."
       (delete-directory temp-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-tangles-config-org ()
+  ;; The shadow file is anchored on the Hypervisor config directory, so
+  ;; XDG_CONFIG_HOME is redirected to keep the test off the real one.
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-reload-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
          (config-file (expand-file-name "config.el" temp-dir))
          (config-org-file (expand-file-name "config.org" temp-dir))
-         (tangled-file (expand-file-name ".config.tangled.el" temp-dir))
+         (tangled-file (expand-file-name ".config.tangled.el" config-dir))
          (env-file (expand-file-name "env" temp-dir))
          (emacs-hypervisor-config-file config-file)
          (emacs-hypervisor-config-org-file config-org-file)
@@ -1474,7 +1481,8 @@ Return a cons cell of (STATUS . OUTPUT)."
               (plist-get report :reports) "from-emacs-lisp"))
             (should (= emacs-hypervisor-test-runtime-value 42))))
       (emacs-hypervisor-reset-declarations)
-      (delete-directory temp-dir t))))
+      (delete-directory temp-dir t)
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-tangles-config-org-from-fixed-config-directory ()
   (let* ((home-dir (make-temp-file "emacs-hypervisor-home" t))
@@ -1515,7 +1523,13 @@ Return a cons cell of (STATUS . OUTPUT)."
       (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-org-skips-tangle-no-blocks ()
+  ;; Tangles, so XDG_CONFIG_HOME is redirected to keep the shadow file out
+  ;; of the real Hypervisor config directory.
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-noblocks-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (_ (make-directory (expand-file-name "emacs-hypervisor/" xdg-dir) t))
          (config-file (expand-file-name "config.el" temp-dir))
          (config-org-file (expand-file-name "config.org" temp-dir))
          (env-file (expand-file-name "env" temp-dir))
@@ -1546,7 +1560,8 @@ Return a cons cell of (STATUS . OUTPUT)."
              (emacs-hypervisor-test--report
               (plist-get report :reports) "skipped"))))
       (emacs-hypervisor-reset-declarations)
-      (delete-directory temp-dir t))))
+      (delete-directory temp-dir t)
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-load-envvars-file-updates-runtime-environment ()
   (let* ((path-dir "/tmp/emacs-hypervisor-test-bin")
@@ -3121,7 +3136,14 @@ Return a cons cell of (STATUS . OUTPUT)."
 (require 'emacs-hypervisor-config-loader)
 
 (ert-deftest emacs-hypervisor-source-map-resolves-org-heading-and-line ()
-  (let* ((config-dir (make-temp-file "hypervisor-source-map" t))
+  ;; XDG_CONFIG_HOME is redirected because the shadow file is written to the
+  ;; Hypervisor config directory; without this the test writes into the real
+  ;; one.
+  (let* ((xdg-dir (make-temp-file "hypervisor-source-map-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
          (org-file (expand-file-name "config.org" config-dir)))
     (unwind-protect
         (progn
@@ -3149,7 +3171,7 @@ Return a cons cell of (STATUS . OUTPUT)."
             ;; begin_src 9, comment 10, (config-unit! 11.
             (should (equal (plist-get source :line) 11))
             (should (integerp (plist-get source :tangled-line)))))
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-source-map-resolves-plain-config-el-line ()
   (let* ((config-dir (make-temp-file "hypervisor-source-el" t))
@@ -3504,7 +3526,11 @@ Return a cons cell of (STATUS . OUTPUT)."
       (delete-directory config-dir t))))
 
 (ert-deftest emacs-hypervisor-tangle-multiple-org-files-keeps-per-file-provenance ()
-  (let* ((config-dir (make-temp-file "hypervisor-multi-org" t))
+  (let* ((xdg-dir (make-temp-file "hypervisor-multi-org-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
          (first-org (expand-file-name "00-first.org" config-dir))
          (second-org (expand-file-name "10-second.org" config-dir))
          (emacs-hypervisor-config-org-file (list first-org second-org)))
@@ -3532,7 +3558,7 @@ Return a cons cell of (STATUS . OUTPUT)."
           (emacs-hypervisor-reset-declarations)
           (let ((tangled (emacs-hypervisor--tangle-config-org-files
                           (list first-org second-org))))
-            ;; The shadow file lands beside the first source.
+            ;; The shadow file lands in the Hypervisor config directory.
             (should (equal tangled
                            (expand-file-name ".config.tangled.el" config-dir)))
             (emacs-hypervisor--load-with-source-map tangled))
@@ -3556,10 +3582,14 @@ Return a cons cell of (STATUS . OUTPUT)."
             ;; begin_src 7, (config-unit! 8.
             (should (equal (plist-get (plist-get second-unit :source) :line) 8))))
       (emacs-hypervisor-reset-declarations)
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-tangle-multiple-org-files-concatenates-in-list-order ()
-  (let* ((config-dir (make-temp-file "hypervisor-multi-order" t))
+  (let* ((xdg-dir (make-temp-file "hypervisor-multi-order-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
          (first-org (expand-file-name "00-first.org" config-dir))
          (second-org (expand-file-name "10-second.org" config-dir))
          (emacs-hypervisor-config-org-file (list first-org second-org)))
@@ -3591,14 +3621,22 @@ Return a cons cell of (STATUS . OUTPUT)."
                     (second-pos (progn (goto-char (point-min))
                                        (search-forward "'second" nil t))))
                 (should (< second-pos first-pos))))))
-      (delete-directory config-dir t))))
+      (delete-directory xdg-dir t))))
 
 (ert-deftest emacs-hypervisor-reload-config-tangles-multiple-org-files ()
   (let* ((temp-dir (make-temp-file "emacs-hypervisor-reload-multi" t))
+         (xdg-dir (make-temp-file "emacs-hypervisor-reload-multi-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
          (config-file (expand-file-name "config.el" temp-dir))
          (first-org (expand-file-name "00-first.org" temp-dir))
          (second-org (expand-file-name "10-second.org" temp-dir))
-         (tangled-file (expand-file-name ".config.tangled.el" temp-dir))
+         ;; Sources live outside the config directory; the shadow still
+         ;; lands in the config directory, which is what the config sees
+         ;; as its root while loading.
+         (tangled-file (expand-file-name ".config.tangled.el" config-dir))
          (env-file (expand-file-name "env" temp-dir))
          (emacs-hypervisor-config-file config-file)
          (emacs-hypervisor-config-org-file (list first-org second-org))
@@ -3632,4 +3670,56 @@ Return a cons cell of (STATUS . OUTPUT)."
                      (plist-get report :reports) "from-second"))
             (should (= emacs-hypervisor-test-runtime-value 42))))
       (emacs-hypervisor-reset-declarations)
-      (delete-directory temp-dir t))))
+      (delete-directory temp-dir t)
+      (delete-directory xdg-dir t))))
+
+(ert-deftest emacs-hypervisor-sources-in-subdirectory-still-load-from-config-root ()
+  "A config whose sources sit in a subdirectory keeps the config root.
+
+Regression: the shadow file was briefly written beside the first source,
+which put `load-file-name' and `default-directory' inside the source
+subdirectory.  A config that loads its own relative paths, the common
+`lisp/' directory case, then resolved them one level too deep and every
+such unit failed with `file-missing'."
+  (let* ((xdg-dir (make-temp-file "hypervisor-subdir-xdg" t))
+         (process-environment (copy-sequence process-environment))
+         (_ (setenv "XDG_CONFIG_HOME" xdg-dir))
+         (config-dir (expand-file-name "emacs-hypervisor/" xdg-dir))
+         (_ (make-directory config-dir t))
+         (chapters-dir (expand-file-name "chapters/" config-dir))
+         (_ (make-directory chapters-dir t))
+         (lisp-dir (expand-file-name "lisp/" config-dir))
+         (_ (make-directory lisp-dir t))
+         (sidecar (expand-file-name "sidecar.el" lisp-dir))
+         (chapter (expand-file-name "10-main.org" chapters-dir))
+         (emacs-hypervisor-config-org-file (list chapter))
+         (emacs-hypervisor-test-runtime-value 0))
+    (unwind-protect
+        (progn
+          (with-temp-file sidecar
+            (insert "(setq emacs-hypervisor-test-runtime-value 7)\n"
+                    "(provide 'sidecar)\n"))
+          ;; Exactly the shape a real config uses: derive the root from
+          ;; `load-file-name', then load a sibling file relative to it.
+          (with-temp-file chapter
+            (insert "#+begin_src emacs-lisp\n"
+                    "(load (expand-file-name\n"
+                    "       \"lisp/sidecar.el\"\n"
+                    "       (file-name-directory load-file-name)))\n"
+                    "#+end_src\n"))
+          (emacs-hypervisor-reset-declarations)
+          (let ((tangled (emacs-hypervisor--tangle-config-org-files
+                          (list chapter))))
+            (should (equal tangled
+                           (expand-file-name ".config.tangled.el" config-dir)))
+            (emacs-hypervisor--load-with-source-map tangled))
+          (should (= emacs-hypervisor-test-runtime-value 7))
+          ;; Provenance still names the chapter, not the shadow file.
+          (let ((markers
+                 (with-temp-buffer
+                   (insert-file-contents
+                    (expand-file-name ".config.tangled.el" config-dir))
+                   (emacs-hypervisor--source-map-markers config-dir))))
+            (should (equal (nth 1 (car markers)) chapter))))
+      (emacs-hypervisor-reset-declarations)
+      (delete-directory xdg-dir t))))

@@ -64,11 +64,7 @@ order into a single shadow file, which stays the unit Hypervisor loads."
   (let* ((sources (if (listp config-org-files)
                       config-org-files
                     (list config-org-files)))
-         ;; Beside the first source, which for a single-file config is the
-         ;; same directory `config.org' has always tangled into.
-         (tangled-file (expand-file-name
-                        ".config.tangled.el"
-                        (file-name-directory (car sources))))
+         (tangled-file (emacs-hypervisor--config-tangled-file))
          (staging (make-temp-file "emacs-hypervisor-tangle" t)))
     (unwind-protect
         (let ((parts

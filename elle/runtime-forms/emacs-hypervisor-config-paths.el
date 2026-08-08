@@ -76,12 +76,15 @@ silently truncated to its first file."
 
 (defun emacs-hypervisor--config-tangled-file ()
   "Return the shadow file path for tangled literate config output.
-Anchored beside the first configured source, so a single-file config puts
-the shadow next to its `config.org' exactly as before."
-  (let ((org-file (emacs-hypervisor--config-org-file)))
-    (when org-file
-      (expand-file-name ".config.tangled.el"
-                        (file-name-directory org-file)))))
+
+Anchored on the Hypervisor config directory, not on a source file's
+directory.  The shadow is the tangled whole config, so its directory is
+what the config sees as `load-file-name' and `default-directory' while it
+loads.  That has to be the config root: a config that keeps its sources in
+a subdirectory still resolves its own relative paths, such as a `lisp/'
+directory, against the root."
+  (expand-file-name ".config.tangled.el"
+                    (emacs-hypervisor--config-directory)))
 
 (defun emacs-hypervisor--env-file ()
   (if (boundp 'emacs-hypervisor-env-file)

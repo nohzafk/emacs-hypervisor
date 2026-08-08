@@ -168,8 +168,13 @@ Hypervisor has no notion of what the files represent. Split them however suits
 the config; the names above are only an example.
 
 Every block keeps provenance to the file it was written in, so a failing unit
-reports and jumps to the right source file rather than to a merged whole. The
-shadow `.config.tangled.el` is written beside the first file in the list.
+reports and jumps to the right source file rather than to a merged whole.
+
+The shadow `.config.tangled.el` is written to the Hypervisor config directory,
+whatever directory the sources live in. That directory is what the config sees
+as `load-file-name` and `default-directory` while it loads, so a config that
+keeps its sources in a subdirectory still resolves its own relative paths, such
+as a `lisp/` directory, against the config root.
 
 Presence of any listed file selects the literate startup path. Files that do
 not exist are skipped, so a list may name optional, machine-specific chapters.
