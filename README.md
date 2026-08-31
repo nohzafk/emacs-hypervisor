@@ -679,7 +679,9 @@ The build uses a repo-local Elle checkout (`.elle`, pinned by `.elle-ref`).
   (e.g. a recursive `match` walk over a `map`-built list) freed the caller's
   still-live scrutinee region. The lowerer marks these bindings borrowed and
   mints the callee's release.
-- `0002-io-stdin-readline-past-buffer.patch`: `port/read-line` reserves 64 KiB,
+- `0002-io-stdin-readline-past-buffer.patch`
+  ([elle-lisp/elle#1003](https://github.com/elle-lisp/elle/pull/1003)):
+  `port/read-line` reserves 64 KiB,
   but a line has no upper bound and the worker reads to the newline however far
   away it is. Sockets and files already answer such a line whole, through
   `complete_port_op` / `read_result`; stdin has its own worker and its own

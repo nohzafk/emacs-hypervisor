@@ -1,6 +1,9 @@
 From: randallwang <randallwang@localhost>
 Subject: [PATCH] io: a stdin line past its buffer is answered whole
 
+Submitted upstream as elle-lisp/elle#1003. Drop this patch once it merges and
+`.elle-ref` moves past it.
+
 `port/read-line` reserves a 64 KiB buffer (`READ_LINE_BUF_SIZE`), and that
 reservation is not a bound on what a read may answer with: a line has no upper
 bound, and `read_line_with_cancel` reads to the newline however far away it is.
