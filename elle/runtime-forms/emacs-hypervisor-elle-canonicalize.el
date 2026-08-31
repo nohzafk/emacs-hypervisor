@@ -9,16 +9,31 @@
 (defun emacs-hypervisor--elle-incompatible-symbol-p (value)
   "Return non-nil if VALUE is a symbol whose printed name elle can't tokenize.
 
-Currently covers:
+Two classes, tested differently because they print differently:
 
-- digit-prefix arithmetic ops `1+' and `1-', which elle's reader splits into
-  an integer and an operator
-- the symbol `{}', which elle's reader treats as an empty struct literal"
+- Named cases, which Emacs prints with no escape at all: the digit-prefix
+  arithmetic ops `1+' and `1-', which elle's reader splits into an integer and
+  an operator, and `{}', which elle's reader treats as an empty struct literal.
+  Nothing in the printed form marks these, so they have to be listed.
+
+- Any symbol Emacs itself can only print with a backslash escape.  Elle has no
+  such escape, so it sees the bare character and applies its own reader macro
+  to it.  For the reader-macro symbols \\=` , and ,@ that does not terminate:
+  the host spins at 100% CPU and the startup report never leaves \"Waiting for
+  package plan\".  Testing the printed form covers the whole class, rather than
+  a list of characters that has to be guessed ahead of the next one.
+
+These reach quoted-data position more often than they look like they would.
+`config-unit!' captures the original source of every rewritten effect form in
+`:source', so one backquote inside an `add-hook' lambda puts the symbol \\=`
+into exported data even though the same backquote in code position is
+macroexpanded away."
   (and (symbolp value)
        (let ((name (symbol-name value)))
          (or (equal name "1+")
              (equal name "1-")
-             (equal name "{}")))))
+             (equal name "{}")
+             (string-match-p "\\\\" (prin1-to-string value))))))
 
 (defun emacs-hypervisor--proper-list-p (value)
   "Return non-nil when VALUE is a nil-terminated proper list."

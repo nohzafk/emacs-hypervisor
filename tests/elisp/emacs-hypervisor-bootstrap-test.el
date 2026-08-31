@@ -305,6 +305,30 @@ Return a cons cell of (STATUS . OUTPUT)."
                          (cons 'bar (intern "1-"))
                          (vector (intern "1+") (intern "{}")))))))
 
+(ert-deftest emacs-hypervisor-config-unit-export-lowers-captured-backquote-source ()
+  "An exported body must never print a symbol that needs a backslash escape.
+
+Elle has no such escape, so it reads the bare character as its own reader
+macro; for \\=` and , that does not terminate and the host spins forever
+instead of answering with a package plan.
+
+A backquote in code position is macroexpanded away, so the form that reaches
+elle is the copy `config-unit!' keeps in the `:source' of a rewritten effect
+form -- there the backquote survives as quoted data."
+  (emacs-hypervisor-reset-declarations)
+  (config-unit! captured-backquote-source-unit
+    :config
+    (add-hook 'emacs-hypervisor-test-hook
+              (lambda ()
+                (setq emacs-hypervisor-test-runtime-value
+                      `(:value ,emacs-hypervisor-test-runtime-value)))))
+  (let* ((unit (car (emacs-hypervisor-export-config-units)))
+         (body (plist-get unit :body))
+         (printed (prin1-to-string body)))
+    (should-not (string-match-p "\\\\" printed))
+    (should (string-match-p "(intern \"`\")" printed))
+    (should (string-match-p "(intern \",\")" printed))))
+
 (ert-deftest emacs-hypervisor-config-unit-export-canonicalizes-reader-hostile-function-quote ()
   (emacs-hypervisor-reset-declarations)
   (config-unit! reader-hostile-function-quote-unit
