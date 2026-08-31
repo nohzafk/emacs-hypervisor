@@ -1,0 +1,267 @@
+From: randallwang <randallwang@localhost>
+Subject: [PATCH] io: a stdin line past its buffer is answered whole
+
+`port/read-line` reserves a 64 KiB buffer (`READ_LINE_BUF_SIZE`), and that
+reservation is not a bound on what a read may answer with: a line has no upper
+bound, and `read_line_with_cancel` reads to the newline however far away it is.
+
+Sockets and files already handle that. They complete through
+`pool_to_completion`, which hands the worker's bytes to `complete_port_op`;
+`assemble_read` joins them to the port's remainder and `read_result` answers
+from the requesting instance's heap when they outgrow the reservation. The
+comment above that call says why in as many words: "Bytes dropped by such a
+clamp are bytes the port has already taken from the kernel, so nothing is left
+to read them again." tests/elle/port-longline.lisp covers it.
+
+Stdin never got that treatment. It has its own worker
+(`src/io/threadpool/stdin.rs`) and its own converter, and `stdin_to_completion`
+kept the older shape — a hand-rolled copy into the fiber's buffer under
+`data.len().min(dst_cap)`, silently dropping everything past 64 KiB. The fiber
+received a truncated line with no way to tell it was truncated, and re-issuing
+the read could not recover the rest because those bytes were already gone.
+
+Route the stdin worker's bytes through `process_raw_completion`, the same way
+the pool worker's go, passing the `fd_states` and `gen` that `cook_raw` already
+holds. The empty-data (EOF) and error arms are unchanged, and the buffer handle
+is still released before the call, so `None` is passed for it.
+
+Found by emacs-hypervisor, whose Emacs<->host sexp-rpc transport runs on stdin
+and sends a 149 KB session-data line for a large literate config: the host read
+the first 65,536 bytes, `read` reported "unterminated list", and the process
+exited 1 while Emacs started.
+
+New test: tests/elle/stdin-longline.lisp — the stdin sibling of
+port-longline.lisp. It asserts the length, the bytes, and that the read after
+the long line still frames the stream. On the unfixed converter it reports
+"got 65536 of 200000".
+
+diff --git a/src/io/aio/convert.rs b/src/io/aio/convert.rs
+index 80ac314a..ea27601d 100644
+--- a/src/io/aio/convert.rs
++++ b/src/io/aio/convert.rs
+@@ -22,7 +22,9 @@ pub(super) fn cook_raw(
+         RawCompletion::Pool(pc) => {
+             pool_to_completion(pc, pending, fd_states, buffer_pool, origin_heap, gen)
+         }
+-        RawCompletion::Stdin(sc) => stdin_to_completion(sc, pending, buffer_pool, origin_heap),
++        RawCompletion::Stdin(sc) => {
++            stdin_to_completion(sc, pending, fd_states, buffer_pool, origin_heap, gen)
++        }
+     }
+ }
+ 
+@@ -52,8 +54,10 @@ fn misrouted(pending_op: &PendingOp, kind: OpKind, id: SubmissionId) -> Option<S
+ pub(super) fn stdin_to_completion(
+     sc: crate::io::threadpool::StdinCompletion,
+     pending: &mut PendingTable,
++    fd_states: &mut HashMap<PortKey, FdState>,
+     buffer_pool: &mut BufferPool,
+     origin_heap: *mut crate::value::fiberheap::FiberHeap,
++    gen: crate::segment::Generation,
+ ) -> Option<Completion> {
+     let id = SubmissionId::from_raw(sc.id);
+     let pending_op = match pending.take(id) {
+@@ -86,74 +90,28 @@ pub(super) fn stdin_to_completion(
+     }
+     Some(match sc.result {
+         Ok(data) if data.is_empty() => Completion::ok(id, Value::NIL),
+-        Ok(data) => {
+-            // For Read/ReadLine, copy data into the pre-allocated buffer
+-            if let PendingOp::Port {
+-                op: PortOp::ReadLine { ref buffer } | PortOp::Read { ref buffer, .. },
+-                ref port,
+-                ..
+-            } = &*pending_op
+-            {
+-                let enc = port
+-                    .as_external::<Port>()
+-                    .map(|p| p.encoding())
+-                    .unwrap_or(Encoding::Binary);
+-                unsafe {
+-                    let (dst, dst_cap) = crate::io::request::writeable_buffer_ptr(buffer);
+-                    let copy_len = data.len().min(dst_cap);
+-                    std::ptr::copy_nonoverlapping(data.as_ptr(), dst, copy_len);
+-                    // For ReadLine, trim trailing \r\n
+-                    let final_len = if matches!(
+-                        &*pending_op,
+-                        PendingOp::Port {
+-                            op: PortOp::ReadLine { .. },
+-                            ..
+-                        }
+-                    ) {
+-                        let mut end = copy_len;
+-                        if end > 0 && data[end - 1] == b'\n' {
+-                            end -= 1;
+-                            if end > 0 && data[end - 1] == b'\r' {
+-                                end -= 1;
+-                            }
+-                        }
+-                        end
+-                    } else {
+-                        copy_len
+-                    };
+-                    crate::io::request::truncate_buffer(buffer, final_len);
+-                }
+-                if let PendingOp::Port {
+-                    op: PortOp::ReadLine { buffer } | PortOp::Read { buffer, .. },
+-                    ..
+-                } = &*pending_op
+-                {
+-                    // ReadLine always returns string; Read depends on encoding
+-                    let result = if matches!(
+-                        &*pending_op,
+-                        PendingOp::Port {
+-                            op: PortOp::ReadLine { .. },
+-                            ..
+-                        }
+-                    ) || enc == Encoding::Text
+-                    {
+-                        unsafe {
+-                            crate::io::request::bytes_to_string_in_place(*buffer, origin_heap)
+-                        }
+-                    } else {
+-                        Ok(*buffer)
+-                    };
+-                    Completion::new(id, result)
+-                } else {
+-                    unreachable!()
+-                }
+-            } else {
+-                // ReadAll or other — construct bytes (legacy path)
+-                let heap = unsafe { &mut *crate::io::completion_heap_ptr(origin_heap) };
+-                let ctx = crate::primitives::ctx::Alloc::new(heap);
+-                Completion::ok(id, ctx.bytes(data))
+-            }
+-        }
++        // The worker's bytes are cooked where the pool's are, and for the same
++        // reason: a line has no upper bound, so staging them into the fiber's
++        // pre-allocated buffer first would clamp them to its size. `read_result`
++        // answers from the buffer when the bytes fit and from the requesting
++        // instance's heap when they do not, instead of dropping the excess —
++        // bytes the port has already taken from the kernel, which nothing is
++        // left to read again.
++        //
++        // The pool worker reports its byte count as the result code, and this
++        // worker reports its bytes; `data.len()` is the same number. The buffer
++        // handle is released above, so none is passed here.
++        Ok(data) => completion::process_raw_completion(
++            id,
++            data.len() as i32,
++            data,
++            &pending_op,
++            fd_states,
++            buffer_pool,
++            None,
++            origin_heap,
++            gen,
++        ),
+         Err(e) => Completion::err(id, crate::io::io_error("io-error", e, origin_heap)),
+     })
+ }
+diff --git a/tests/elle/stdin-longline.lisp b/tests/elle/stdin-longline.lisp
+new file mode 100644
+index 00000000..3f5b84b8
+--- /dev/null
++++ b/tests/elle/stdin-longline.lisp
+@@ -0,0 +1,101 @@
++(elle/epoch 12)
++## tests/elle/stdin-longline.lisp
++##
++## A line on STDIN longer than the buffer `port/read-line` reserves is
++## answered without loss, and the read after it still frames the stream
++## correctly. See docs/io.md § "A read that overshoots keeps the rest for
++## the same port".
++##
++## tests/elle/port-longline.lisp asserts the same property for a socket,
++## and that one passes: a socket read completes through
++## `pool_to_completion`, which hands the worker's bytes to
++## `complete_port_op` and lets `read_result` answer from the requesting
++## instance's heap when they outgrow the reservation.
++##
++## Stdin does not take that path. It has its own worker
++## (`src/io/threadpool/stdin.rs`) and its own converter
++## (`stdin_to_completion`), and that converter kept the older shape: it
++## copied the worker's bytes into the fiber's pre-allocated buffer under
++## `data.len().min(dst_cap)`. `read_line_with_cancel` reads to the newline
++## however far away it is, so everything past 64 KiB was dropped — bytes
++## already out of the kernel, with nothing left to read them again. The
++## fiber got a truncated line and no way to tell it was truncated.
++##
++## The counter-factual: a payload under 64 KiB passes every assertion here
++## on the unfixed code. The line has to outgrow the reservation before the
++## defect is reachable, which is why the payload is 200 KiB.
++##
++## We test through a subprocess so `make test` can run this without piping
++## stdin into the runner itself.
++
++(def line-size 200000)
++
++(def long-line
++  (let [@buf @""
++        @i 0]
++    (while (< i line-size)
++      (push buf (string (mod i 10)))
++      (assign i (+ i 1)))
++    (freeze buf)))
++
++## The child rebuilds the same digit pattern and compares, so a read that
++## answers with the right LENGTH but the wrong bytes still fails.
++(def inner-script
++  "(def line-size 200000)
++   (def expected
++     (let [@buf @\"\"
++           @i 0]
++       (while (< i line-size)
++         (push buf (string (mod i 10)))
++         (assign i (+ i 1)))
++       (freeze buf)))
++   (def first-line (port/read-line (*stdin*)))
++   (def second-line (port/read-line (*stdin*)))
++   (println (length first-line))
++   (println (if (= first-line expected) \"same\" \"differs\"))
++   (println second-line)
++   (sys/exit 0)")
++
++(def elle-bin
++  (cond
++    (file/exists? "./target/release/elle") "./target/release/elle"
++    (file/exists? "./target/debug/elle") "./target/debug/elle"
++    true (error {:error :test-skip
++                 :message "cannot find elle binary in ./target/"})))
++
++(def scratch (file/mktempdir))
++(def inner-path (path/join scratch "stdin-longline-inner.lisp"))
++(def input-path (path/join scratch "stdin-longline-input.txt"))
++(file/write inner-path inner-script)
++
++## The long line, then a short one. The second line is what proves the
++## overshoot was framed rather than merely delivered: a converter that
++## mislays the remainder loses it or replays part of the first line here.
++(file/write input-path (concat long-line "\ntail\n"))
++
++(def result
++  (subprocess/system "sh"
++                     ["-c"
++                      (string "cat '" input-path "' | '" elle-bin
++                              "' '" inner-path "'")]))
++
++(assert (= result:exit 0)
++        (string "subprocess exited " result:exit ": " result:stderr))
++
++(def lines (string/split (string/trim result:stdout) "\n"))
++
++(assert (= (get lines 0) (string line-size))
++        (string "the whole line is answered: got " (get lines 0)
++                " of " (string line-size)))
++(println "  1. a stdin line past its buffer is answered whole")
++
++(assert (= (get lines 1) "same")
++        "and byte for byte, not merely the right length")
++(println "  2. and byte for byte")
++
++(assert (= (get lines 2) "tail")
++        (string "the next read resumes after the newline: got "
++                (get lines 2)))
++(println "  3. the read after it frames the stream correctly")
++
++(println "stdin-longline: ok")

@@ -670,14 +670,27 @@ Step-by-step live testing: `just emacs-home-e2e-reset`
 
 The build uses a repo-local Elle checkout (`.elle`, pinned by `.elle-ref`).
 `scripts/bootstrap-elle` clones it and applies the repo-maintained fixes in
-`patches/elle/*.patch` on top of the pinned ref --- currently the
-match/destructure-`rest` alias fix ([elle-lisp/elle#999](https://github.com/elle-lisp/elle/issues/999)):
-a `(a & rest)` pattern binds `rest` to a borrowed subview of the scrutinee
-with no owning reference, so passing it as an owned-param call argument (e.g.
-a recursive `match` walk over a `map`-built list) freed the caller's still-live
-scrutinee region. The lowerer marks these bindings borrowed and mints the
-callee's release. Patches are candidates for upstream submission and are
-reverted/reapplied idempotently across ref changes.
+`patches/elle/*.patch` on top of the pinned ref --- currently two:
+
+- `0001-region-match-rest-alias-borrow.patch`
+  ([elle-lisp/elle#999](https://github.com/elle-lisp/elle/issues/999)): a
+  `(a & rest)` pattern binds `rest` to a borrowed subview of the scrutinee
+  with no owning reference, so passing it as an owned-param call argument
+  (e.g. a recursive `match` walk over a `map`-built list) freed the caller's
+  still-live scrutinee region. The lowerer marks these bindings borrowed and
+  mints the callee's release.
+- `0002-io-stdin-readline-past-buffer.patch`: `port/read-line` reserves 64 KiB,
+  but a line has no upper bound and the worker reads to the newline however far
+  away it is. Sockets and files already answer such a line whole, through
+  `complete_port_op` / `read_result`; stdin has its own worker and its own
+  converter, and `stdin_to_completion` still clamped the worker's bytes to the
+  reservation and dropped the rest. Since this transport is stdin, any config
+  whose session-data message exceeds 64 KiB made the host read a truncated
+  s-expression and exit 1 during Emacs startup. The stdin converter now routes
+  through `process_raw_completion` like the pool one does.
+
+Patches are candidates for upstream submission and are reverted/reapplied
+idempotently across ref changes.
 
 ## Further Reading
 
