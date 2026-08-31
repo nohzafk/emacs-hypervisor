@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared boot-policy helpers built on graph + preflight modules.
 
 (defn emacs-hypervisor-boot-policy-module [graph preflight]

@@ -23,9 +23,9 @@ use std::process;
 
 use clap::{Args, Parser, Subcommand};
 use elle::config::Config;
-use elle::context::{clear_symbol_table, clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::compile_file;
-use elle::{init_stdlib, register_primitives, SymbolTable, VM};
+use elle::runtime::Runtime;
+use elle::SymbolTable;
 
 const HOME_STARTUP_ELISP: &str = include_str!("../emacs-kernel/home-startup.el");
 const HOME_EARLY_INIT_ELISP: &str = embedded::EMBEDDED_EARLY_INIT_ELISP;
@@ -365,8 +365,6 @@ fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
 
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("{}", message.as_ref());
-    clear_vm_context();
-    clear_symbol_table();
     process::exit(1)
 }
 
@@ -385,27 +383,24 @@ fn run_serve() {
     }
     elle::config::init(config);
 
-    let mut vm = VM::new();
-    let mut symbols = SymbolTable::new();
-    let _signals = register_primitives(&mut vm, &mut symbols);
-
-    set_vm_context(&mut vm as *mut VM);
-    set_symbol_table(&mut symbols as *mut SymbolTable);
-    init_stdlib(&mut vm, &mut symbols);
+    // One `Runtime` (elle 2.0) owns the VM, the symbol table and the compile
+    // context together, registers primitives itself and loads the stdlib; its
+    // `Drop` runs the region-teardown sweep. Nothing here to set up or tear down
+    // by hand.
+    let mut rt = Runtime::new();
+    let (vm, symbols, cctx) = rt.parts();
 
     let compiled = compile_file(
         embedded::EMBEDDED_BACKEND_SOURCE,
-        &mut symbols,
+        symbols,
+        cctx,
         backend_display,
     )
     .unwrap_or_else(|error| fail(error.to_string()));
 
-    if let Err(error) = vm.execute_scheduled(&compiled.bytecode, &symbols) {
-        fail(format_runtime_error(&error, &symbols));
+    if let Err(error) = vm.execute_scheduled(&compiled.bytecode, symbols, cctx) {
+        fail(format_runtime_error(&error, symbols));
     }
-
-    clear_vm_context();
-    clear_symbol_table();
 }
 
 /// Entries that do not make a directory "non-empty" for `init`:

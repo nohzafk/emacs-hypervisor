@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared graph, validation, and reporting helpers.
 
 (defn emacs-hypervisor-graph-module []

@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Generic emitted loader for static Elisp modules.
 
 (defn emacs-hypervisor-runtime-forms-module-loader-module []

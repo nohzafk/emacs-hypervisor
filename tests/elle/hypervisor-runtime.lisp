@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## tests/elle/hypervisor-runtime.lisp
 ##
 ## Regression checks extracted from the removed numbered spikes. These cover

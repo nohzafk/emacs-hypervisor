@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared benchmark and instrumentation helpers.
 
 (defn emacs-hypervisor-benchmark-module [protocol enabled?]

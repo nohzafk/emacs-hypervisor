@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared execution helpers for package and unit runtime phases.
 
 (defn emacs-hypervisor-execution-module [protocol graph mailbox benchmark]

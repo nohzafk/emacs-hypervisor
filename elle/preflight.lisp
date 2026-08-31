@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared env and executable preflight helpers.
 
 (defn emacs-hypervisor-preflight-module [_protocol graph _mailbox _benchmark]

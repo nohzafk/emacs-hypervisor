@@ -1,4 +1,4 @@
-(elle/epoch 10)
+(elle/epoch 12)
 ## Shared `sexp-rpc` protocol helpers.
 
 (defn emacs-hypervisor-protocol-module []
