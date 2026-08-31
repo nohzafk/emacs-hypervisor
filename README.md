@@ -670,10 +670,14 @@ Step-by-step live testing: `just emacs-home-e2e-reset`
 
 The build uses a repo-local Elle checkout (`.elle`, pinned by `.elle-ref`).
 `scripts/bootstrap-elle` clones it and applies the repo-maintained fixes in
-`patches/elle/*.patch` on top of the pinned ref --- currently a fix for
-io_uring short writes that would otherwise truncate large sexp-rpc lines.
-Patches are candidates for upstream submission and are reverted/reapplied
-idempotently across ref changes.
+`patches/elle/*.patch` on top of the pinned ref --- currently the
+match/destructure-`rest` alias fix ([elle-lisp/elle#999](https://github.com/elle-lisp/elle/issues/999)):
+a `(a & rest)` pattern binds `rest` to a borrowed subview of the scrutinee
+with no owning reference, so passing it as an owned-param call argument (e.g.
+a recursive `match` walk over a `map`-built list) freed the caller's still-live
+scrutinee region. The lowerer marks these bindings borrowed and mints the
+callee's release. Patches are candidates for upstream submission and are
+reverted/reapplied idempotently across ref changes.
 
 ## Further Reading
 

@@ -1,0 +1,251 @@
+From: randallwang <randallwang@localhost>
+Subject: [PATCH] lir: a match/destructure `rest` alias is borrowed
+
+A `(a & rest)` pattern binds `rest` to a BORROWED subview of the scrutinue:
+the match decision tree loads it with the `Rest` intrinsic, which hands back a
+cdr pointer into the scrutinee's region pages with NO owning reference. The
+region solver registers a counted container read for call-site `rest()` /
+`first()` only, never for pattern loads. Passing such an alias as an
+owned-param call argument (tail or not) made the callee's owned-param release
+free the caller's still-live scrutinee region — the match sibling of the
+captured-upvalue tail-move-borrow UAF (`region-tail-move-borrow-uaf.lisp`).
+
+Mark match/destructure-rest bindings borrowed: the lowerer tracks
+`destructure_alias_bindings`, and `arg_leaf_is_borrowed` /
+`tail_arg_is_borrowed` treat a call arg naming one as borrowed, minting a
+fresh owning reference the callee's release balances. The scrutinee's own
+reference is untouched.
+
+Fixes the hypervisor's `graph:find-entry` over a `map`-built list (the
+map-produced list's tail was freed and reused after a recursive match walk).
+
+Regression: tests/elle/region-match-rest-tail-move-uaf.lisp.
+
+diff --git a/src/lir/lower/binding/destructure.rs b/src/lir/lower/binding/destructure.rs
+index 159c4874..b2714948 100644
+--- a/src/lir/lower/binding/destructure.rs
++++ b/src/lir/lower/binding/destructure.rs
+@@ -93,6 +93,16 @@ impl<'a> Lowerer<'a> {
+                 }
+                 // Bind the remaining tail to the rest pattern
+                 if let Some(rest_pat) = rest {
++                    // A LIST rest is a borrowed sublist aliased into the
++                    // scrutinee's region pages — `RestDestructure` returns the
++                    // cdr pointer with NO owning reference (unlike the `rest()`
++                    // intrinsic, whose result the solver counts as a container
++                    // read). Mark its bindings so a call arg that aliases one is
++                    // treated as borrowed (a callee's owned-param release must
++                    // not free the caller's still-live scrutinee region).
++                    for b in rest_pat.bindings().bindings {
++                        self.destructure_alias_bindings.insert(b);
++                    }
+                     self.lower_destructure(rest_pat, current, strict)?;
+                 }
+                 Ok(())
+diff --git a/src/lir/lower/control.rs b/src/lir/lower/control.rs
+index 883db674..4bdedb66 100644
+--- a/src/lir/lower/control.rs
++++ b/src/lir/lower/control.rs
+@@ -96,6 +96,7 @@ impl<'a> Lowerer<'a> {
+             // route is position-independent (the frame never owns a constant).
+             HirKind::Var(binding) => {
+                 (self.in_lambda && self.upvalue_bindings.contains(binding))
++                    || self.destructure_alias_bindings.contains(binding)
+                     || self
+                         .immutable_values
+                         .get(binding)
+diff --git a/src/lir/lower/mod.rs b/src/lir/lower/mod.rs
+index 6675bad3..22e52ef3 100644
+--- a/src/lir/lower/mod.rs
++++ b/src/lir/lower/mod.rs
+@@ -204,6 +204,21 @@ pub struct Lowerer<'a> {
+     /// Set of bindings that are upvalues (captures/parameters in lambda)
+     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
+     upvalue_bindings: std::collections::HashSet<Binding>,
++    /// Bindings bound to a BORROWED SUBVIEW of a scrutinee by destructuring:
++    /// a `(a & rest)` / `(a b)` list or array pattern binds `rest` (and, for a
++    /// list, each element) to a pointer ALIASED INTO the scrutinee's region
++    /// pages — `RestDestructure`/`FirstDestructure` return no owning reference
++    /// (unlike the `rest()`/`first()` intrinsics, whose results the solver
++    /// registers as counted container reads). Passing such an alias as an
++    /// owned-param CALL ARGUMENT (tail or not) makes the callee's param release
++    /// free the caller's still-live scrutinee region — the match/destructure
++    /// sibling of the captured-upvalue tail-move-borrow UAF
++    /// (`region-tail-move-borrow-uaf.lisp`). Marking these bindings borrowed
++    /// makes `arg_leaf_is_borrowed`/`tail_arg_is_borrowed` treat them like any
++    /// other borrowed arg: the caller mints a fresh owning reference at the call
++    /// (the `CallArgument`/borrowed-arg incref) that the callee's release
++    /// balances, leaving the scrutinee's own reference intact.
++    destructure_alias_bindings: std::collections::HashSet<Binding>,
+     /// Current span for emitted instructions
+     current_span: Span,
+     /// Intrinsic operations for operator specialization.
+@@ -439,6 +454,7 @@ impl<'a> Lowerer<'a> {
+             num_captures: 0,
+             num_local_params: 0,
+             upvalue_bindings: std::collections::HashSet::new(),
++            destructure_alias_bindings: std::collections::HashSet::new(),
+             current_span: Span::synthetic(),
+             intrinsics: FxHashMap::default(),
+             call_classification: crate::hir::CallClassification::default(),
+diff --git a/src/lir/lower/pattern.rs b/src/lir/lower/pattern.rs
+index 2612e260..f28bb297 100644
+--- a/src/lir/lower/pattern.rs
++++ b/src/lir/lower/pattern.rs
+@@ -1,13 +1,36 @@
+ //! Pattern matching lowering
+ 
+ use super::*;
+-use crate::hir::decision::{Constructor, DecisionTree};
++use crate::hir::decision::{AccessPath, Constructor, DecisionTree};
+ use crate::hir::{HirPattern, PatternKey, PatternLiteral};
+ 
+ mod keyed;
+ mod matching;
+ mod seq;
+ 
++/// Does an access path reach a binding through a cons TAIL (`Rest`)? A `(a & r)`
++/// pattern binds `r` at `AccessPath::Rest(...)`; an element inside the rest
++/// (`(a & [x])`) is reached through `Rest` then `First`. Such a binding is a
++/// BORROWED subview of the scrutinee — the decision tree loads it with the
++/// `Rest` intrinsic, which carries no owning reference (the region solver only
++/// registers a counted container read for *call-site* `rest()`/`first()`,
++/// not for pattern loads). The lowerer marks these bindings in
++/// `destructure_alias_bindings` so a tail or non-tail call argument naming one
++/// is treated as borrowed (matching `arg_leaf_is_borrowed`'s upvalue route) —
++/// the callee's owned-param release must not free the caller's still-live
++/// scrutinee region.
++pub(super) fn access_has_rest(access: &AccessPath) -> bool {
++    match access {
++        AccessPath::Rest(_) => true,
++        AccessPath::First(inner) => access_has_rest(inner),
++        AccessPath::Index(inner, _)
++        | AccessPath::Slice(inner, _)
++        | AccessPath::Key(inner, _)
++        | AccessPath::StructRest(inner, _) => access_has_rest(inner),
++        AccessPath::Root => false,
++    }
++}
++
+ impl<'a> Lowerer<'a> {
+     // ── Decision tree lowering ─────────────────────────────────────
+ 
+@@ -69,6 +92,19 @@ impl<'a> Lowerer<'a> {
+                 // and keeping it on the operand stack would leak intermediates.
+                 for (binding, access) in bindings {
+                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
++                    // A binding reached through `AccessPath::Rest` (or the
++                    // `First` of a cons whose enclosing path is a Rest) is a
++                    // BORROWED sublist aliased into the scrutinee's region
++                    // pages — the decision tree loads it via `Rest`, which
++                    // carries no counted-read retain the solver registered for
++                    // this match (it only registers the intrinsic `rest()`
++                    // calls). Mark it so a call arg that hands it to an
++                    // owned-param callee is treated as borrowed (the callee's
++                    // release must not free the caller's still-live scrutinee
++                    // region — the match sibling of the tail-move-borrow UAF).
++                    if access_has_rest(access) {
++                        self.destructure_alias_bindings.insert(*binding);
++                    }
+                     let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
+                         existing
+                     } else {
+@@ -129,6 +165,19 @@ impl<'a> Lowerer<'a> {
+                 // Establish bindings — pop after each store (same as Leaf).
+                 for (binding, access) in bindings {
+                     let val_reg = self.load_access_path(access, scrutinee_slot)?;
++                    // A binding reached through `AccessPath::Rest` (or the
++                    // `First` of a cons whose enclosing path is a Rest) is a
++                    // BORROWED sublist aliased into the scrutinee's region
++                    // pages — the decision tree loads it via `Rest`, which
++                    // carries no counted-read retain the solver registered for
++                    // this match (it only registers the intrinsic `rest()`
++                    // calls). Mark it so a call arg that hands it to an
++                    // owned-param callee is treated as borrowed (the callee's
++                    // release must not free the caller's still-live scrutinee
++                    // region — the match sibling of the tail-move-borrow UAF).
++                    if access_has_rest(access) {
++                        self.destructure_alias_bindings.insert(*binding);
++                    }
+                     let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
+                         existing
+                     } else {
+diff --git a/src/lir/lower/pattern/seq.rs b/src/lir/lower/pattern/seq.rs
+index fe308b92..06ab98d3 100644
+--- a/src/lir/lower/pattern/seq.rs
++++ b/src/lir/lower/pattern/seq.rs
+@@ -82,6 +82,16 @@ impl<'a> Lowerer<'a> {
+                 });
+ 
+                 // Match tail pattern
++                // The tail is a BORROWED sublist aliased into the scrutinee's
++                // region pages (the `Rest` intrinsic result, but without the
++                // solver's container-read registration). Mark its bindings so a
++                // call arg that hands one to an owned-param callee is treated as
++                // borrowed — the callee's release must not free the caller's
++                // still-live scrutinee region (the match sibling of the
++                // tail-move-borrow UAF).
++                for b in tail.bindings().bindings {
++                    self.destructure_alias_bindings.insert(b);
++                }
+                 self.lower_pattern_match(tail, tail_reg, fail_label)?;
+ 
+                 Ok(())
+@@ -162,7 +172,18 @@ impl<'a> Lowerer<'a> {
+                 }
+ 
+                 if let Some(rest_pat) = rest {
+-                    // With & rest: bind remaining tail to rest pattern
++                    // With & rest: bind remaining tail to rest pattern.
++                    // The tail is a BORROWED sublist aliased into the
++                    // scrutinee's region pages (like the `rest()` intrinsic,
++                    // but no solver count as a container read here because the
++                    // value was already extracted by the pattern walk). Mark
++                    // the bound aliases so a call arg that hands one to an
++                    // owned-param callee is treated as borrowed — the callee's
++                    // release must not free the caller's still-live scrutinee
++                    // region (the match sibling of the tail-move-borrow UAF).
++                    for b in rest_pat.bindings().bindings {
++                        self.destructure_alias_bindings.insert(b);
++                    }
+                     self.lower_pattern_match(rest_pat, current_reg, fail_label)?;
+                 } else {
+                     // Without rest: check that tail is empty_list (exact length)
+
+diff --git a/tests/elle/region-match-rest-tail-move-uaf.lisp b/tests/elle/region-match-rest-tail-move-uaf.lisp
+new file mode 100644
+index 00000000..c7ef259d
+--- /dev/null
++++ b/tests/elle/region-match-rest-tail-move-uaf.lisp
+@@ -0,0 +1,31 @@
++(elle/epoch 12)
++# A `match`-destructured `rest` alias is a BORROWED subview of the scrutinee
++# (the `Rest` intrinsic loads the cdr pointer into the scrutinee's region pages,
++# but the region solver only registers a counted container read for *call-site*
++# `rest()`/`first()`, not for pattern loads). Passing such an alias as an
++# owned-param CALL ARGUMENT (tail or not) makes the callee's param release free
++# the caller's still-live scrutinee region — a use-after-free on the caller's
++# original list.
++#
++# Witness: a self-recursive `match` walk passes `rest` to its own tail call;
++# the caller's scratch list (built by `map`) must survive the walk intact.
++# GREEN since the lowerer marks destructure-rest bindings borrowed
++# (`destructure_alias_bindings` → the borrowed-arg incref at the call site).
++# RED before the fix (the freed tail prints as <heap:...> / length fails).
++
++(defn find-entry [entries name]
++  (match entries
++    () nil
++    (entry & rest)
++      (if (= (get entry :name) name) entry (find-entry rest name))
++    _ nil))
++
++(var i 0)
++(while (%lt i 2000)
++  (let* [r2 (map (fn [u] u) (list {:name "a"} {:name "b"} {:name "c"} {:name "d"}))
++         found (find-entry r2 "c")]
++    (assert (= (get found :name) "c") "find-entry returns the matching entry")
++    (assert (= (length r2) 4) "the map-built list survives a tail-recursive match walk"))
++  (assign i (%add i 1)))
++
++(println "region-match-rest-tail-move-uaf: ok")
