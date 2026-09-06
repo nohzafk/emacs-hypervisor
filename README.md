@@ -55,9 +55,12 @@ not choose your packages, keybindings, UI, editing model, or workflow.
 - **Literate config** --- write `config.org` and Hypervisor auto-tangles it at
   startup and reload; no manual tangle step needed.
 - **Built-in package management** --- `package!` declarations install through
-  Emacs's built-in `package-vc-install` (Emacs 29.1+) with `Package-Requires:`
+  Emacs's built-in `package-vc-install` (Emacs 31+) with `Package-Requires:`
   resolved against GNU ELPA, NonGNU ELPA, and MELPA. The bridge clones git sources and adopts
-  them via `package-vc-install-from-checkout`. Clean, transactional rebuilding of local packages is supported via env vars and in-session Lisp commands.
+  them via `package-vc-install-from-checkout`. Direct-local packages (`:local`)
+  use the User Lisp Directory (`user-lisp-directory`) instead — a symlink into
+  your source checkout, so edits take effect on the next reload without a clone
+  or lock to sync. Clean, transactional rebuilding of local packages is supported via env vars and in-session Lisp commands.
 - **Reproducible installs** --- a `hypervisor.lock` next to your config records
   every installed revision; a fresh machine restores the exact same package
   state. Deliberate upgrades (`M-x emacs-hypervisor-upgrade-package`) and
@@ -247,7 +250,8 @@ See [docs/reload.md](docs/reload.md) for the full data model and API, and
 
 ## Requirements
 
-- Emacs 29.1 or later (uses built-in `package-vc-install`)
+- Emacs 31 or later (uses built-in `package-vc-install` and the
+  `user-lisp-directory` User Lisp Directory mechanism for `:local` packages)
 - `git` on `PATH`
 - Network access on first run (clones VC packages and refreshes archive indices)
 
@@ -382,10 +386,12 @@ repo --- commit it. See [Package Lockfile](#package-lockfile).
 
 ### `package!` options
 
-Bare `(package! consult)` installs from `package-archives`. Any of `:repo`,
-`:host`, or `:local` switches to the package-vc bridge (git clone of the
-upstream source, then adoption via `package-vc-install-from-checkout`).
-`Package-Requires:` deps are resolved against the archives either way.
+Bare `(package! consult)` installs from `package-archives`. Any of `:repo` or
+`:host` switches to the package-vc bridge (git clone of the upstream source,
+then adoption via `package-vc-install-from-checkout`). `:local` instead uses
+the User Lisp Directory directly: no clone, no lock — the source checkout is
+symlinked under `user-lisp-directory` and edits take effect on the next
+reload. `Package-Requires:` deps are resolved against the archives either way.
 
 | Option | Purpose |
 |---|---|
@@ -394,7 +400,7 @@ upstream source, then adoption via `package-vc-install-from-checkout`).
 | `:branch` | Branch to track |
 | `:tag` | Tag to pin |
 | `:ref` | Exact commit to pin |
-| `:local` | Local filesystem path instead of a remote URL |
+| `:local` | Local filesystem path; used directly via `user-lisp-directory` (no clone, no revision pinning) |
 | `:lisp-dir` | Subdirectory containing the `.el` files (rare; for non-standard layouts) |
 | `:deps` | Package dependencies (used by Elle's topological sort) |
 | `:submodules` | Non-nil: `git submodule update --init --recursive` in the checkout (package-vc does not fetch submodules) |
