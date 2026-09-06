@@ -144,10 +144,20 @@ HOW is :pinned (declared :ref/:tag), :hit (lockfile revision), or
 (defun emacs-hypervisor-bridge--vc-entry-p (entry)
   (and (emacs-hypervisor-bridge--build-url entry) t))
 
+(defun emacs-hypervisor-bridge--local-direct-p (entry)
+  "Return non-nil when ENTRY is a `:local' package used directly.
+Direct-local packages use the source checkout themselves (no staging
+clone); edits to the source take effect on the next Emacs reload."
+  (or (plist-get entry :local)
+      (emacs-hypervisor-bridge--local-repo-p (plist-get entry :repo))))
+
 (defun emacs-hypervisor-bridge--clone-dir (entry)
-  (expand-file-name
-   (plist-get entry :name)
-   (emacs-hypervisor-bridge--staging-root)))
+  (if (emacs-hypervisor-bridge--local-direct-p entry)
+      (emacs-hypervisor-bridge--expand-local
+       (or (plist-get entry :local) (plist-get entry :repo)))
+    (expand-file-name
+     (plist-get entry :name)
+     (emacs-hypervisor-bridge--staging-root))))
 
 (defun emacs-hypervisor-bridge--package-dir (entry)
   (expand-file-name (plist-get entry :name) package-user-dir))
@@ -301,7 +311,11 @@ Local paths are inherently unlocked; their lock entries are informational."
             (list url dir))))
 
 (defun emacs-hypervisor-bridge--checkout-ref (entry)
-  "Run `git checkout' for the declared pin or locked revision."
+  "Run `git checkout' for the declared pin or locked revision.
+Direct-local packages skip checkout: their working tree is the source of
+truth and must not be moved by hypervisor."
+  (when (emacs-hypervisor-bridge--local-direct-p entry)
+    (cl-return-from emacs-hypervisor-bridge--checkout-ref))
   (let ((ref (emacs-hypervisor-bridge--resolved-rev entry))
         (dir (emacs-hypervisor-bridge--clone-dir entry)))
     (when ref
@@ -411,12 +425,14 @@ shell commands, run in the package root -- e.g. to compile a native or
 WebAssembly artifact that is not committed to the repository.  Both run before
 `package-vc-install-from-checkout' so the artifacts are present when the
 package is symlinked, byte-compiled, and activated."
-  (when (plist-get entry :submodules)
+  (when (and (plist-get entry :submodules)
+             (not (emacs-hypervisor-bridge--local-direct-p entry)))
     (emacs-hypervisor-bridge--run-in-clone
      entry "git submodule update --init --recursive" "submodules"))
   (let ((build (plist-get entry :build)))
     (dolist (command (if (listp build) build (list build)))
-      (when (and command (stringp command))
+      (when (and command (stringp command)
+                 (not (emacs-hypervisor-bridge--local-direct-p entry)))
         (emacs-hypervisor-bridge--run-in-clone entry command "build")))))
 
 (defun emacs-hypervisor-bridge--clone-head-rev (entry)
@@ -648,8 +664,11 @@ Used by rebuild (before reinstalling) and prune (without reinstalling)."
           (package-delete desc t t))))
     ;; 3. Delete staging clone and package directories.  Tolerate filesystem
     ;; errors (locked files, permissions) like the other purge steps so one
-    ;; stubborn path does not abort the purge.
-    (dolist (dir (list clone-dir pkg-dir))
+    ;; stubborn path does not abort the purge.  Direct-local packages NEVER
+    ;; have their clone-dir deleted: it is the user's source checkout.
+    (dolist (dir (if (emacs-hypervisor-bridge--local-direct-p entry)
+                     (list pkg-dir)
+                   (list clone-dir pkg-dir)))
       (ignore-errors
         (emacs-hypervisor-bridge--delete-cache-path dir)))
     ;; 4. Purge stale native-compiled .eln files.
