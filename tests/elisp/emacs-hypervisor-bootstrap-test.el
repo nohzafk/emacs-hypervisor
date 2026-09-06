@@ -266,6 +266,45 @@ Return a cons cell of (STATUS . OUTPUT)."
     (should-not (string-prefix-p (emacs-hypervisor-bridge--staging-root)
                                  (emacs-hypervisor-bridge--clone-dir direct)))))
 
+(ert-deftest emacs-hypervisor-local-direct-installs-into-user-lisp ()
+  (emacs-hypervisor-reset-declarations)
+  (let ((user-lisp-directory (make-temp-file "hv-user-lisp-" t))
+        (src (make-temp-file "hv-src-" t)))
+    (unwind-protect
+        (progn
+          (package! direct-pkg :local src :lisp-dir "lisp")
+          (make-directory (expand-file-name "lisp" src))
+          (write-region ";;; direct-pkg.el --- test" nil
+                        (expand-file-name "direct-pkg.el"
+                                          (expand-file-name "lisp" src)))
+          (let ((entry (car (emacs-hypervisor-export-packages))))
+            (emacs-hypervisor-bridge--install-user-lisp entry)
+            (should (file-exists-p
+                     (emacs-hypervisor-bridge--user-lisp-dir entry)))
+            (should (file-symlink-p
+                     (emacs-hypervisor-bridge--user-lisp-dir entry)))))
+      (delete-directory user-lisp-directory t)
+      (delete-directory src t))))
+
+(ert-deftest emacs-hypervisor-local-direct-purge-keeps-source ()
+  (emacs-hypervisor-reset-declarations)
+  (let ((user-lisp-directory (make-temp-file "hv-user-lisp-" t))
+        (src (make-temp-file "hv-src-" t)))
+    (unwind-protect
+        (progn
+          (package! direct-pkg :local src)
+          (write-region ";;; direct-pkg.el --- test" nil
+                        (expand-file-name "direct-pkg.el" src))
+          (let ((entry (car (emacs-hypervisor-export-packages))))
+            (emacs-hypervisor-bridge--install-user-lisp entry)
+            (emacs-hypervisor-bridge--purge-user-lisp entry)
+            (should-not (file-exists-p
+                         (emacs-hypervisor-bridge--user-lisp-dir entry)))
+            (should (file-exists-p src))
+            (should (file-exists-p (expand-file-name "direct-pkg.el" src)))))
+      (delete-directory user-lisp-directory t)
+      (delete-directory src t))))
+
 (ert-deftest emacs-hypervisor-package-export-does-not-require-packages ()
   (emacs-hypervisor-reset-declarations)
   (package! transient)

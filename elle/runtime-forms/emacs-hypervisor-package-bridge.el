@@ -218,8 +218,12 @@ clone); edits to the source take effect on the next Emacs reload."
   (emacs-hypervisor-bridge--activate-entry-load-path entry))
 
 (defun emacs-hypervisor-bridge--installed-p (entry)
-  (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
-    (package-installed-p sym)))
+  (if (emacs-hypervisor-bridge--local-direct-p entry)
+      ;; Direct-local packages are "installed" when their user-lisp
+      ;; deployment exists (package.el has no record of them).
+      (file-exists-p (emacs-hypervisor-bridge--user-lisp-dir entry))
+    (let ((sym (emacs-hypervisor-bridge--package-symbol entry)))
+      (package-installed-p sym))))
 
 (defun emacs-hypervisor-bridge--clone-present-p (entry)
   (file-directory-p (emacs-hypervisor-bridge--clone-dir entry)))
@@ -487,13 +491,73 @@ package is symlinked, byte-compiled, and activated."
         (emacs-hypervisor-bridge--record-vc-lock entry)
       (emacs-hypervisor-bridge--record-archive-lock entry))))
 
+(defun emacs-hypervisor-bridge--user-lisp-dir (entry)
+  "Return the user-lisp target directory for a direct-local ENTRY.
+Direct-local packages live in `user-lisp-directory' (Emacs 31+) instead
+of package.el: a symlink into the user's source checkout, so edits take
+effect on the next reload with no clone or lock to sync."
+  (expand-file-name (plist-get entry :name) user-lisp-directory))
+
+(defun emacs-hypervisor-bridge--install-user-lisp (entry)
+  "Deploy direct-local ENTRY into `user-lisp-directory'.
+Creates the user-lisp directory, symlinks the entry's lisp dir (or the
+whole checkout when no `:lisp-dir') as `<user-lisp>/<name>', then runs
+`prepare-user-lisp' so the files are byte-compiled, autoloads scraped
+and load-path updated on the next automatic scrape."
+  (unless (file-directory-p user-lisp-directory)
+    (make-directory user-lisp-directory t))
+  (let ((target (emacs-hypervisor-bridge--user-lisp-dir entry))
+        (source (let ((lisp-dir (plist-get entry :lisp-dir)))
+                  (if lisp-dir
+                      (expand-file-name lisp-dir (emacs-hypervisor-bridge--clone-dir entry))
+                    (emacs-hypervisor-bridge--clone-dir entry)))))
+    (unless (file-directory-p source)
+      (error "direct-local source missing: %s" source))
+    (condition-case err
+        (progn
+          ;; Recreate the symlink so a removed/changed source is relinked.
+          (when (file-exists-p target)
+            (if (file-symlink-p target)
+                (delete-file target)
+              (delete-directory target t)))
+          (make-symbolic-link source target t))
+      (error
+       ;; Fall back to a copy when symlinks are unsupported (e.g. some
+       ;; filesystems); a copy still works for activation but edits need
+       ;; a re-deploy to show up.
+       (when (file-exists-p target)
+         (if (file-symlink-p target)
+             (delete-file target)
+           (delete-directory target t)))
+       (copy-directory source target t t)))
+    ;; Activate immediately: byte-compile + autoload scrape + load-path.
+    (when (fboundp 'prepare-user-lisp)
+      (condition-case _
+          (prepare-user-lisp t)
+        (error nil)))))
+
+(defun emacs-hypervisor-bridge--purge-user-lisp (entry)
+  "Remove the user-lisp deployment of direct-local ENTRY.
+Only the symlink/copy under `user-lisp-directory' is deleted — never
+the source checkout itself."
+  (let ((target (emacs-hypervisor-bridge--user-lisp-dir entry)))
+    (when (file-exists-p target)
+      (if (file-symlink-p target)
+          (delete-file target)
+        (delete-directory target t)))))
+
 (defun emacs-hypervisor-bridge--adopt (entry)
   "Adopt a pre-cloned ENTRY via `package-vc-install-from-checkout'.
 Dependency ordering is managed by the hypervisor via `:deps', so
 `package-compute-transaction' is bypassed to avoid false negatives for
 packages whose Package-Requires reference hypervisor-only dependencies
-that are not on any archive."
-  (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
+that are not on any archive.
+
+Direct-local entries (with `:local') are installed via
+`user-lisp-directory' (Emacs 31) instead of package.el."
+  (if (emacs-hypervisor-bridge--local-direct-p entry)
+      (emacs-hypervisor-bridge--install-user-lisp entry)
+    (let* ((sym (emacs-hypervisor-bridge--package-symbol entry))
          (dir (emacs-hypervisor-bridge--clone-dir entry))
          (pkg-dir (emacs-hypervisor-bridge--package-dir entry)))
     (unless (package-installed-p sym)
@@ -525,7 +589,7 @@ that are not on any archive."
                      packages)))
           (package-vc-install-from-checkout dir (symbol-name sym))))
       (emacs-hypervisor-bridge--record-vc-lock entry))
-    (emacs-hypervisor-bridge--note-present entry)))
+    (emacs-hypervisor-bridge--note-present entry))))
 
 (defvar emacs-hypervisor-bridge--archive-refreshed-on-error nil
   "Non-nil after a failed archive install has triggered a one-shot refresh.")
@@ -664,12 +728,13 @@ Used by rebuild (before reinstalling) and prune (without reinstalling)."
     ;; 3. Delete staging clone and package directories.  Tolerate filesystem
     ;; errors (locked files, permissions) like the other purge steps so one
     ;; stubborn path does not abort the purge.  Direct-local packages NEVER
-    ;; have their clone-dir deleted: it is the user's source checkout.
-    (dolist (dir (if (emacs-hypervisor-bridge--local-direct-p entry)
-                     (list pkg-dir)
-                   (list clone-dir pkg-dir)))
-      (ignore-errors
-        (emacs-hypervisor-bridge--delete-cache-path dir)))
+    ;; have their clone-dir deleted: it is the user's source checkout; their
+    ;; user-lisp deployment (symlink into the source) is removed instead.
+    (if (emacs-hypervisor-bridge--local-direct-p entry)
+        (emacs-hypervisor-bridge--purge-user-lisp entry)
+      (dolist (dir (list clone-dir pkg-dir))
+        (ignore-errors
+          (emacs-hypervisor-bridge--delete-cache-path dir))))
     ;; 4. Purge stale native-compiled .eln files.
     (emacs-hypervisor-bridge--purge-eln-cache name)
     ;; 5. Clear in-memory package.el state.
@@ -688,8 +753,12 @@ Deletes both the staging clone and package directories, purges native-compiled
 
 (defun emacs-hypervisor-bridge-remove-package (name)
   "Remove installed package NAME entirely, including its lock entry."
-  (emacs-hypervisor-bridge--purge-package (list :name name))
-  (emacs-hypervisor-package-lock-remove name))
+  (let ((entry (or (car (cl-remove-if-not
+                         (lambda (e) (equal (plist-get e :name) name))
+                         emacs-hypervisor-packages))
+                   (list :name name))))
+    (emacs-hypervisor-bridge--purge-package entry)
+    (emacs-hypervisor-package-lock-remove name)))
 
 (defun emacs-hypervisor-bridge--requires-closure (names)
   "Expand NAMES with the transitive Package-Requires of installed packages.
