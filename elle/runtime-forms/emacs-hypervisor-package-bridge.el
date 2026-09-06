@@ -314,11 +314,10 @@ Local paths are inherently unlocked; their lock entries are informational."
   "Run `git checkout' for the declared pin or locked revision.
 Direct-local packages skip checkout: their working tree is the source of
 truth and must not be moved by hypervisor."
-  (when (emacs-hypervisor-bridge--local-direct-p entry)
-    (cl-return-from emacs-hypervisor-bridge--checkout-ref))
-  (let ((ref (emacs-hypervisor-bridge--resolved-rev entry))
+  (unless (emacs-hypervisor-bridge--local-direct-p entry)
+   (let ((ref (emacs-hypervisor-bridge--resolved-rev entry))
         (dir (emacs-hypervisor-bridge--clone-dir entry)))
-    (when ref
+     (when ref
       (let* ((buffer (get-buffer-create
                       (format " *hypervisor-checkout-%s*"
                               (plist-get entry :name))))
@@ -331,7 +330,7 @@ truth and must not be moved by hypervisor."
                 (signal 'emacs-hypervisor-stale-package-lock
                         (list ref output))
               (error "git checkout %s failed: %s" ref output))))
-        (kill-buffer buffer)))))
+        (kill-buffer buffer))))))
 
 (defun emacs-hypervisor-bridge--clone-sync (entry)
   "Clone ENTRY synchronously into its staging directory."
